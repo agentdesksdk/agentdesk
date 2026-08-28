@@ -9,6 +9,11 @@ export type BenchRun = {
   elapsedMs: number | null;
   catalogSize: number;
   activeTools: number;
+  /** Schema bytes at run start, before any routing. */
+  schemaBytesStart: number;
+  /** Highest schema bytes observed during the run (the fair task-time figure). */
+  schemaBytesPeak: number;
+  /** Schema bytes when the run stopped. */
   schemaBytes: number;
   invocations: number;
   staleCalls: number;
@@ -26,7 +31,12 @@ const STORAGE_KEY = "agentdesk-benchmark-runs";
 function loadRuns(): BenchRun[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as BenchRun[]) : [];
+    const parsed = raw ? (JSON.parse(raw) as BenchRun[]) : [];
+    return parsed.map((run) => ({
+      ...run,
+      schemaBytesStart: run.schemaBytesStart ?? run.schemaBytes,
+      schemaBytesPeak: run.schemaBytesPeak ?? run.schemaBytes,
+    }));
   } catch {
     return [];
   }
@@ -53,8 +63,9 @@ function emit(): void {
 function refreshGauges(run: BenchRun): void {
   const snapshot = agentdesk.getSnapshot();
   run.catalogSize = snapshot.catalogSize;
-  run.activeTools = snapshot.nativeTools.length;
+  run.activeTools = Math.max(run.activeTools, snapshot.nativeTools.length);
   run.schemaBytes = snapshot.schemaBytes;
+  run.schemaBytesPeak = Math.max(run.schemaBytesPeak, snapshot.schemaBytes);
 }
 
 agentdesk.subscribe((snapshot) => {
@@ -69,6 +80,14 @@ agentdesk.subscribe((snapshot) => {
     return;
   }
   let changed = false;
+  if (snapshot.schemaBytes > run.schemaBytesPeak) {
+    run.schemaBytesPeak = snapshot.schemaBytes;
+    changed = true;
+  }
+  if (snapshot.nativeTools.length > run.activeTools) {
+    run.activeTools = snapshot.nativeTools.length;
+    changed = true;
+  }
   for (const event of fresh) {
     if (event.kind === "capability_invoked") {
       run.invocations += 1;
@@ -121,6 +140,8 @@ export const benchmark = {
       elapsedMs: null,
       catalogSize: snapshot.catalogSize,
       activeTools: snapshot.nativeTools.length,
+      schemaBytesStart: snapshot.schemaBytes,
+      schemaBytesPeak: snapshot.schemaBytes,
       schemaBytes: snapshot.schemaBytes,
       invocations: 0,
       staleCalls: 0,

@@ -46,16 +46,20 @@ export function Inspector() {
           <span className={`to${bump ? " bump" : ""}`}>{routedCount}</span>
         </div>
         <div className="stat-row">
-          <span>Internal capabilities</span>
+          <span>Application capabilities</span>
           <span className="num">{snapshot.catalogSize}</span>
         </div>
         <div className="stat-row">
-          <span>Active WebMCP tools</span>
-          <span className="num">{snapshot.nativeTools.length}</span>
+          <span>Runtime (bootstrap) tools</span>
+          <span className="num">{bootstrapTools.length}</span>
         </div>
         <div className="stat-row">
           <span>Routed application tools</span>
           <span className="num">{routedCount}</span>
+        </div>
+        <div className="stat-row">
+          <span>Total active WebMCP tools</span>
+          <span className="num">{snapshot.nativeTools.length}</span>
         </div>
         <div className="stat-row">
           <span>Schema bytes on the wire</span>
