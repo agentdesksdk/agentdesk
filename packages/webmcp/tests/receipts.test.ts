@@ -52,7 +52,7 @@ describe("change previews", () => {
     expect(store.refunded).toBe(false);
   });
 
-  it("a throwing preview does not block the approval", async () => {
+  it("a consequential capability with a broken preview fails closed", async () => {
     const model = createMockModelContext();
     const runtime = createAgentDeskRuntime({
       registerTool: model.registerTool,
@@ -70,9 +70,8 @@ describe("change previews", () => {
     });
     await runtime.start();
     const result = await runtime.invoke("risky_action", {});
-    expect(result.code).toBe("APPROVAL_REQUIRED");
-    expect(result.data?.will_change).toBeUndefined();
-    expect(runtime.getSnapshot().pending).toHaveLength(1);
+    expect(result.code).toBe("PREVIEW_UNAVAILABLE");
+    expect(runtime.getSnapshot().pending).toHaveLength(0);
   });
 });
 

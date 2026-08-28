@@ -131,8 +131,18 @@ an execution that resolves after its epoch ended returns its value to the
 caller but cannot write to audit or approval state, so a slow handler can
 never repopulate a runtime that was just cleared.
 
-`invoke_capability` accepts an optional `idempotency_key`. A retry with the
-same key returns the first result instead of executing again.
+A cancelled execution is visible to its caller. When an execution outlives
+its epoch the caller receives `EXECUTION_CANCELLED` rather than a silent
+success, because a write that may or may not have landed must not be
+reported as completed.
+
+`invoke_capability` accepts an optional `idempotency_key`, scoped per
+capability so the same key under two capabilities is two operations. The
+store holds the in-flight promise, so concurrent retries join the first
+execution instead of starting a second. Reusing a key with different input
+returns `IDEMPOTENCY_CONFLICT` rather than silently replaying an unrelated
+result. The store is bounded at 512 entries, evicted oldest-first, and
+lives in memory: it survives retries within a session, not reloads.
 
 ## Validation and policy are pluggable
 
@@ -142,11 +152,25 @@ the boundary before policy, approval, or execution, returning a structured
 `VALIDATION_FAILED` with per-field issues. Pass `validate` to swap in Ajv,
 Zod, or Standard Schema.
 
+The bundled validator enforces a subset. `unsupportedSchemaKeywords(schema)`
+reports every keyword it will not enforce (`oneOf`, `anyOf`, `$ref`,
+`additionalProperties`, and so on), so a schema that looks validated but is
+not can be caught in a test rather than trusted in production. Nested
+object properties and their `required` lists are enforced.
+
 Policy is a function, not a table. The default is risk-based
 (`riskBasedPolicy`), and `policy` replaces it with anything returning
 `allow`, `require_approval`, or `deny` with a reason, which is how limits
 ("refund <= $500") and tenant rules get expressed without the SDK growing
-an RBAC vocabulary.
+an RBAC vocabulary. Policy is evaluated twice for a consequential action:
+once when the request arrives, and again at approval, so a rule that starts
+denying while the action sits pending blocks it.
+
+A consequential capability that declares `previewChanges` and throws is
+refused with `PREVIEW_UNAVAILABLE` instead of being queued. The human would
+otherwise be approving blind, which is worse than failing. A WRITE with a
+broken preview still executes, and a consequential capability that declares
+no preview is unaffected.
 
 ## Previews and receipts
 
@@ -223,9 +247,10 @@ Known limitations:
 - Idempotency and approval records live in memory. A page reload loses
   pending approvals and dedupe keys; durable storage is not implemented.
 - The bundled validator covers the JSON Schema subset this SDK emits
-  (types, required, enum, ranges, lengths, pattern, array items). Unknown
-  keywords are ignored rather than rejected, so exotic schemas pass rather
-  than fail shut. Supply Ajv via the `validate` option for full coverage.
+  (types, required, enum, ranges, lengths, pattern, array items, nested
+  objects). Unknown keywords are ignored rather than rejected, so exotic
+  schemas pass rather than fail shut; call `unsupportedSchemaKeywords()` to
+  find them, or supply Ajv via the `validate` option for full coverage.
 - Declarative (HTML form) WebMCP tools are not catalogued. That API is an
   explainer, not part of the normative spec, so the shape is not stable
   enough to build against.

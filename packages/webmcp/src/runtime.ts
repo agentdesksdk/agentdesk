@@ -27,8 +27,11 @@ import {
   approvalRequired,
   capabilityUnavailable,
   errorResult,
+  executionCancelled,
+  idempotencyConflict,
   isReceiptEnvelope,
   policyDenied,
+  previewUnavailable,
   toToolResult,
   validationFailed,
   type ToolResult,
@@ -87,6 +90,8 @@ export type RuntimeSnapshot = {
   pending: PendingAction[];
   lastRouting: RoutingReport | null;
   schemaBytes: number;
+  /** Live size of the bounded idempotency store. */
+  idempotencyEntries: number;
   audit: readonly AuditEvent[];
 };
 
@@ -161,7 +166,31 @@ export function createAgentDeskRuntime(options: {
   let epoch = 0;
   let epochController = new AbortController();
   let executionCounter = 0;
-  const idempotency = new Map<string, ToolResult>();
+
+  /**
+   * Keyed by capability and key so the same key in two capabilities is two
+   * operations. Holds the in-flight promise, not just the settled result,
+   * so concurrent retries join the first execution instead of starting a
+   * second one. Bounded and evicted oldest-first; this is process memory,
+   * not durable storage.
+   */
+  type IdempotencyEntry = {
+    fingerprint: string;
+    inFlight: Promise<ToolResult>;
+  };
+  const IDEMPOTENCY_LIMIT = 512;
+  const idempotency = new Map<string, IdempotencyEntry>();
+
+  function rememberIdempotent(key: string, entry: IdempotencyEntry): void {
+    idempotency.set(key, entry);
+    while (idempotency.size > IDEMPOTENCY_LIMIT) {
+      const oldest = idempotency.keys().next();
+      if (oldest.done) {
+        break;
+      }
+      idempotency.delete(oldest.value);
+    }
+  }
 
   function endEpoch(): void {
     epoch += 1;
@@ -208,6 +237,7 @@ export function createAgentDeskRuntime(options: {
       pending: approvals.pending(),
       lastRouting,
       schemaBytes: surface.schemaBytes(),
+      idempotencyEntries: idempotency.size,
       audit: audit.list(),
     };
   }
@@ -324,12 +354,22 @@ export function createAgentDeskRuntime(options: {
         capability.title ??
         capability.name;
       const preview = safePreview(capability, input, context);
+      if (!preview.ok && capability.risk === "CONSEQUENTIAL") {
+        audit.append({
+          kind: "capability_unavailable",
+          capability: capability.name,
+          reasonCode: "PREVIEW_UNAVAILABLE",
+          at: now(),
+        });
+        emit();
+        return previewUnavailable(capability.name, preview.error);
+      }
       const action = approvals.request(
         capability.name,
         input,
         capability.risk,
         summary,
-        preview,
+        preview.changes,
         now(),
       );
       audit.append({
@@ -400,12 +440,43 @@ export function createAgentDeskRuntime(options: {
     idempotencyKey?: string,
   ): Promise<ExecutionOutcome> {
     if (idempotencyKey !== undefined) {
-      const previous = idempotency.get(`${capability.name}:${idempotencyKey}`);
+      const slot = `${capability.name}:${idempotencyKey}`;
+      const fingerprint = JSON.stringify(input);
+      const previous = idempotency.get(slot);
       if (previous) {
-        return { ok: true, value: undefined, result: previous };
+        if (previous.fingerprint !== fingerprint) {
+          return {
+            ok: false,
+            result: idempotencyConflict(capability.name, idempotencyKey),
+          };
+        }
+        return { ok: true, value: undefined, result: await previous.inFlight };
       }
+      let settle: (result: ToolResult) => void = () => {};
+      rememberIdempotent(slot, {
+        fingerprint,
+        inFlight: new Promise<ToolResult>((resolve) => {
+          settle = resolve;
+        }),
+      });
+      const outcome = await runExecution(
+        capability,
+        input,
+        signal,
+        idempotencyKey,
+      );
+      settle(outcome.result);
+      return outcome;
     }
+    return runExecution(capability, input, signal, undefined);
+  }
 
+  async function runExecution(
+    capability: Capability,
+    input: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+    idempotencyKey: string | undefined,
+  ): Promise<ExecutionOutcome> {
     const executionId = `EXE-${++executionCounter}`;
     const startedEpoch = epoch;
     const linked = linkSignals(signal, epochController.signal);
@@ -428,7 +499,10 @@ export function createAgentDeskRuntime(options: {
     try {
       const value = await capability.execute(input, execContext);
       if (startedEpoch !== epoch) {
-        return { ok: true, value, result: toToolResult(value) };
+        return {
+          ok: false,
+          result: executionCancelled(capability.name),
+        };
       }
       const event: Extract<AuditEvent, { kind: "execution_completed" }> = {
         kind: "execution_completed",
@@ -442,14 +516,10 @@ export function createAgentDeskRuntime(options: {
       audit.append(event);
       present(capability, "capability_completed", input);
       emit();
-      const result = toToolResult(value);
-      if (idempotencyKey !== undefined) {
-        idempotency.set(`${capability.name}:${idempotencyKey}`, result);
-      }
-      return { ok: true, value, result };
+      return { ok: true, value, result: toToolResult(value) };
     } catch (err) {
       if (startedEpoch !== epoch) {
-        return { ok: false, result: errorResult("runtime was reset") };
+        return { ok: false, result: executionCancelled(capability.name) };
       }
       if (err instanceof CapabilityUnavailableError) {
         audit.append({
@@ -760,6 +830,30 @@ export function createAgentDeskRuntime(options: {
         });
         return errorResult(`unknown capability: ${action.capability}`);
       }
+      // Policy is re-evaluated here, not just at request time: a rule that
+      // started denying while the action sat pending must block it.
+      const decision = policy({
+        capability: routed,
+        input: action.input,
+        context,
+      });
+      if (decision.kind === "deny") {
+        approvals.resolve(actionId, {
+          status: "FAILED",
+          action,
+          error: decision.reason,
+          resolvedAt: now(),
+        });
+        audit.append({
+          kind: "policy_denied",
+          capability: action.capability,
+          reason: decision.reason,
+          at: now(),
+        });
+        emit();
+        return policyDenied(action.capability, decision.reason);
+      }
+
       const availability = routed.availability(context);
       const inputCheck = availability.available
         ? routed.checkInput?.(action.input, context)
@@ -953,17 +1047,27 @@ function linkSignals(
   };
 }
 
-/** A preview is advisory; a broken one must not block the approval. */
+/**
+ * A capability that declares no preview is fine. One that declares a
+ * preview and throws is not: for a consequential action the caller would
+ * be approving blind, so the failure is reported rather than swallowed.
+ */
 function safePreview(
   capability: Capability,
   input: Record<string, unknown>,
   ctx: AppContext,
-): Change[] {
+): { ok: true; changes: Change[] } | { ok: false; error: string; changes: Change[] } {
+  if (!capability.previewChanges) {
+    return { ok: true, changes: [] };
+  }
   try {
-    return capability.previewChanges?.(input, ctx) ?? [];
+    return { ok: true, changes: capability.previewChanges(input, ctx) };
   } catch (err) {
-    console.error(`agentdesk previewChanges failed for ${capability.name}`, err);
-    return [];
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      changes: [],
+    };
   }
 }
 

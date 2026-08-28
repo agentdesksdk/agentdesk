@@ -57,6 +57,7 @@ export {
 } from "./client.ts";
 export {
   defaultValidator,
+  unsupportedSchemaKeywords,
   type ValidationIssue,
   type ValidationResult,
   type Validator,
@@ -84,7 +85,10 @@ export type { ToolResult, ToolCode } from "./results.ts";
 export {
   approvalRequired,
   capabilityUnavailable,
+  executionCancelled,
+  idempotencyConflict,
   policyDenied,
+  previewUnavailable,
   receipt,
   toolRetired,
   validationFailed,

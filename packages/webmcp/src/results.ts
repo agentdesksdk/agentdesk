@@ -5,7 +5,10 @@ export type ToolCode =
   | "APPROVAL_REQUIRED"
   | "CAPABILITY_UNAVAILABLE"
   | "VALIDATION_FAILED"
-  | "POLICY_DENIED";
+  | "POLICY_DENIED"
+  | "IDEMPOTENCY_CONFLICT"
+  | "PREVIEW_UNAVAILABLE"
+  | "EXECUTION_CANCELLED";
 
 export type ToolResult = {
   content: Array<{ type: string; text: string }>;
@@ -156,6 +159,59 @@ export function policyDenied(
       capability,
       reason,
       next: "This action is not permitted in the current context.",
+    },
+    true,
+  );
+}
+
+export function idempotencyConflict(
+  capability: string,
+  key: string,
+): ToolResult {
+  return coded(
+    "IDEMPOTENCY_CONFLICT",
+    {
+      status: "IDEMPOTENCY_CONFLICT",
+      code: "IDEMPOTENCY_CONFLICT",
+      capability,
+      idempotency_key: key,
+      reason:
+        "This idempotency key was already used for this capability with different input.",
+      next: "Use a new idempotency_key, or resend the original input to get the original result.",
+    },
+    true,
+  );
+}
+
+export function previewUnavailable(
+  capability: string,
+  error: string,
+): ToolResult {
+  return coded(
+    "PREVIEW_UNAVAILABLE",
+    {
+      status: "PREVIEW_UNAVAILABLE",
+      code: "PREVIEW_UNAVAILABLE",
+      capability,
+      error,
+      reason:
+        "This capability declares a change preview and it failed. A consequential action is not queued for approval without one, because a human would be approving blind.",
+      next: "Retry once the underlying data is readable.",
+    },
+    true,
+  );
+}
+
+export function executionCancelled(capability: string): ToolResult {
+  return coded(
+    "EXECUTION_CANCELLED",
+    {
+      status: "EXECUTION_CANCELLED",
+      code: "EXECUTION_CANCELLED",
+      capability,
+      reason:
+        "The runtime was stopped or reset while this execution was in flight.",
+      next: "Re-check application state before retrying; the write may or may not have landed.",
     },
     true,
   );

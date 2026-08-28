@@ -130,7 +130,84 @@ function checkValue(
     });
   }
 
+  if (
+    expected === "object" &&
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value)
+  ) {
+    const nested = value as Record<string, unknown>;
+    const nestedProps = (property.properties ?? {}) as Record<
+      string,
+      PropertySchema
+    >;
+    for (const key of asStringArray(property.required)) {
+      const child = nested[key];
+      if (child === undefined || child === null || child === "") {
+        issues.push({ path: `${path}.${key}`, message: `${path}.${key} is required` });
+      }
+    }
+    for (const [key, child] of Object.entries(nested)) {
+      const childSchema = nestedProps[key];
+      if (childSchema && child !== undefined && child !== null) {
+        issues.push(...checkValue(`${path}.${key}`, child, childSchema));
+      }
+    }
+  }
+
   return issues;
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+}
+
+/**
+ * Keywords the bundled validator does not enforce. Call this in a test or
+ * at startup to find schemas that look validated but are not, then either
+ * simplify the schema or pass a full validator via the `validate` option.
+ */
+const SUPPORTED = new Set([
+  "type",
+  "description",
+  "properties",
+  "required",
+  "enum",
+  "items",
+  "minimum",
+  "maximum",
+  "minLength",
+  "maxLength",
+  "pattern",
+  "title",
+  "default",
+  "examples",
+]);
+
+export function unsupportedSchemaKeywords(schema: InputSchema): string[] {
+  const found = new Set<string>();
+  const walk = (node: Record<string, unknown>): void => {
+    for (const [key, value] of Object.entries(node)) {
+      if (!SUPPORTED.has(key)) {
+        found.add(key);
+        continue;
+      }
+      if (key === "properties" && value && typeof value === "object") {
+        for (const child of Object.values(value as Record<string, unknown>)) {
+          if (child && typeof child === "object") {
+            walk(child as Record<string, unknown>);
+          }
+        }
+      }
+      if (key === "items" && value && typeof value === "object") {
+        walk(value as Record<string, unknown>);
+      }
+    }
+  };
+  walk(schema as unknown as Record<string, unknown>);
+  return [...found].sort();
 }
 
 function matchesType(value: unknown, expected: string): boolean {
