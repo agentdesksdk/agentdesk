@@ -11,11 +11,17 @@ export {
   type CapabilitySpec,
   type InputSchema,
   type Policy,
+  type Presentation,
   type RiskLevel,
   type ToolSurfaceKind,
   type Unavailability,
 } from "./capability.ts";
 export { CapabilityCatalog } from "./catalog.ts";
+export {
+  type PresentationEvent,
+  type PresentationListener,
+  type PresentationPhase,
+} from "./presentation.ts";
 export { availableCapabilities, evaluateAvailability } from "./availability.ts";
 export {
   rankCapabilities,

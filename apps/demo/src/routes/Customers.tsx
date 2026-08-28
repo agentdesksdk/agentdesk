@@ -29,7 +29,7 @@ export function Customers() {
           onChange={(event) => setFilter(event.target.value)}
         />
       </div>
-      <div className="panel">
+      <div className="panel" data-reveal="customers-table">
         <table className="data">
           <thead>
             <tr>

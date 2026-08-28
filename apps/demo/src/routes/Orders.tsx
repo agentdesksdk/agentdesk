@@ -29,7 +29,7 @@ export function Orders() {
           </button>
         ))}
       </div>
-      <div className="panel">
+      <div className="panel" data-reveal="orders-table">
         <table className="data">
           <thead>
             <tr>

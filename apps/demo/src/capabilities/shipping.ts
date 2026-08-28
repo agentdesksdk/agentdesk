@@ -14,6 +14,7 @@ import {
 import {
   money,
   obj,
+  orderRoute,
   orderSummary,
   requireOrder,
   requireStr,
@@ -66,6 +67,12 @@ export const shippingCapabilities: Capability[] = [
     entities: ["orderId"],
     routes: ["/orders/", "/shipping"],
     inputSchema: obj({ order_id: s("Order id") }, ["order_id"]),
+    presentation: {
+      route: orderRoute,
+      reveal: "shipping-summary",
+      message: (input) =>
+        `Checking whether shipping was paid on order #${String(input.order_id ?? "")}`,
+    },
     execute: (input) => {
       const order = requireOrder(input);
       return {
@@ -111,6 +118,12 @@ export const shippingCapabilities: Capability[] = [
       return (order && refundBlocker(order)) || AVAILABLE;
     },
     inputSchema: obj({ order_id: s("Order id, e.g. 10428") }, ["order_id"]),
+    presentation: {
+      route: orderRoute,
+      reveal: "shipping-summary",
+      message: (input) =>
+        `Preparing a shipping refund for order #${String(input.order_id ?? "")}`,
+    },
     describeApproval: (input) => {
       const id = String(input.order_id ?? "?");
       const order = getState().orders.find((o) => o.id === id.replace(/^#/, ""));
@@ -223,6 +236,11 @@ export const shippingCapabilities: Capability[] = [
     keywords: ["pending", "queue", "shipment"],
     routes: ["/shipping"],
     inputSchema: obj({}),
+    presentation: {
+      route: () => "/shipping",
+      reveal: "pending-shipments",
+      message: "Reviewing the fulfillment queue",
+    },
     execute: () => {
       const orders = getState()
         .orders.filter((order) => order.status === "processing")

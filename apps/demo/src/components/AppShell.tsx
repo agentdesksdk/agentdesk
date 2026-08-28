@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   Link,
   NavLink,
@@ -10,8 +10,15 @@ import {
 import { resetStore } from "../data/store.ts";
 import { agentdesk, contextForPath } from "../runtime/agentdesk.ts";
 import { ActivityPanel } from "./ActivityPanel.tsx";
+import { AgentPresence, type PresenceMode } from "./AgentPresence.tsx";
 import { ApprovalCards } from "./ApprovalCards.tsx";
 import { Inspector } from "./Inspector.tsx";
+
+const PRESENCE_KEY = "agentdesk-presence-mode";
+
+function initialPresence(): PresenceMode {
+  return localStorage.getItem(PRESENCE_KEY) === "fast" ? "fast" : "guided";
+}
 
 const NAV = [
   ["", "Overview"],
@@ -27,6 +34,7 @@ const NAV = [
 export function AppShell() {
   const { mode } = useParams();
   const location = useLocation();
+  const [presence, setPresence] = useState<PresenceMode>(initialPresence);
 
   const validMode = mode === "agentdesk" || mode === "baseline";
 
@@ -69,6 +77,16 @@ export function AppShell() {
           </Link>
         </div>
         <div className="spacer" />
+        <button
+          title="Guided mode navigates, scrolls, and narrates what the agent is acting on. Execution is identical in both modes."
+          onClick={() => {
+            const next: PresenceMode = presence === "guided" ? "fast" : "guided";
+            setPresence(next);
+            localStorage.setItem(PRESENCE_KEY, next);
+          }}
+        >
+          Presence: {presence}
+        </button>
         <Link to={`${base}/benchmark`}>
           <button>Benchmark</button>
         </Link>
@@ -103,6 +121,7 @@ export function AppShell() {
         </nav>
       </aside>
       <main className="main">
+        <AgentPresence mode={presence} />
         {mode === "baseline" ? (
           <div className="banner-baseline">
             <strong>BASELINE / CONTROL MODE</strong>

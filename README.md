@@ -77,6 +77,42 @@ occurring when the client refreshes its tool snapshot, typically the next
 turn; `invoke_capability` covers clients whose discovery lags behind the
 page. Full matrix in [docs/testing.md](docs/testing.md).
 
+## Guided execution
+
+The agent calls tools; it does not click through the UI. But a human
+watching a screen should still see what the agent is acting on. AgentDesk
+separates execution from presentation:
+
+```text
+agent intent → WebMCP capability executes → presentation events
+            → UI navigates, reveals the affected value, narrates
+```
+
+A capability declares presentation hints alongside its schema:
+
+```ts
+defineCapability({
+  name: "get_order_shipping",
+  presentation: {
+    route: (input) => `/orders/${input.order_id}`,
+    reveal: "shipping-summary",
+    message: (input) => `Checking whether shipping was paid on order #${input.order_id}`,
+  },
+  // ...
+});
+```
+
+The runtime resolves those to plain data and emits them on a separate
+stream (`runtime.subscribePresentation`); navigating, scrolling, and
+highlighting stay the UI's job. The WebMCP result is authoritative whether
+or not anyone subscribes, and a throwing presentation listener cannot
+affect execution. Toggle **Presence: guided / fast** in the header; `fast`
+executes identically with no UI movement.
+
+There is deliberately no simulated cursor. Every motion in guided mode
+reflects state the agent actually touched, rather than pantomiming an
+input device it never used.
+
 ## Approval is a state machine, not a modal
 
 Every consequential action gets an auditable record with an

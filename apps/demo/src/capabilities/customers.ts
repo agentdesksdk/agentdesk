@@ -13,6 +13,7 @@ import {
   createUpdateCapability,
 } from "./factories.ts";
 import {
+  customerRoute,
   customerSummary,
   obj,
   orderSummary,
@@ -35,6 +36,11 @@ export const customerCapabilities: Capability[] = [
     keywords: ["customer", "name", "email", "person", "client"],
     routes: ["/customers"],
     inputSchema: obj({ query: s("Name, email fragment, or city") }, ["query"]),
+    presentation: {
+      route: () => "/customers",
+      reveal: "customers-table",
+      message: (input) => `Searching customers for "${String(input.query ?? "")}"`,
+    },
     execute: (input) => {
       const query = requireStr(input, "query").toLowerCase();
       const matches = getState()
@@ -59,6 +65,11 @@ export const customerCapabilities: Capability[] = [
     inputSchema: obj({ customer_id: s("Customer id like C-1001, or exact name") }, [
       "customer_id",
     ]),
+    presentation: {
+      route: (input) => customerRoute(input),
+      reveal: "customer-orders",
+      message: (input) => `Opening the profile for ${String(input.customer_id ?? "")}`,
+    },
     execute: (input) => {
       const customer = requireCustomer(input);
       return { ...customerSummary(customer), phone: customer.phone, notes: customer.notes };
@@ -81,6 +92,11 @@ export const customerCapabilities: Capability[] = [
       },
       ["customer_id"],
     ),
+    presentation: {
+      route: (input) => customerRoute(input),
+      reveal: "customer-orders",
+      message: (input) => `Listing orders for ${String(input.customer_id ?? "")}`,
+    },
     execute: (input) => {
       const customer = requireCustomer(input);
       const status = str(input, "status");

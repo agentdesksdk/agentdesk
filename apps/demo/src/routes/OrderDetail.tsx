@@ -41,7 +41,7 @@ export function OrderDetail() {
         </Link>
       </p>
       <div className="grid-2">
-        <div className="panel">
+        <div className="panel" data-reveal="order-items">
           <h2>Items</h2>
           <table className="data">
             <thead>
@@ -86,7 +86,7 @@ export function OrderDetail() {
           </table>
         </div>
         <div>
-          <div className="panel">
+          <div className="panel" data-reveal="shipping-summary">
             <h2>Shipping</h2>
             <div className="stat-row">
               <span>Address</span>
@@ -121,7 +121,7 @@ export function OrderDetail() {
               </div>
             ) : null}
           </div>
-          <div className="panel">
+          <div className="panel" data-reveal="order-billing">
             <h2>Billing</h2>
             {invoice ? (
               <>

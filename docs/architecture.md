@@ -91,6 +91,29 @@ document.modelContext.registerTool(...)
 | `runtime.ts` | The pipeline, bootstrap tools, exposure modes, snapshots |
 | `webmcp-adapter.ts` | The only `document.modelContext` touchpoint |
 
+## Presentation is separate from audit and from execution
+
+Capabilities may declare optional `presentation` hints (`route`, `reveal`,
+`message`). The runtime resolves them against the current input and context
+and emits `PresentationEvent`s on a dedicated bus
+(`runtime.subscribePresentation`), at four points: `intent_routed`,
+`capability_started`, `approval_requested`, and
+`capability_completed`/`capability_failed`.
+
+Three rules keep this from leaking into the judged path:
+
+1. The runtime never touches the DOM or a router. It emits strings; the
+   React layer decides whether to navigate, scroll, or highlight. This is
+   the same observation-only boundary as snapshots.
+2. Presentation is not audit. Audit is the governance record and must stay
+   complete; presentation is transient choreography a headless client
+   ignores entirely. They are separate buses with separate types.
+3. Presentation listeners are isolated. A throwing listener is logged and
+   swallowed; it cannot change a tool result (regression-tested).
+
+`AgentPresence` in the demo consumes this stream, with a guided/fast
+toggle. Execution is byte-identical in both modes.
+
 ## Hardening contract (from the 2026-08-28 stress test)
 
 Fixed and regression-tested:

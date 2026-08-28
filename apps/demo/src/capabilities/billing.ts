@@ -12,9 +12,11 @@ import {
   createUpdateCapability,
 } from "./factories.ts";
 import {
+  customerRoute,
   money,
   num,
   obj,
+  orderRoute,
   requireCustomer,
   requireOrder,
   requireStr,
@@ -220,6 +222,12 @@ export const billingCapabilities: Capability[] = [
       },
       ["customer_id", "amount", "reason"],
     ),
+    presentation: {
+      route: (input) => customerRoute(input),
+      reveal: "customer-credits",
+      message: (input) =>
+        `Preparing a ${money(Number(input.amount ?? 0))} credit for ${String(input.customer_id ?? "")}`,
+    },
     checkInput: (input) => {
       const amount =
         typeof input.amount === "number" && Number.isFinite(input.amount)
@@ -283,6 +291,12 @@ export const billingCapabilities: Capability[] = [
     keywords: ["refund", "payment", "invoice"],
     entities: ["orderId"],
     inputSchema: obj({ order_id: s("Order id") }, ["order_id"]),
+    presentation: {
+      route: orderRoute,
+      reveal: "order-billing",
+      message: (input) =>
+        `Preparing a payment refund for order #${String(input.order_id ?? "")}`,
+    },
     checkInput: (input) => refundPaymentBlocker(input) ?? AVAILABLE,
     describeApproval: (input) => {
       const refundable = refundableBalance(input);

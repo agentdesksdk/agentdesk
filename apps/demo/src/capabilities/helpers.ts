@@ -148,3 +148,25 @@ export function orderSummary(order: Order) {
 export function money(value: number): string {
   return `$${value.toFixed(2)}`;
 }
+
+/** Resolves an order_id input to its detail route for guided presentation. */
+export function orderRoute(
+  input: Record<string, unknown>,
+): string | undefined {
+  const id = str(input, "order_id");
+  return id === undefined ? undefined : `/orders/${id.replace(/^#/, "")}`;
+}
+
+export function customerRoute(
+  input: Record<string, unknown>,
+  key = "customer_id",
+): string | undefined {
+  const raw = str(input, key);
+  if (raw === undefined) {
+    return undefined;
+  }
+  const customer = getState().customers.find(
+    (c) => c.id === raw || c.name.toLowerCase() === raw.toLowerCase(),
+  );
+  return customer ? `/customers/${customer.id}` : undefined;
+}

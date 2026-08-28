@@ -13,6 +13,12 @@ import {
 } from "./capability.ts";
 import { CapabilityCatalog } from "./catalog.ts";
 import { decidePolicy } from "./policy.ts";
+import {
+  PresentationBus,
+  resolvePresentation,
+  type PresentationListener,
+  type PresentationPhase,
+} from "./presentation.ts";
 import { isRouteError, rankCapabilities, routeCapability } from "./router.ts";
 import {
   approvalRequired,
@@ -87,6 +93,11 @@ export type AgentDeskRuntime = {
   reset: () => Promise<void>;
   getSnapshot: () => RuntimeSnapshot;
   subscribe: (listener: (snapshot: RuntimeSnapshot) => void) => () => void;
+  /**
+   * Transient UI choreography (navigate, reveal, narrate). Optional: the
+   * WebMCP result is authoritative whether or not anyone subscribes.
+   */
+  subscribePresentation: (listener: PresentationListener) => () => void;
   invoke: (name: string, input?: Record<string, unknown>) => Promise<ToolResult>;
   approve: (actionId: string) => Promise<ToolResult>;
   reject: (actionId: string) => ToolResult;
@@ -101,6 +112,7 @@ export function createAgentDeskRuntime(options: {
 }): AgentDeskRuntime {
   const audit = new AuditBus();
   const approvals = new ApprovalManager();
+  const presentation = new PresentationBus();
   const adapter =
     options.adapter ??
     createWebMcpAdapter(
@@ -131,6 +143,16 @@ export function createAgentDeskRuntime(options: {
 
   function appOnly(capability: Capability): boolean {
     return !BUILTIN_NAMES.has(capability.name);
+  }
+
+  function present(
+    capability: Capability,
+    phase: PresentationPhase,
+    input: Record<string, unknown>,
+  ): void {
+    presentation.emit(
+      resolvePresentation(capability, phase, input, context, now()),
+    );
   }
 
   function snapshot(): RuntimeSnapshot {
@@ -232,6 +254,7 @@ export function createAgentDeskRuntime(options: {
       emit();
       return capabilityUnavailable(capability.name, inputCheck);
     }
+    present(capability, "capability_started", input);
     if (decidePolicy(capability) === "approval_required") {
       const summary =
         capability.describeApproval?.(input, context) ??
@@ -252,6 +275,7 @@ export function createAgentDeskRuntime(options: {
         summary,
         at: now(),
       });
+      present(capability, "approval_requested", input);
       emit();
       return approvalRequired(
         capability.name,
@@ -308,6 +332,7 @@ export function createAgentDeskRuntime(options: {
         capability: capability.name,
         at: now(),
       });
+      present(capability, "capability_completed", input);
       emit();
       return { ok: true, value, result: toToolResult(value) };
     } catch (err) {
@@ -331,6 +356,7 @@ export function createAgentDeskRuntime(options: {
         error: message,
         at: now(),
       });
+      present(capability, "capability_failed", input);
       emit();
       return { ok: false, result: errorResult(message) };
     }
@@ -385,6 +411,14 @@ export function createAgentDeskRuntime(options: {
       .nativeNames()
       .filter((name) => !BUILTIN_NAMES.has(name));
     lastRouting = { query, matches, activated, at: now() };
+    presentation.emit({
+      phase: "intent_routed",
+      capability: FIND_CAPABILITIES,
+      message: query
+        ? `Routing "${query}" against ${appCaps.length} capabilities`
+        : `Routing against ${appCaps.length} capabilities`,
+      at: now(),
+    });
     audit.append({
       kind: "capability_routed",
       query,
@@ -561,6 +595,9 @@ export function createAgentDeskRuntime(options: {
       return () => {
         listeners.delete(listener);
       };
+    },
+    subscribePresentation(listener) {
+      return presentation.subscribe(listener);
     },
     async invoke(name, input = {}) {
       if (!started) {

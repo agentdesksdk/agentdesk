@@ -14,6 +14,7 @@ import {
 } from "./factories.ts";
 import {
   obj,
+  orderRoute,
   orderSummary,
   requireOrder,
   requireStr,
@@ -68,6 +69,11 @@ export const orderCapabilities: Capability[] = [
     entities: ["orderId"],
     routes: ["/orders/"],
     inputSchema: obj({ order_id: s("Order id, e.g. 10428") }, ["order_id"]),
+    presentation: {
+      route: orderRoute,
+      reveal: "order-items",
+      message: (input) => `Opening order #${String(input.order_id ?? "")}`,
+    },
     execute: (input) => {
       const order = requireOrder(input);
       return {
@@ -153,6 +159,14 @@ export const orderCapabilities: Capability[] = [
     inputSchema: obj({
       customer: s("Optional customer id or name filter"),
     }),
+    presentation: {
+      route: () => "/orders",
+      reveal: "orders-table",
+      message: (input) =>
+        input.customer
+          ? `Looking for unshipped orders for ${String(input.customer)}`
+          : "Looking for unshipped orders",
+    },
     execute: (input) => {
       const state = getState();
       const filter = str(input, "customer")?.toLowerCase();
@@ -355,6 +369,12 @@ export const orderCapabilities: Capability[] = [
     inputSchema: obj({ order_id: s("Order id"), reason: s("Cancellation reason") }, [
       "order_id",
     ]),
+    presentation: {
+      route: orderRoute,
+      reveal: "order-items",
+      message: (input) =>
+        `Preparing to cancel order #${String(input.order_id ?? "")}`,
+    },
     describeApproval: (input) =>
       `Cancel order #${String(input.order_id)}. Inventory is released and the invoice is voided.`,
     execute: (input) => {

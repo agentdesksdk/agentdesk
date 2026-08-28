@@ -14,6 +14,22 @@ export type AppContext = {
 
 export type RiskLevel = "READ" | "WRITE" | "CONSEQUENTIAL";
 
+/**
+ * Optional hints for showing a human what a capability is acting on.
+ * The runtime only resolves these to plain data; navigating, scrolling,
+ * and highlighting are the UI's job.
+ */
+export type Presentation = {
+  /** Where the affected entity lives, e.g. `/orders/10428`. */
+  route?: (input: Record<string, unknown>, ctx: AppContext) => string | undefined;
+  /** Anchor for the UI to scroll to and emphasize, matched by the app. */
+  reveal?: string;
+  /** Short narration, e.g. "Checking whether shipping was paid". */
+  message?:
+    | string
+    | ((input: Record<string, unknown>, ctx: AppContext) => string);
+};
+
 export type Policy =
   | { kind: "allow" }
   | { kind: "approval_required" };
@@ -92,6 +108,7 @@ export type Capability = {
     ctx: AppContext,
   ) => Availability;
   policy: Policy;
+  presentation?: Presentation;
   describeApproval?: (
     input: Record<string, unknown>,
     ctx: AppContext,
@@ -138,6 +155,7 @@ export type CapabilitySpec = {
     ctx: AppContext,
   ) => Availability;
   policy?: Policy;
+  presentation?: Presentation;
   describeApproval?: (
     input: Record<string, unknown>,
     ctx: AppContext,
@@ -203,6 +221,9 @@ export function defineCapability(spec: CapabilitySpec): Capability {
   }
   if (spec.checkInput !== undefined) {
     capability.checkInput = spec.checkInput;
+  }
+  if (spec.presentation !== undefined) {
+    capability.presentation = spec.presentation;
   }
   if (spec.describeApproval !== undefined) {
     capability.describeApproval = spec.describeApproval;
