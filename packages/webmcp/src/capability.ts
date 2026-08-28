@@ -14,6 +14,13 @@ export type AppContext = {
 
 export type RiskLevel = "READ" | "WRITE" | "CONSEQUENTIAL";
 
+/** One field-level before/after pair. Values must be JSON-serializable. */
+export type Change = {
+  field: string;
+  before: unknown;
+  after: unknown;
+};
+
 /**
  * Optional hints for showing a human what a capability is acting on.
  * The runtime only resolves these to plain data; navigating, scrolling,
@@ -113,6 +120,15 @@ export type Capability = {
     input: Record<string, unknown>,
     ctx: AppContext,
   ) => string;
+  /**
+   * What this call would change, evaluated before execution so a human can
+   * see it on the approval card. Advisory: the authoritative record is the
+   * receipt the handler returns after the write.
+   */
+  previewChanges?: (
+    input: Record<string, unknown>,
+    ctx: AppContext,
+  ) => Change[];
   execute: (
     input: Record<string, unknown>,
     ctx: AppContext,
@@ -160,6 +176,10 @@ export type CapabilitySpec = {
     input: Record<string, unknown>,
     ctx: AppContext,
   ) => string;
+  previewChanges?: (
+    input: Record<string, unknown>,
+    ctx: AppContext,
+  ) => Change[];
   execute: (
     input: Record<string, unknown>,
     ctx: AppContext,
@@ -227,6 +247,9 @@ export function defineCapability(spec: CapabilitySpec): Capability {
   }
   if (spec.describeApproval !== undefined) {
     capability.describeApproval = spec.describeApproval;
+  }
+  if (spec.previewChanges !== undefined) {
+    capability.previewChanges = spec.previewChanges;
   }
   return capability;
 }

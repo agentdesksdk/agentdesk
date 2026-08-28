@@ -1,4 +1,4 @@
-import type { RiskLevel, Unavailability } from "./capability.ts";
+import type { Change, RiskLevel, Unavailability } from "./capability.ts";
 
 export type ToolCode =
   | "TOOL_RETIRED"
@@ -67,20 +67,61 @@ export function approvalRequired(
   actionId: string,
   risk: RiskLevel,
   summary: string,
+  preview: Change[] = [],
 ): ToolResult {
-  return coded(
-    "APPROVAL_REQUIRED",
-    {
-      status: "APPROVAL_REQUIRED",
-      code: "APPROVAL_REQUIRED",
-      approval_id: actionId,
-      actionId,
-      capability,
-      risk,
-      summary,
-      hint: "A human must approve this action in the application UI. Do not wait on this call; check get_action_status with the approval_id later.",
-    },
-    false,
+  const data: Record<string, unknown> = {
+    status: "APPROVAL_REQUIRED",
+    code: "APPROVAL_REQUIRED",
+    approval_id: actionId,
+    actionId,
+    capability,
+    risk,
+    summary,
+    hint: "A human must approve this action in the application UI. Do not wait on this call; check get_action_status with the approval_id later.",
+  };
+  if (preview.length > 0) {
+    data.will_change = preview;
+  }
+  return coded("APPROVAL_REQUIRED", data, false);
+}
+
+/**
+ * Application-authored evidence of a completed write: which entity
+ * changed, field-level before/after, and whether it can be undone. The
+ * runtime carries receipts verbatim into the tool result, the audit
+ * timeline, and the approval record.
+ */
+export type Receipt = {
+  entity: string;
+  changes: Change[];
+  undoable?: boolean;
+  note?: string;
+};
+
+const RECEIPT = Symbol.for("agentdesk.receipt");
+
+type ReceiptEnvelope = {
+  [RECEIPT]: true;
+  receipt: Receipt;
+  value: unknown;
+};
+
+/** Wraps a handler's return value with a verifiable change receipt. */
+export function receipt(spec: Receipt & { result: unknown }): unknown {
+  const { result, ...rest } = spec;
+  const envelope: ReceiptEnvelope = {
+    [RECEIPT]: true,
+    receipt: rest,
+    value: result,
+  };
+  return envelope;
+}
+
+export function isReceiptEnvelope(value: unknown): value is ReceiptEnvelope {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as Record<symbol, unknown>)[RECEIPT] === true
   );
 }
 
@@ -98,6 +139,17 @@ export function errorResult(message: string): ToolResult {
 }
 
 export function toToolResult(value: unknown): ToolResult {
+  if (isReceiptEnvelope(value)) {
+    const payload = {
+      status: "COMPLETED",
+      result: value.value ?? null,
+      receipt: value.receipt,
+    };
+    return {
+      content: [{ type: "text", text: JSON.stringify(payload) }],
+      data: payload,
+    };
+  }
   if (isToolResult(value)) {
     return value;
   }

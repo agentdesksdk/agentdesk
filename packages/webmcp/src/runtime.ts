@@ -8,6 +8,7 @@ import {
   type AppContext,
   type Capability,
   type CapabilityName,
+  type Change,
   type RiskLevel,
   type Unavailability,
 } from "./capability.ts";
@@ -24,7 +25,9 @@ import {
   approvalRequired,
   capabilityUnavailable,
   errorResult,
+  isReceiptEnvelope,
   toToolResult,
+  type Receipt,
   type ToolResult,
 } from "./results.ts";
 import { ToolSurfaceManager } from "./tool-surface.ts";
@@ -260,11 +263,13 @@ export function createAgentDeskRuntime(options: {
         capability.describeApproval?.(input, context) ??
         capability.title ??
         capability.name;
+      const preview = safePreview(capability, input, context);
       const action = approvals.request(
         capability.name,
         input,
         capability.risk,
         summary,
+        preview,
         now(),
       );
       audit.append({
@@ -282,6 +287,7 @@ export function createAgentDeskRuntime(options: {
         action.id,
         capability.risk,
         summary,
+        action.preview,
       );
     }
     const outcome = await executeNow(capability, input);
@@ -327,11 +333,15 @@ export function createAgentDeskRuntime(options: {
     });
     try {
       const value = await capability.execute(input, context);
-      audit.append({
+      const event: Extract<AuditEvent, { kind: "execution_completed" }> = {
         kind: "execution_completed",
         capability: capability.name,
         at: now(),
-      });
+      };
+      if (isReceiptEnvelope(value)) {
+        event.receipt = value.receipt;
+      }
+      audit.append(event);
       present(capability, "capability_completed", input);
       emit();
       return { ok: true, value, result: toToolResult(value) };
@@ -790,6 +800,20 @@ function builtinCapabilities(): Capability[] {
       execute: unreachable(GET_ACTION_STATUS),
     }),
   ];
+}
+
+/** A preview is advisory; a broken one must not block the approval. */
+function safePreview(
+  capability: Capability,
+  input: Record<string, unknown>,
+  ctx: AppContext,
+): Change[] {
+  try {
+    return capability.previewChanges?.(input, ctx) ?? [];
+  } catch (err) {
+    console.error(`agentdesk previewChanges failed for ${capability.name}`, err);
+    return [];
+  }
 }
 
 function firstText(result: ToolResult): string {

@@ -1,4 +1,4 @@
-import type { CapabilityName, RiskLevel } from "./capability.ts";
+import type { Change, CapabilityName, RiskLevel } from "./capability.ts";
 
 export type ActionId = string & { readonly __brand: "ActionId" };
 
@@ -8,6 +8,8 @@ export type PendingAction = {
   input: Record<string, unknown>;
   risk: RiskLevel;
   summary: string;
+  /** What this call would change, shown to the human before approving. */
+  preview: Change[];
   createdAt: number;
 };
 
@@ -47,6 +49,7 @@ export class ApprovalManager {
     input: Record<string, unknown>,
     risk: RiskLevel,
     summary: string,
+    preview: Change[],
     createdAt: number,
   ): PendingAction {
     const snapshot = structuredClone(input);
@@ -67,6 +70,7 @@ export class ApprovalManager {
       input: snapshot,
       risk,
       summary,
+      preview,
       createdAt,
     };
     this.records.set(id, { status: "PENDING", action });

@@ -110,16 +110,33 @@ describe("hero scenario", () => {
     expect(refund.data?.summary).toBe(
       "Refund $18.00 shipping for Order #10428 (Alice Johnson).",
     );
+    expect(refund.data?.will_change).toContainEqual({
+      field: "Order #10428 shipping refunded",
+      before: false,
+      after: true,
+    });
     expect(getState().orders.find((o) => o.id === "10428")?.shippingRefunded).toBe(
       false,
     );
 
     const actionId = runtime.getSnapshot().pending[0]!.id;
     const approved = await runtime.approve(actionId);
-    expect(JSON.parse(approved.content[0]!.text)).toEqual({
+    const payload = JSON.parse(approved.content[0]!.text) as {
+      status: string;
+      result: Record<string, unknown>;
+      receipt: { entity: string; changes: Array<Record<string, unknown>> };
+    };
+    expect(payload.status).toBe("COMPLETED");
+    expect(payload.result).toEqual({
       order_id: "10428",
       shipping_refunded: true,
       amount: 18,
+    });
+    expect(payload.receipt.entity).toBe("Order #10428");
+    expect(payload.receipt.changes).toContainEqual({
+      field: "Order #10428 shipping refunded",
+      before: false,
+      after: true,
     });
     const order = getState().orders.find((o) => o.id === "10428")!;
     expect(order.shippingRefunded).toBe(true);

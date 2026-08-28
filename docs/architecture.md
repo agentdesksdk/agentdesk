@@ -91,6 +91,24 @@ document.modelContext.registerTool(...)
 | `runtime.ts` | The pipeline, bootstrap tools, exposure modes, snapshots |
 | `webmcp-adapter.ts` | The only `document.modelContext` touchpoint |
 
+## Previews and receipts
+
+Two distinct artifacts, deliberately not merged:
+
+- **Preview** (`previewChanges`) is evaluated before execution and answers
+  "what would this do". It rides on `APPROVAL_REQUIRED` as `will_change`
+  and renders as a diff on the approval card. It is advisory; a throwing
+  preview is logged and the approval proceeds without one.
+- **Receipt** (the `receipt()` result helper) is produced by the handler
+  and answers "what did this actually do". It is attached to the tool
+  result, the `execution_completed` audit event, and the resolved approval
+  record, so `get_action_status` can serve it later.
+
+The receipt is authoritative because only the handler observed both states.
+The preview can be wrong if state changes between rendering and approval,
+which is exactly why approval re-checks availability and input before
+executing.
+
 ## Presentation is separate from audit and from execution
 
 Capabilities may declare optional `presentation` hints (`route`, `reveal`,

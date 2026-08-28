@@ -1,6 +1,7 @@
 import {
   AVAILABLE,
   CapabilityUnavailableError,
+  receipt,
   unavailable,
   type Capability,
 } from "@agentdesk/webmcp";
@@ -377,6 +378,26 @@ export const orderCapabilities: Capability[] = [
     },
     describeApproval: (input) =>
       `Cancel order #${String(input.order_id)}. Inventory is released and the invoice is voided.`,
+    previewChanges: (input) => {
+      const id = String(input.order_id ?? "").replace(/^#/, "");
+      const order = getState().orders.find((o) => o.id === id);
+      if (!order) {
+        return [];
+      }
+      const invoice = getState().invoices.find((inv) => inv.orderId === order.id);
+      return [
+        { field: `Order #${order.id} status`, before: order.status, after: "cancelled" },
+        ...(invoice
+          ? [
+              {
+                field: `Invoice ${invoice.id} status`,
+                before: invoice.status,
+                after: "void",
+              },
+            ]
+          : []),
+      ];
+    },
     execute: (input) => {
       const order = requireOrder(input);
       if (order.status === "shipped" || order.status === "delivered") {
@@ -393,6 +414,9 @@ export const orderCapabilities: Capability[] = [
           unavailable("INVALID_STATE", "This order is already cancelled."),
         );
       }
+      const invoiceBefore = getState().invoices.find(
+        (inv) => inv.orderId === order.id,
+      );
       mutate((draft) => {
         const target = draft.orders.find((o) => o.id === order.id);
         if (target) {
@@ -403,7 +427,23 @@ export const orderCapabilities: Capability[] = [
           invoice.status = "void";
         }
       });
-      return { order_id: order.id, status: "cancelled" };
+      return receipt({
+        entity: `Order #${order.id}`,
+        changes: [
+          { field: "Status", before: order.status, after: "cancelled" },
+          ...(invoiceBefore
+            ? [
+                {
+                  field: `Invoice ${invoiceBefore.id} status`,
+                  before: invoiceBefore.status,
+                  after: "void",
+                },
+              ]
+            : []),
+        ],
+        undoable: false,
+        result: { order_id: order.id, status: "cancelled" },
+      });
     },
   }),
   createUpdateCapability({

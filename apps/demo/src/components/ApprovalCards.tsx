@@ -64,6 +64,19 @@ export function ApprovalCards() {
             <dt>Approval id</dt>
             <dd>{action.id}</dd>
           </dl>
+          {action.preview.length > 0 ? (
+            <div className="will-change">
+              <h4>What will change</h4>
+              {action.preview.map((change) => (
+                <div key={change.field} className="change-row">
+                  <span className="field">{change.field}</span>
+                  <span className="before">{render(change.before)}</span>
+                  <span className="arrow">→</span>
+                  <span className="after">{render(change.after)}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
           <div className="actions">
             <button
               onClick={() => {
@@ -85,6 +98,16 @@ export function ApprovalCards() {
       ))}
     </div>
   );
+}
+
+export function render(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "none";
+  }
+  if (typeof value === "boolean") {
+    return value ? "yes" : "no";
+  }
+  return String(value);
 }
 
 function FragmentRow({ label, value }: { label: string; value: string }) {

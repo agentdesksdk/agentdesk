@@ -1,8 +1,10 @@
 import {
   AVAILABLE,
   CapabilityUnavailableError,
+  receipt,
   unavailable,
   type Capability,
+  type Change,
 } from "@agentdesk/webmcp";
 import { getState, mutate } from "../data/store.ts";
 import {
@@ -134,12 +136,44 @@ export const shippingCapabilities: Capability[] = [
         ? `Refund ${money(order.shippingFee)} shipping for Order #${order.id} (${customer?.name ?? "unknown customer"}).`
         : `Refund shipping for Order #${id}.`;
     },
+    previewChanges: (input) => {
+      const id = String(input.order_id ?? "").replace(/^#/, "");
+      const order = getState().orders.find((o) => o.id === id);
+      if (!order) {
+        return [];
+      }
+      const invoice = getState().invoices.find((inv) => inv.orderId === order.id);
+      const changes: Change[] = [
+        {
+          field: `Order #${order.id} shipping refunded`,
+          before: false,
+          after: true,
+        },
+        {
+          field: "Credits issued to customer",
+          before: money(0),
+          after: money(order.shippingFee),
+        },
+      ];
+      if (invoice) {
+        changes.push({
+          field: `Invoice ${invoice.id} status`,
+          before: invoice.status,
+          after: "partially_refunded",
+        });
+      }
+      return changes;
+    },
     execute: (input) => {
       const order = requireOrder(input);
       const blocker = refundBlocker(order);
       if (blocker) {
         throw new CapabilityUnavailableError(blocker);
       }
+      const invoiceBefore = getState().invoices.find(
+        (inv) => inv.orderId === order.id,
+      );
+      let creditId = "";
       mutate((draft) => {
         const target = draft.orders.find((o) => o.id === order.id);
         if (target) {
@@ -149,19 +183,45 @@ export const shippingCapabilities: Capability[] = [
         if (invoice) {
           invoice.status = "partially_refunded";
         }
+        creditId = `CR-${4001 + draft.credits.length}`;
         draft.credits.push({
-          id: `CR-${4001 + draft.credits.length}`,
+          id: creditId,
           customerId: order.customerId,
           amount: order.shippingFee,
           reason: `Shipping refund for order ${order.id}`,
           issuedAt: new Date().toISOString(),
         });
       });
-      return {
-        order_id: order.id,
-        shipping_refunded: true,
-        amount: order.shippingFee,
-      };
+      const changes: Change[] = [
+        {
+          field: `Order #${order.id} shipping refunded`,
+          before: false,
+          after: true,
+        },
+        {
+          field: "Credit issued",
+          before: null,
+          after: `${creditId} · ${money(order.shippingFee)}`,
+        },
+      ];
+      if (invoiceBefore) {
+        changes.push({
+          field: `Invoice ${invoiceBefore.id} status`,
+          before: invoiceBefore.status,
+          after: "partially_refunded",
+        });
+      }
+      return receipt({
+        entity: `Order #${order.id}`,
+        changes,
+        undoable: false,
+        note: "Reset Demo restores the seeded state.",
+        result: {
+          order_id: order.id,
+          shipping_refunded: true,
+          amount: order.shippingFee,
+        },
+      });
     },
   }),
   createReadCapability({

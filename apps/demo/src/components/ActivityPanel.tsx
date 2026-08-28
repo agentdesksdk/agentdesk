@@ -1,4 +1,5 @@
-import type { AuditEvent } from "@agentdesk/webmcp";
+import type { AuditEvent, Receipt } from "@agentdesk/webmcp";
+import { render } from "./ApprovalCards.tsx";
 import { useRuntime } from "./hooks.ts";
 
 type Rendered = {
@@ -8,6 +9,7 @@ type Rendered = {
   cap?: string;
   risk?: string;
   meta?: string;
+  receipt?: Receipt;
 };
 
 function collapse(events: readonly AuditEvent[]): Rendered[] {
@@ -97,9 +99,19 @@ function collapse(events: readonly AuditEvent[]): Rendered[] {
         break;
       case "execution_started":
         break;
-      case "execution_completed":
-        out.push({ key, at: event.at, head: "Success", cap: event.capability });
+      case "execution_completed": {
+        const row: Rendered = {
+          key,
+          at: event.at,
+          head: "Success",
+          cap: event.capability,
+        };
+        if (event.receipt) {
+          row.receipt = event.receipt;
+        }
+        out.push(row);
         break;
+      }
       case "execution_failed":
         out.push({
           key,
@@ -143,6 +155,21 @@ export function ActivityPanel() {
                 {row.head}
               </div>
               {row.meta ? <div className="meta">{row.meta}</div> : null}
+              {row.receipt ? (
+                <div className="receipt">
+                  <div className="receipt-head">
+                    Receipt · {row.receipt.entity}
+                  </div>
+                  {row.receipt.changes.map((change) => (
+                    <div key={change.field} className="change-row">
+                      <span className="field">{change.field}</span>
+                      <span className="before">{render(change.before)}</span>
+                      <span className="arrow">→</span>
+                      <span className="after">{render(change.after)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
           </div>
         ))

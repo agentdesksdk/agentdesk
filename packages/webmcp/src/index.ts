@@ -9,6 +9,7 @@ export {
   type Capability,
   type CapabilityName,
   type CapabilitySpec,
+  type Change,
   type InputSchema,
   type Policy,
   type Presentation,
@@ -53,5 +54,7 @@ export type { ToolResult, ToolCode } from "./results.ts";
 export {
   approvalRequired,
   capabilityUnavailable,
+  receipt,
   toolRetired,
+  type Receipt,
 } from "./results.ts";

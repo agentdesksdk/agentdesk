@@ -113,6 +113,30 @@ There is deliberately no simulated cursor. Every motion in guided mode
 reflects state the agent actually touched, rather than pantomiming an
 input device it never used.
 
+## Verifiable changes, not just results
+
+A consequential capability declares what it *would* change before it runs,
+and returns application-authored evidence of what it *did* change:
+
+```ts
+previewChanges: () => [
+  { field: "Order #10428 shipping refunded", before: false, after: true },
+  { field: "Invoice INV-3021 status", before: "due", after: "partially_refunded" },
+],
+execute: () => receipt({
+  entity: "Order #10428",
+  changes: [...],
+  undoable: false,
+  result: { order_id: "10428", shipping_refunded: true, amount: 18 },
+}),
+```
+
+The preview rides on the `APPROVAL_REQUIRED` response as `will_change` and
+renders as a diff on the approval card, so the human authorizes a specific
+change rather than a sentence. The receipt rides on the completed tool
+result, the audit timeline, and `get_action_status`, so the agent and the
+human can both verify the outcome afterward without re-reading state.
+
 ## Approval is a state machine, not a modal
 
 Every consequential action gets an auditable record with an

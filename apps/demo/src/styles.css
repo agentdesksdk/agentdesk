@@ -643,6 +643,99 @@ input[type="text"]:focus {
   font-size: 12px;
 }
 
+.change-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 6px;
+  align-items: baseline;
+  padding: 3px 0;
+  font-size: 12px;
+  border-top: 1px dotted var(--line);
+}
+
+.change-row .field {
+  color: var(--ink-soft);
+}
+
+.change-row .before {
+  font-family: var(--mono);
+  color: var(--danger);
+  text-decoration: line-through;
+}
+
+.change-row .arrow {
+  color: var(--ink-soft);
+}
+
+.change-row .after {
+  font-family: var(--mono);
+  color: var(--good);
+  font-weight: 700;
+}
+
+.will-change {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 14px;
+  background: var(--bg);
+}
+
+.will-change h4 {
+  margin: 0 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+}
+
+.will-change .change-row:first-of-type {
+  border-top: none;
+}
+
+.receipt {
+  margin-top: 4px;
+  border-left: 2px solid var(--good);
+  padding-left: 8px;
+}
+
+.receipt-head {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--good);
+  font-weight: 700;
+}
+
+.receipt .change-row:first-of-type {
+  border-top: none;
+}
+
+/* The rail is too narrow for four columns; stack field over the diff. */
+.receipt .change-row {
+  grid-template-columns: auto auto 1fr;
+  grid-template-areas:
+    "field field field"
+    "before arrow after";
+  gap: 2px 6px;
+}
+
+.receipt .change-row .field {
+  grid-area: field;
+}
+
+.receipt .change-row .before {
+  grid-area: before;
+}
+
+.receipt .change-row .arrow {
+  grid-area: arrow;
+}
+
+.receipt .change-row .after {
+  grid-area: after;
+}
+
 .agent-narration {
   position: sticky;
   top: 0;

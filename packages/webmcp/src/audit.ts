@@ -1,4 +1,5 @@
 import type { RiskLevel } from "./capability.ts";
+import type { Receipt } from "./results.ts";
 
 export type AuditEvent =
   | { kind: "context_changed"; route: string; exposure: string; at: number }
@@ -36,7 +37,12 @@ export type AuditEvent =
   | { kind: "approval_approved"; actionId: string; capability: string; at: number }
   | { kind: "approval_rejected"; actionId: string; capability: string; at: number }
   | { kind: "execution_started"; capability: string; at: number }
-  | { kind: "execution_completed"; capability: string; at: number }
+  | {
+      kind: "execution_completed";
+      capability: string;
+      receipt?: Receipt;
+      at: number;
+    }
   | { kind: "execution_failed"; capability: string; error: string; at: number };
 
 const MAX_EVENTS = 1000;
