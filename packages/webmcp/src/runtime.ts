@@ -38,6 +38,7 @@ import {
 } from "./results.ts";
 import { ToolSurfaceManager } from "./tool-surface.ts";
 import {
+  assertSafeOrigins,
   createWebMcpAdapter,
   type RegisterToolFn,
   type WebMcpAdapter,
@@ -143,6 +144,9 @@ export function createAgentDeskRuntime(options: {
         : undefined,
     );
 
+  if (options.exposedTo) {
+    assertSafeOrigins(options.exposedTo);
+  }
   const policy = options.policy ?? riskBasedPolicy;
   const validate = options.validate ?? defaultValidator;
   const appCapabilities = options.capabilities ?? [];

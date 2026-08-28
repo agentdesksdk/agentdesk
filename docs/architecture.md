@@ -100,7 +100,7 @@ argument is `{ signal }`; annotations are exactly `readOnlyHint` and
 
 | Spec surface | Status |
 | --- | --- |
-| `registerTool(tool, {signal, exposedTo})` | Implemented, including `exposedTo` |
+| `registerTool(tool, {signal, exposedTo})` | Implemented; `exposedTo` origins validated at construction |
 | Execute callback `{signal}` | Forwarded into handlers as `ctx.signal` |
 | Abort-based unregistration | Implemented (ToolSurfaceManager) |
 | `name`/`title`/`description`/`inputSchema` | Implemented |
@@ -109,7 +109,7 @@ argument is `{ signal }`; annotations are exactly `readOnlyHint` and
 | `executeTool(tool, input, {signal})` | Optional client |
 | `toolchange` | Optional client (`onToolChange`) |
 | Permissions Policy `tools` | Documented for deployment; nothing to implement in-page |
-| Declarative form tools | Not implemented; explainer-only, not normative |
+| Declarative form tools | Not implemented; the spec section exists but is a TODO |
 
 The consumer-side methods live in `client.ts`, not the runtime, because
 AgentDesk's role is being a tool *provider* and control plane. Per-method
@@ -126,7 +126,28 @@ events. The handler receives an `ExecutionContext`: the app context plus
 
 The signal is the client's WebMCP execution signal linked with a runtime
 lifecycle signal, so a handler aborts when either the client cancels or the
-operator calls `stop()`/`reset()`. Those two also end the current *epoch*;
+operator calls `stop()`/`reset()`.
+
+**Abort does not roll anything back.** A signal is a request to stop, not a
+transaction boundary. If a handler already issued its write, aborting after
+that point cannot unwrite it, and the runtime makes no attempt to
+compensate. The obligation sits with the handler, and it is sharpest for
+consequential capabilities: check `signal.aborted` immediately before the
+mutation, not only at the top.
+
+```ts
+execute: async (input, { signal }) => {
+  const order = await loadOrder(input.order_id, { signal });
+  if (signal.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
+  return commitRefund(order);
+},
+```
+
+A caller receiving `EXECUTION_CANCELLED` therefore learns that the
+execution did not complete cleanly, not that nothing happened. The result
+says so, and the audit trail is the place to establish what landed. Those two also end the current *epoch*;
 an execution that resolves after its epoch ended returns its value to the
 caller but cannot write to audit or approval state, so a slow handler can
 never repopulate a runtime that was just cleared.
@@ -136,13 +157,30 @@ its epoch the caller receives `EXECUTION_CANCELLED` rather than a silent
 success, because a write that may or may not have landed must not be
 reported as completed.
 
-`invoke_capability` accepts an optional `idempotency_key`, scoped per
-capability so the same key under two capabilities is two operations. The
-store holds the in-flight promise, so concurrent retries join the first
-execution instead of starting a second. Reusing a key with different input
-returns `IDEMPOTENCY_CONFLICT` rather than silently replaying an unrelated
-result. The store is bounded at 512 entries, evicted oldest-first, and
-lives in memory: it survives retries within a session, not reloads.
+### Idempotency contract
+
+`invoke_capability` accepts an optional `idempotency_key`. The guarantees,
+each covered by a test in `tests/audit.test.ts`:
+
+1. **Concurrent duplicates collapse.** The store holds the in-flight
+   promise, not just the settled result, so a second call with the same key
+   joins the first execution rather than starting another.
+2. **Completed replays return the identical result.** The recorded result
+   is returned verbatim; the handler does not run again.
+3. **Key reuse with different input conflicts.** Input is fingerprinted;
+   a mismatch returns `IDEMPOTENCY_CONFLICT` instead of handing back a
+   result computed from different arguments.
+4. **Keys are scoped per capability.** The slot is `capability:key`, so the
+   same key under two capabilities is two independent operations.
+5. **Retention is bounded.** 512 entries, evicted oldest-first, cleared by
+   `reset()`.
+
+Two limits are deliberate rather than incidental. The store is in-memory,
+so it deduplicates retries within a session and not across reloads. And
+there is no caller or tenant dimension, because this SDK has no identity
+concept and inventing one would be fiction: a multi-tenant deployment must
+namespace the key itself (`tenant-42:refund-abc`) or supply its own
+`policy` that rejects unnamespaced keys.
 
 ## Validation and policy are pluggable
 
@@ -152,11 +190,24 @@ the boundary before policy, approval, or execution, returning a structured
 `VALIDATION_FAILED` with per-field issues. Pass `validate` to swap in Ajv,
 Zod, or Standard Schema.
 
-The bundled validator enforces a subset. `unsupportedSchemaKeywords(schema)`
-reports every keyword it will not enforce (`oneOf`, `anyOf`, `$ref`,
-`additionalProperties`, and so on), so a schema that looks validated but is
-not can be caught in a test rather than trusted in production. Nested
-object properties and their `required` lists are enforced.
+The bundled validator enforces `type` (including `integer`), `required`,
+`enum`, `minimum`/`maximum`, `minLength`/`maxLength`, `pattern`, `items`,
+and nested `properties` with their own `required` lists. It does not
+enforce `oneOf`, `anyOf`, `allOf`, `const`, `$ref`, or
+`additionalProperties`.
+
+Unknown keywords are ignored rather than rejected, so a richer schema still
+passes rather than failing shut. That is a deliberate trade and it has a
+sharp edge: a schema can look validated while a construct in it is inert.
+`unsupportedSchemaKeywords(schema)` names every such keyword, which turns
+the risk into a one-line test. Assert it is empty for schemas you rely on,
+or pass a full validator through the `validate` option.
+
+Because `exposedTo` widens who can call a tool, its origins are validated
+when the runtime is constructed rather than at registration. Wildcards,
+paths, malformed URLs, and non-loopback `http` origins throw immediately,
+since silently dropping an entry would leave the author believing an origin
+had been granted access.
 
 Policy is a function, not a table. The default is risk-based
 (`riskBasedPolicy`), and `policy` replaces it with anything returning
@@ -251,9 +302,12 @@ Known limitations:
   objects). Unknown keywords are ignored rather than rejected, so exotic
   schemas pass rather than fail shut; call `unsupportedSchemaKeywords()` to
   find them, or supply Ajv via the `validate` option for full coverage.
-- Declarative (HTML form) WebMCP tools are not catalogued. That API is an
-  explainer, not part of the normative spec, so the shape is not stable
-  enough to build against.
+- Declarative (HTML form) WebMCP tools are not catalogued. The spec does
+  reserve a section for them (§3.3 "Declarative WebMCP") and names a
+  `synthesize a declarative JSON Schema object` algorithm, but both are
+  explicitly TODO and defer to the declarative-api explainer, and the
+  explainer states the form-to-schema reduction is itself TBD. There is a
+  reserved place in the spec, not a stable shape to build against.
 - Multi-client conformance is unverified beyond the clients recorded in
   `testing.md`.
 

@@ -40,6 +40,7 @@ export {
   type RuntimeSnapshot,
 } from "./runtime.ts";
 export {
+  assertSafeOrigins,
   createWebMcpAdapter,
   getModelContext,
   probeFeatures,

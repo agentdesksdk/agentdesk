@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { defineCapability } from "../src/capability.ts";
 import { createWebMcpClient } from "../src/client.ts";
 import { createAgentDeskRuntime } from "../src/runtime.ts";
-import { defaultValidator } from "../src/validation.ts";
+import {
+  defaultValidator,
+  unsupportedSchemaKeywords,
+} from "../src/validation.ts";
 import { createWebMcpAdapter } from "../src/webmcp-adapter.ts";
 import { createMockModelContext } from "./mock-model-context.ts";
 import type { RegisteredTool } from "../src/webmcp-adapter.ts";
@@ -295,7 +298,103 @@ describe("consequential actions require a working preview", () => {
   });
 });
 
+describe("exposedTo origin safety", () => {
+  it("rejects insecure, wildcard, and malformed origins at construction", () => {
+    for (const bad of [
+      "http://agent.example",
+      "*",
+      "https://*.example.com",
+      "not a url",
+      "https://agent.example/tools",
+    ]) {
+      expect(
+        () =>
+          createAgentDeskRuntime({
+            registerTool: async () => {},
+            exposedTo: [bad],
+          }),
+        `expected ${bad} to be rejected`,
+      ).toThrow();
+    }
+  });
+
+  it("accepts https and loopback development origins", () => {
+    expect(() =>
+      createAgentDeskRuntime({
+        registerTool: async () => {},
+        exposedTo: ["https://agent.example", "http://localhost:4178"],
+      }),
+    ).not.toThrow();
+  });
+
+  it("forwards accepted origins on every registration", async () => {
+    const seen: Array<string[] | undefined> = [];
+    const runtime = createAgentDeskRuntime({
+      registerTool: async (_tool, options) => {
+        seen.push(options?.exposedTo);
+      },
+      exposedTo: ["https://agent.example"],
+    });
+    await runtime.start();
+    expect(seen).toHaveLength(4);
+    expect(new Set(seen.map((o) => JSON.stringify(o)))).toEqual(
+      new Set([JSON.stringify(["https://agent.example"])]),
+    );
+  });
+});
+
 describe("schema construct support", () => {
+  const cases: Array<[string, Record<string, unknown>, unknown, boolean]> = [
+    ["enum accepts a member", { enum: ["x", "y"] }, "x", true],
+    ["enum rejects a non-member", { enum: ["x", "y"] }, "z", false],
+    ["array items are checked", { type: "array", items: { type: "number" } }, [1, "two"], false],
+    ["array of correct items passes", { type: "array", items: { type: "number" } }, [1, 2], true],
+    ["integer rejects fractions", { type: "integer" }, 1.5, false],
+    ["pattern is enforced", { type: "string", pattern: "^A" }, "B", false],
+  ];
+
+  for (const [label, property, value, shouldPass] of cases) {
+    it(label, () => {
+      const result = defaultValidator(
+        { type: "object", properties: { field: property } },
+        { field: value },
+      );
+      expect(result.valid).toBe(shouldPass);
+    });
+  }
+
+  it("names every construct it does not enforce", () => {
+    const unsupported = unsupportedSchemaKeywords({
+      type: "object",
+      properties: {
+        a: { oneOf: [{ type: "string" }] },
+        b: { anyOf: [{ type: "string" }] },
+        c: { const: "fixed" },
+        d: { allOf: [{ type: "string" }] },
+        e: { $ref: "#/definitions/x" },
+      },
+      additionalProperties: false,
+    } as never);
+    for (const keyword of [
+      "oneOf",
+      "anyOf",
+      "const",
+      "allOf",
+      "$ref",
+      "additionalProperties",
+    ]) {
+      expect(unsupported, `${keyword} must be reported`).toContain(keyword);
+    }
+  });
+
+  it("does not silently enforce a construct it cannot check", () => {
+    const result = defaultValidator(
+      { type: "object", properties: { choice: { const: "fixed" } } } as never,
+      { choice: "anything else" },
+    );
+    expect(result.valid).toBe(true);
+  });
+
   it("validates nested object properties", () => {
     const result = defaultValidator(
       {
@@ -313,20 +412,12 @@ describe("schema construct support", () => {
     expect(result.valid).toBe(false);
   });
 
-  it("reports schema constructs it does not enforce", async () => {
-    const { unsupportedSchemaKeywords } = await import("../src/validation.ts");
+  it("reports nothing unsupported for a schema it fully enforces", () => {
     expect(
       unsupportedSchemaKeywords({
         type: "object",
-        properties: {
-          choice: { oneOf: [{ type: "string" }, { type: "number" }] },
-        },
-      }),
-    ).toContain("oneOf");
-    expect(
-      unsupportedSchemaKeywords({
-        type: "object",
-        properties: { id: { type: "string" } },
+        required: ["id"],
+        properties: { id: { type: "string" }, n: { type: "integer" } },
       }),
     ).toEqual([]);
   });

@@ -87,6 +87,42 @@ export function getModelContext(): ModelContextLike | undefined {
   return (globalThis as ModelContextHost).document?.modelContext;
 }
 
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+
+/**
+ * `exposedTo` widens who can see a tool, so a malformed or downgraded
+ * entry is a security-relevant configuration error, not a preference.
+ * WebMCP is `[SecureContext]`, so an http origin cannot legitimately be a
+ * peer. Throws rather than filtering: silently dropping an entry would
+ * leave the author believing an origin was granted access.
+ */
+export function assertSafeOrigins(origins: readonly string[]): void {
+  for (const origin of origins) {
+    if (origin === "*" || origin.includes("*")) {
+      throw new Error(
+        `exposedTo does not accept wildcards, received ${origin}`,
+      );
+    }
+    let url: URL;
+    try {
+      url = new URL(origin);
+    } catch {
+      throw new Error(`exposedTo entry is not a valid origin: ${origin}`);
+    }
+    if (url.origin !== origin.replace(/\/$/, "")) {
+      throw new Error(
+        `exposedTo entries must be bare origins with no path, received ${origin}`,
+      );
+    }
+    const isLoopback = LOOPBACK.has(url.hostname);
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback)) {
+      throw new Error(
+        `exposedTo requires a secure origin, received ${origin}`,
+      );
+    }
+  }
+}
+
 export function probeFeatures(
   native: ModelContextLike | undefined = getModelContext(),
 ): WebMcpFeatures {
