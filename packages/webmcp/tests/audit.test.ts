@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+﻿import { describe, expect, it, vi } from "vitest";
 import { defineCapability } from "../src/capability.ts";
 import { createWebMcpClient } from "../src/client.ts";
 import { createAgentDeskRuntime } from "../src/runtime.ts";
@@ -216,6 +216,7 @@ describe("policy is re-evaluated at approval", () => {
           name: "refund_shipping",
           description: "Refund shipping",
           risk: "CONSEQUENTIAL",
+          approvalEvidence: "summary",
           execute: () => {
             ran = true;
             return "refunded";
@@ -288,6 +289,7 @@ describe("consequential actions require a working preview", () => {
           name: "cancel_order",
           description: "Cancels an order",
           risk: "CONSEQUENTIAL",
+          approvalEvidence: "summary",
           execute: () => "cancelled",
         }),
       ],

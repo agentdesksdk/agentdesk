@@ -59,6 +59,9 @@ const runtime = createAgentDeskRuntime({
         required: ["order_id"],
         properties: { order_id: { type: "string" } },
       },
+      previewChanges: () => [
+        { field: "refunded", before: false, after: true },
+      ],
       execute: (input) =>
         receipt({
           entity: \`Order #\${input.order_id}\`,
@@ -79,6 +82,11 @@ assert.deepEqual([...tools.keys()].sort(), [
 
 const queued = await runtime.invoke("refund_shipping", { order_id: "10428" });
 assert.equal(queued.code, "APPROVAL_REQUIRED");
+assert.equal(queued.data.approvalEvidence, "diff");
+assert.equal(queued.data.will_change.length, 1);
+
+const rejected = await runtime.invoke("refund_shipping", { order_id: 10428 });
+assert.equal(rejected.code, "VALIDATION_FAILED");
 
 const id = runtime.getSnapshot().pending[0].id;
 const done = await runtime.approve(id);

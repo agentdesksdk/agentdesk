@@ -73,6 +73,7 @@ export function approvalRequired(
   risk: RiskLevel,
   summary: string,
   preview: Change[] = [],
+  approvalEvidence: "diff" | "summary" = "summary",
 ): ToolResult {
   const data: Record<string, unknown> = {
     status: "APPROVAL_REQUIRED",
@@ -82,6 +83,9 @@ export function approvalRequired(
     capability,
     risk,
     summary,
+    // Tells the caller whether the human is seeing a field-level diff or
+    // only a sentence, so "approved" can be interpreted correctly.
+    approvalEvidence,
     hint: "A human must approve this action in the application UI. Do not wait on this call; check get_action_status with the approval_id later.",
   };
   if (preview.length > 0) {

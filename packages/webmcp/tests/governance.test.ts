@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { AVAILABLE, defineCapability, unavailable } from "../src/capability.ts";
 import { createAgentDeskRuntime } from "../src/runtime.ts";
 import { createMockModelContext } from "./mock-model-context.ts";
@@ -13,6 +13,7 @@ function refundFixture(store: Store) {
     domain: "shipping",
     intents: ["refund shipping"],
     risk: "CONSEQUENTIAL",
+    approvalEvidence: "summary",
     availability: () =>
       store.refunded
         ? unavailable(
@@ -50,6 +51,7 @@ describe("two-phase approval", () => {
         status: "APPROVAL_REQUIRED",
         capability: "refund_shipping",
         risk: "CONSEQUENTIAL",
+        approvalEvidence: "summary",
         summary: "Refund $18.00 shipping for Order #10428.",
       },
     });

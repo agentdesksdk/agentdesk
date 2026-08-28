@@ -78,21 +78,27 @@ export class AuditBus {
     };
   }
 
+  /**
+   * History is evidence, so the stored event is detached from the caller's
+   * object and deep-frozen, nested receipts included. Freezing once on
+   * write beats cloning on every read: `list()` runs on every snapshot,
+   * and cloning a thousand events per emit made execution quadratic.
+   */
   append(event: AuditEvent): void {
-    this.events.push(event);
+    const stored = deepFreeze(structuredClone(event));
+    this.events.push(stored);
     if (this.events.length > MAX_EVENTS) {
       this.events.splice(0, this.events.length - MAX_EVENTS);
     }
     for (const listener of this.listeners) {
       try {
-        listener(event);
+        listener(stored);
       } catch (err) {
         console.error("agentdesk audit listener threw", err);
       }
     }
   }
 
-  /** Detached copy; mutating a snapshot cannot rewrite history. */
   list(): readonly AuditEvent[] {
     return [...this.events];
   }
@@ -104,4 +110,15 @@ export class AuditBus {
 
 export function now(): number {
   return Date.now();
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value === null || typeof value !== "object" || Object.isFrozen(value)) {
+    return value;
+  }
+  Object.freeze(value);
+  for (const nested of Object.values(value as Record<string, unknown>)) {
+    deepFreeze(nested);
+  }
+  return value;
 }

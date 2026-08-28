@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { defineCapability } from "../src/capability.ts";
 import { rankCapabilities } from "../src/router.ts";
 import { createAgentDeskRuntime } from "../src/runtime.ts";
@@ -10,6 +10,7 @@ function slowRefundFixture() {
     name: "refund_shipping",
     description: "Refund the shipping fee",
     risk: "CONSEQUENTIAL",
+    approvalEvidence: "summary",
     describeApproval: (input) => `Refund order ${String(input.order_id)}`,
     execute: async (input) => {
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -54,6 +55,7 @@ describe("approval atomicity", () => {
           name: "issue_credit",
           description: "Issue a credit",
           risk: "CONSEQUENTIAL",
+          approvalEvidence: "summary",
           execute: (input) => {
             seen.push(input.details);
             return "done";

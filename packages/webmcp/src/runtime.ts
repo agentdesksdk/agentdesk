@@ -1,6 +1,9 @@
-import { ApprovalManager, type PendingAction } from "./approval.ts";
+﻿import { ApprovalManager, type PendingAction } from "./approval.ts";
 import { AuditBus, now, type AuditEvent } from "./audit.ts";
-import { availableCapabilities } from "./availability.ts";
+import {
+  availableCapabilities,
+  evaluateAvailability,
+} from "./availability.ts";
 import {
   CapabilityUnavailableError,
   defineCapability,
@@ -181,19 +184,43 @@ export function createAgentDeskRuntime(options: {
   type IdempotencyEntry = {
     fingerprint: string;
     inFlight: Promise<ToolResult>;
+    settled: boolean;
   };
   const IDEMPOTENCY_LIMIT = 512;
   const idempotency = new Map<string, IdempotencyEntry>();
 
+  /**
+   * Evicts settled entries only. Dropping an in-flight one would let a
+   * retry start a second execution, which is the exact duplicate this
+   * store exists to prevent.
+   */
   function rememberIdempotent(key: string, entry: IdempotencyEntry): void {
     idempotency.set(key, entry);
-    while (idempotency.size > IDEMPOTENCY_LIMIT) {
-      const oldest = idempotency.keys().next();
-      if (oldest.done) {
+    if (idempotency.size <= IDEMPOTENCY_LIMIT) {
+      return;
+    }
+    for (const [candidate, held] of idempotency) {
+      if (idempotency.size <= IDEMPOTENCY_LIMIT) {
         break;
       }
-      idempotency.delete(oldest.value);
+      if (held.settled && candidate !== key) {
+        idempotency.delete(candidate);
+      }
     }
+  }
+
+  /** Stable across property insertion order, so `{a,b}` matches `{b,a}`. */
+  function fingerprintInput(value: unknown): string {
+    if (Array.isArray(value)) {
+      return `[${value.map(fingerprintInput).join(",")}]`;
+    }
+    if (value && typeof value === "object") {
+      return `{${Object.entries(value as Record<string, unknown>)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => `${JSON.stringify(k)}:${fingerprintInput(v)}`)
+        .join(",")}}`;
+    }
+    return JSON.stringify(value) ?? "null";
   }
 
   function endEpoch(): void {
@@ -305,7 +332,7 @@ export function createAgentDeskRuntime(options: {
       via,
       at: now(),
     });
-    const availability = capability.availability(context);
+    const availability = evaluateAvailability(capability, context);
     if (!availability.available) {
       audit.append({
         kind: "capability_unavailable",
@@ -392,6 +419,7 @@ export function createAgentDeskRuntime(options: {
         capability.risk,
         summary,
         action.preview,
+        capability.approvalEvidence,
       );
     }
     const outcome = await executeNow(
@@ -445,7 +473,7 @@ export function createAgentDeskRuntime(options: {
   ): Promise<ExecutionOutcome> {
     if (idempotencyKey !== undefined) {
       const slot = `${capability.name}:${idempotencyKey}`;
-      const fingerprint = JSON.stringify(input);
+      const fingerprint = fingerprintInput(input);
       const previous = idempotency.get(slot);
       if (previous) {
         if (previous.fingerprint !== fingerprint) {
@@ -457,18 +485,21 @@ export function createAgentDeskRuntime(options: {
         return { ok: true, value: undefined, result: await previous.inFlight };
       }
       let settle: (result: ToolResult) => void = () => {};
-      rememberIdempotent(slot, {
+      const entry: IdempotencyEntry = {
         fingerprint,
         inFlight: new Promise<ToolResult>((resolve) => {
           settle = resolve;
         }),
-      });
+        settled: false,
+      };
+      rememberIdempotent(slot, entry);
       const outcome = await runExecution(
         capability,
         input,
         signal,
         idempotencyKey,
       );
+      entry.settled = true;
       settle(outcome.result);
       return outcome;
     }
@@ -563,13 +594,13 @@ export function createAgentDeskRuntime(options: {
     if (ranked.length === 0) {
       fallback = true;
       ranked = appCaps
-        .filter((capability) => capability.availability(context).available)
+        .filter((capability) => evaluateAvailability(capability, context).available)
         .sort((a, b) => a.name.localeCompare(b.name))
         .slice(0, 5)
         .map((capability) => ({ capability, score: 0 }));
     }
     const matches: RoutedMatch[] = ranked.map(({ capability, score }) => {
-      const availability = capability.availability(context);
+      const availability = evaluateAvailability(capability, context);
       const match: RoutedMatch = {
         name: capability.name,
         description: capability.description,
@@ -704,7 +735,7 @@ export function createAgentDeskRuntime(options: {
     const next = new Set<string>();
     for (const name of routedNames) {
       const capability = catalog.get(name);
-      if (capability && capability.availability(context).available) {
+      if (capability && evaluateAvailability(capability, context).available) {
         next.add(name);
       }
     }
@@ -834,6 +865,7 @@ export function createAgentDeskRuntime(options: {
         });
         return errorResult(`unknown capability: ${action.capability}`);
       }
+      try {
       // Policy is re-evaluated here, not just at request time: a rule that
       // started denying while the action sat pending must block it.
       const decision = policy({
@@ -858,7 +890,7 @@ export function createAgentDeskRuntime(options: {
         return policyDenied(action.capability, decision.reason);
       }
 
-      const availability = routed.availability(context);
+      const availability = evaluateAvailability(routed, context);
       const inputCheck = availability.available
         ? routed.checkInput?.(action.input, context)
         : undefined;
@@ -908,6 +940,26 @@ export function createAgentDeskRuntime(options: {
       }
       emit();
       return outcome.result;
+      } catch (err) {
+        // The action is already claimed, so a throw anywhere in these
+        // checks would otherwise strand it in EXECUTING with no retry.
+        const message = err instanceof Error ? err.message : String(err);
+        approvals.resolve(actionId, {
+          status: "FAILED",
+          action,
+          error: message,
+          resolvedAt: now(),
+        });
+        audit.append({
+          kind: "execution_failed",
+          capability: action.capability,
+          executionId: `${actionId}-approval-check`,
+          error: message,
+          at: now(),
+        });
+        emit();
+        return errorResult(message);
+      }
     },
     reject(actionId) {
       const action = approvals.pendingAction(actionId);

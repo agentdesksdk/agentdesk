@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import type { PresentationEvent } from "../src/presentation.ts";
 import { defineCapability } from "../src/capability.ts";
 import { createAgentDeskRuntime } from "../src/runtime.ts";
@@ -22,6 +22,7 @@ function fixture() {
       name: "refund_shipping",
       description: "Refund the shipping fee",
       risk: "CONSEQUENTIAL",
+      approvalEvidence: "summary",
       presentation: {
         route: (input) => `/orders/${String(input.order_id)}`,
         reveal: "shipping-summary",

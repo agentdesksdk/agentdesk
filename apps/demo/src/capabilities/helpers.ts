@@ -11,6 +11,14 @@ export function obj(
   properties: Record<string, Record<string, unknown>>,
   required?: string[],
 ): InputSchema {
+  // JSON Schema `required` only checks presence, so a required string
+  // needs minLength to reject "" before it reaches a handler guard.
+  for (const key of required ?? []) {
+    const property = properties[key];
+    if (property?.type === "string" && property.minLength === undefined) {
+      property.minLength = 1;
+    }
+  }
   const schema: InputSchema = { type: "object", properties };
   if (required && required.length > 0) {
     schema.required = required;

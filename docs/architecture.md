@@ -147,10 +147,9 @@ execute: async (input, { signal }) => {
 
 A caller receiving `EXECUTION_CANCELLED` therefore learns that the
 execution did not complete cleanly, not that nothing happened. The result
-says so, and the audit trail is the place to establish what landed. Those two also end the current *epoch*;
-an execution that resolves after its epoch ended returns its value to the
-caller but cannot write to audit or approval state, so a slow handler can
-never repopulate a runtime that was just cleared.
+says so, and the audit trail is the place to establish what landed. Those two also end the current *epoch*. An execution that resolves after
+its epoch ended cannot write to audit or approval state, so a slow handler
+can never repopulate a runtime that was just cleared.
 
 A cancelled execution is visible to its caller. When an execution outlives
 its epoch the caller receives `EXECUTION_CANCELLED` rather than a silent
@@ -209,6 +208,13 @@ paths, malformed URLs, and non-loopback `http` origins throw immediately,
 since silently dropping an entry would leave the author believing an origin
 had been granted access.
 
+`assertSafeOrigins()` is an SDK policy, deliberately stricter than the
+spec. The WebMCP algorithm parses a potentially trustworthy URL and stores
+its origin, which would accept an input carrying a path. This SDK requires
+a bare origin so a typo like `https://agent.example/tools` fails loudly at
+startup instead of being silently normalized to something the author did
+not write.
+
 Policy is a function, not a table. The default is risk-based
 (`riskBasedPolicy`), and `policy` replaces it with anything returning
 `allow`, `require_approval`, or `deny` with a reason, which is how limits
@@ -217,11 +223,23 @@ an RBAC vocabulary. Policy is evaluated twice for a consequential action:
 once when the request arrives, and again at approval, so a rule that starts
 denying while the action sits pending blocks it.
 
-A consequential capability that declares `previewChanges` and throws is
-refused with `PREVIEW_UNAVAILABLE` instead of being queued. The human would
-otherwise be approving blind, which is worse than failing. A WRITE with a
-broken preview still executes, and a consequential capability that declares
-no preview is unaffected.
+### Approval evidence is an explicit choice
+
+Every consequential capability declares what the human sees before
+approving. `previewChanges` implies `approvalEvidence: "diff"`. A
+capability with no enumerable change set must opt in to
+`approvalEvidence: "summary"` by hand. `defineCapability` throws when a
+consequential capability declares neither, so a missing preview can never
+quietly degrade into an empty diff, which is the failure the contract
+exists to prevent.
+
+The chosen mode rides on the `APPROVAL_REQUIRED` payload as
+`approvalEvidence`, so a caller can tell whether "approved" meant a human
+read a field-level diff or only a sentence.
+
+A capability that declares `previewChanges` and throws is refused with
+`PREVIEW_UNAVAILABLE` instead of being queued, because approving blind is
+worse than failing. A WRITE with a broken preview still executes.
 
 ## Previews and receipts
 
@@ -303,7 +321,7 @@ Known limitations:
   schemas pass rather than fail shut; call `unsupportedSchemaKeywords()` to
   find them, or supply Ajv via the `validate` option for full coverage.
 - Declarative (HTML form) WebMCP tools are not catalogued. The spec does
-  reserve a section for them (§3.3 "Declarative WebMCP") and names a
+  reserve a section for them (§4.3 "Declarative WebMCP") and names a
   `synthesize a declarative JSON Schema object` algorithm, but both are
   explicitly TODO and defer to the declarative-api explainer, and the
   explainer states the form-to-schema reduction is itself TBD. There is a

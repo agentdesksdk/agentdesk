@@ -265,6 +265,23 @@ export const inventoryCapabilities: Capability[] = [
     keywords: ["discontinue", "retire", "remove", "product"],
     entities: ["sku"],
     inputSchema: obj({ sku: s("Product SKU") }, ["sku"]),
+    previewChanges: (input) => {
+      const sku = String(input.sku ?? "");
+      const product = getState().products.find(
+        (p) => p.sku.toLowerCase() === sku.toLowerCase(),
+      );
+      if (!product) {
+        return [];
+      }
+      return [
+        { field: `${product.sku} discontinued`, before: false, after: true },
+        {
+          field: "Units removed from sale",
+          before: 0,
+          after: product.stock - product.reserved,
+        },
+      ];
+    },
     describeApproval: (input) =>
       `Discontinue product ${String(input.sku)}. It is removed from sale permanently.`,
     execute: (input) => {

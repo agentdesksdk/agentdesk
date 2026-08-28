@@ -4,9 +4,10 @@
 
 ```bash
 pnpm install
-pnpm test        # SDK (28 tests) + demo (10 tests)
+pnpm test        # SDK (115 tests) + demo (96 tests)
 pnpm typecheck   # strict TS across all packages
-pnpm build       # SDK typecheck + P0 + demo static build + site assembly
+pnpm build       # SDK build + P0 + demo static build + site assembly
+pnpm test:pack   # packs the SDK and imports it under plain Node
 ```
 
 Coverage highlights (see `packages/webmcp/tests` and `apps/demo/tests`):
@@ -82,29 +83,35 @@ does not and cannot substitute for them.
 
 The last row is the point: native registration, retirement, and
 re-registration are only observable in a browser that implements WebMCP.
-Those cells stay empty below until someone runs them there.
+That run has since been completed in the Codex in-app browser and is
+recorded below.
 
 ### Results
 
-Do not fill a cell without actually observing the behavior. Observed
-2026-08-28 against the local build; Codex column from a live Codex in-app
-browser session.
+Do not fill a cell without actually observing the behavior.
+
+**Codex in-app browser: complete.** Native WebMCP was exposed at
+`http://127.0.0.1:4177/p0/` and the full checklist ran there. ChatGPT and
+Chrome remain unverified; nobody has run them.
 
 | Test | Codex in-app browser | ChatGPT in-app browser | Chrome 149+ WebMCP |
 | --- | --- | --- | --- |
-| Bootstrap tools discovered | ✅ four bootstrap tools listed | ⬜ | ⬜ |
-| `find_capabilities` works | ✅ routed and activated tools | ⬜ | ⬜ |
-| New native tool discovered immediately | ⚠️ registered immediately, callable only after the client refreshed its tool snapshot | ⬜ | ⬜ |
+| Bootstrap tools discovered | ✅ four bootstrap tools | ⬜ | ⬜ |
+| `find_capabilities({query:"hello"})` | ✅ registered `hello_dynamic_tool`, `ping`, `request_demo_approval` | ⬜ | ⬜ |
+| Dynamic call | ✅ `{"greeting":"Hello, Audit!","deterministic":true}` | ⬜ | ⬜ |
+| New native tool discovered immediately | ⚠️ registered immediately, callable after the client refreshed its tool snapshot | ⬜ | ⬜ |
 | Discovered on next turn | ✅ | ⬜ | ⬜ |
-| Retired tool behavior | ✅ stale call returned structured `TOOL_RETIRED` | ⬜ | ⬜ |
-| Same-name re-registration | ✅ after snapshot refresh (`Hello, ChatGPT!`) | ⬜ | ⬜ |
-| `invoke_capability` fallback | ✅ (`pong`) | ⬜ | ⬜ |
-| Approval flow | ✅ immediate `APPROVAL_REQUIRED`; `APR-1001` resolved `APPROVED_EXECUTED` | ⬜ | ⬜ |
+| Retired tool behavior | ✅ structured `TOOL_RETIRED` | ⬜ | ⬜ |
+| Same-name re-registration | ✅ `{"greeting":"Hello, Codex!","deterministic":true}` | ⬜ | ⬜ |
+| `invoke_capability` fallback | ✅ `invoke_capability({name:"ping"})` returned `pong` | ⬜ | ⬜ |
+| Approval flow | ✅ immediate `APPROVAL_REQUIRED`, `APR-1001` | ⬜ | ⬜ |
+| Approval status after approving | ✅ `APPROVED_EXECUTED` | ⬜ | ⬜ |
+| Browser console | ✅ no warnings or errors | ⬜ | ⬜ |
 
-Observed wording for the submission (matches the Codex column): AgentDesk
+Observed wording for the submission, matching the Codex column. AgentDesk
 dynamically updates the native WebMCP surface, with client rediscovery
-occurring when the client refreshes its tool snapshot (typically the next
-turn); `invoke_capability` covers clients whose discovery lags behind the
+occurring when the client refreshes its tool snapshot, typically the next
+turn. `invoke_capability` covers clients whose discovery lags behind the
 page.
 
 ### Hero flow (demo app)

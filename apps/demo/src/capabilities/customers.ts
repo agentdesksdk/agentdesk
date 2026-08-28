@@ -265,6 +265,26 @@ export const customerCapabilities: Capability[] = [
       }
       return AVAILABLE;
     },
+    previewChanges: (input) => {
+      const duplicateId = String(input.duplicate_id ?? "");
+      const primaryId = String(input.primary_id ?? "");
+      const state = getState();
+      const moving = state.orders.filter((o) => o.customerId === duplicateId);
+      const tickets = state.tickets.filter((t) => t.customerId === duplicateId);
+      return [
+        { field: `Customer ${duplicateId}`, before: "active", after: "removed" },
+        {
+          field: `Orders reassigned to ${primaryId}`,
+          before: 0,
+          after: moving.length,
+        },
+        {
+          field: `Tickets reassigned to ${primaryId}`,
+          before: 0,
+          after: tickets.length,
+        },
+      ];
+    },
     describeApproval: (input) =>
       `Merge customer ${String(input.duplicate_id)} into ${String(input.primary_id)}. The duplicate profile is removed.`,
     execute: (input) => {
@@ -316,6 +336,19 @@ export const customerCapabilities: Capability[] = [
       return AVAILABLE;
     },
     inputSchema: obj({ customer_id: s("Customer id") }, ["customer_id"]),
+    previewChanges: (input) => {
+      const id = String(input.customer_id ?? "");
+      const customer = getState().customers.find((c) => c.id === id);
+      if (!customer) {
+        return [];
+      }
+      return [
+        { field: "Name", before: customer.name, after: `Anonymized ${id}` },
+        { field: "Email", before: customer.email, after: "removed@example.com" },
+        { field: "Phone", before: customer.phone, after: "removed" },
+        { field: "Notes retained", before: customer.notes.length, after: 0 },
+      ];
+    },
     describeApproval: (input) =>
       `Anonymize all personal data for customer ${String(input.customer_id)}. This cannot be undone.`,
     execute: (input) => {

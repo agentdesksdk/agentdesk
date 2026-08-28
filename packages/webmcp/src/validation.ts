@@ -37,9 +37,10 @@ export const defaultValidator: Validator = (schema, input) => {
   const issues: ValidationIssue[] = [];
   const properties = schema.properties ?? {};
 
-  for (const key of schema.required ?? []) {
-    const value = input[key];
-    if (value === undefined || value === null || value === "") {
+  // JSON Schema `required` is about presence. An empty string is present;
+  // rejecting it is `minLength`'s job.
+  for (const key of asStringArray(schema.required)) {
+    if (!(key in input) || input[key] === undefined) {
       issues.push({ path: key, message: `${key} is required` });
     }
   }
@@ -65,12 +66,15 @@ function checkValue(
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const expected = property.type;
+  const allowed = asStringArray(
+    typeof expected === "string" ? [expected] : expected,
+  );
 
-  if (typeof expected === "string" && !matchesType(value, expected)) {
+  if (allowed.length > 0 && !allowed.some((t) => matchesType(value, t))) {
     return [
       {
         path,
-        message: `${path} must be a ${expected}, received ${describe(value)}`,
+        message: `${path} must be ${allowed.join(" or ")}, received ${describe(value)}`,
       },
     ];
   }
@@ -131,7 +135,7 @@ function checkValue(
   }
 
   if (
-    expected === "object" &&
+    allowed.includes("object") &&
     typeof value === "object" &&
     value !== null &&
     !Array.isArray(value)
@@ -186,11 +190,42 @@ const SUPPORTED = new Set([
   "examples",
 ]);
 
+/**
+ * A keyword is only "supported" when its value has a shape the validator
+ * can act on. `enum: "x"` or tuple-form `items: [...]` are silently inert,
+ * so they are reported alongside genuinely unknown keywords.
+ */
+function shapeIsEnforceable(key: string, value: unknown): boolean {
+  switch (key) {
+    case "type":
+      return (
+        typeof value === "string" ||
+        (Array.isArray(value) && value.every((v) => typeof v === "string"))
+      );
+    case "enum":
+      return Array.isArray(value);
+    case "required":
+      return Array.isArray(value) && value.every((v) => typeof v === "string");
+    case "items":
+    case "properties":
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    case "minimum":
+    case "maximum":
+    case "minLength":
+    case "maxLength":
+      return typeof value === "number";
+    case "pattern":
+      return typeof value === "string";
+    default:
+      return true;
+  }
+}
+
 export function unsupportedSchemaKeywords(schema: InputSchema): string[] {
   const found = new Set<string>();
   const walk = (node: Record<string, unknown>): void => {
     for (const [key, value] of Object.entries(node)) {
-      if (!SUPPORTED.has(key)) {
+      if (!SUPPORTED.has(key) || !shapeIsEnforceable(key, value)) {
         found.add(key);
         continue;
       }
@@ -201,7 +236,12 @@ export function unsupportedSchemaKeywords(schema: InputSchema): string[] {
           }
         }
       }
-      if (key === "items" && value && typeof value === "object") {
+      if (
+        key === "items" &&
+        value &&
+        typeof value === "object" &&
+        !Array.isArray(value)
+      ) {
         walk(value as Record<string, unknown>);
       }
     }

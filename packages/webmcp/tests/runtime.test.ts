@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+﻿import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -151,6 +151,7 @@ describe("AgentDesk runtime", () => {
           name: "apply_redline",
           description: "Apply a proposed redline",
           policy: { kind: "approval_required" },
+          approvalEvidence: "summary",
           execute: () => {
             applied = true;
             return "applied";

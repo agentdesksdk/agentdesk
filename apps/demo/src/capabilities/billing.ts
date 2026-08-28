@@ -257,6 +257,21 @@ export const billingCapabilities: Capability[] = [
       }
       return AVAILABLE;
     },
+    previewChanges: (input) => {
+      const id = String(input.customer_id ?? "");
+      const amount = Number(input.amount ?? 0);
+      const existing = getState()
+        .credits.filter((c) => c.customerId === id)
+        .reduce((sum, c) => sum + c.amount, 0);
+      return [
+        {
+          field: `Credits held by ${id}`,
+          before: money(existing),
+          after: money(existing + amount),
+        },
+        { field: "New credit", before: null, after: money(amount) },
+      ];
+    },
     describeApproval: (input) =>
       `Issue a ${money(Number(input.amount ?? 0))} credit to customer ${String(input.customer_id)}: ${String(input.reason ?? "")}`,
     execute: (input) => {
@@ -298,6 +313,26 @@ export const billingCapabilities: Capability[] = [
         `Preparing a payment refund for order #${String(input.order_id ?? "")}`,
     },
     checkInput: (input) => refundPaymentBlocker(input) ?? AVAILABLE,
+    previewChanges: (input) => {
+      const order = orderFromInput(input);
+      const refundable = refundableBalance(input);
+      if (!order || !refundable) {
+        return [];
+      }
+      const invoice = getState().invoices.find((inv) => inv.orderId === order.id);
+      return [
+        {
+          field: `Invoice ${invoice?.id ?? ""} status`,
+          before: invoice?.status ?? "unknown",
+          after: "void",
+        },
+        {
+          field: "Credit issued",
+          before: null,
+          after: money(refundable.amount),
+        },
+      ];
+    },
     describeApproval: (input) => {
       const refundable = refundableBalance(input);
       return refundable
@@ -335,6 +370,19 @@ export const billingCapabilities: Capability[] = [
     consequential: true,
     keywords: ["void", "invoice", "cancel"],
     inputSchema: obj({ invoice_id: s("Invoice id") }, ["invoice_id"]),
+    previewChanges: (input) => {
+      const id = String(input.invoice_id ?? "");
+      const invoice = getState().invoices.find(
+        (inv) => inv.id.toLowerCase() === id.toLowerCase(),
+      );
+      if (!invoice) {
+        return [];
+      }
+      return [
+        { field: `Invoice ${invoice.id} status`, before: invoice.status, after: "void" },
+        { field: "Amount no longer collectable", before: null, after: money(invoice.total) },
+      ];
+    },
     describeApproval: (input) => `Void invoice ${String(input.invoice_id)}.`,
     execute: (input) => {
       const invoice = requireInvoice(input);

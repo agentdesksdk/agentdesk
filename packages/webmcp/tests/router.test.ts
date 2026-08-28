@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { AVAILABLE, defineCapability, unavailable } from "../src/capability.ts";
 import { rankCapabilities } from "../src/router.ts";
 import { createAgentDeskRuntime } from "../src/runtime.ts";
@@ -40,6 +40,7 @@ function fixtureCatalog() {
       intents: ["refund shipping"],
       entities: ["orderId"],
       risk: "CONSEQUENTIAL",
+      approvalEvidence: "summary",
       availability: (ctx) =>
         ctx.state.shippingRefunded === true
           ? unavailable(

@@ -146,6 +146,13 @@ export type Capability = {
     input: Record<string, unknown>,
     ctx: AppContext,
   ) => Change[];
+  /**
+   * What the human is shown before approving. `diff` requires
+   * `previewChanges`; `summary` is an explicit opt-out for actions with no
+   * enumerable change set. A consequential capability must pick one, so a
+   * missing preview can never silently degrade into an empty diff.
+   */
+  approvalEvidence: "diff" | "summary";
   execute: (
     input: Record<string, unknown>,
     ctx: ExecutionContext,
@@ -197,6 +204,8 @@ export type CapabilitySpec = {
     input: Record<string, unknown>,
     ctx: AppContext,
   ) => Change[];
+  /** Required for a consequential capability with no `previewChanges`. */
+  approvalEvidence?: "diff" | "summary";
   execute: (
     input: Record<string, unknown>,
     ctx: ExecutionContext,
@@ -226,6 +235,21 @@ export function defineCapability(spec: CapabilitySpec): Capability {
               )
       : (): Availability => AVAILABLE);
 
+  const approvalEvidence =
+    spec.approvalEvidence ?? (spec.previewChanges ? "diff" : "summary");
+  if (risk === "CONSEQUENTIAL") {
+    if (approvalEvidence === "diff" && !spec.previewChanges) {
+      throw new Error(
+        `${name} declares approvalEvidence "diff" but has no previewChanges`,
+      );
+    }
+    if (spec.approvalEvidence === undefined && !spec.previewChanges) {
+      throw new Error(
+        `${name} is CONSEQUENTIAL and must either declare previewChanges or opt in to approvalEvidence: "summary". A human approving without a diff has to be a deliberate choice.`,
+      );
+    }
+  }
+
   const keywords = new Set<string>(name.split("_"));
   for (const keyword of spec.keywords ?? []) {
     keywords.add(keyword.toLowerCase());
@@ -248,6 +272,7 @@ export function defineCapability(spec: CapabilitySpec): Capability {
     surface: spec.surface ?? "invoke",
     availability,
     policy,
+    approvalEvidence,
     execute: spec.execute,
   };
   if (spec.domain !== undefined) {

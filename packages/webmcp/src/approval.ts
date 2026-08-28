@@ -53,6 +53,7 @@ export class ApprovalManager {
     createdAt: number,
   ): PendingAction {
     const snapshot = structuredClone(input);
+    const storedPreview = structuredClone(preview) as Change[];
     const fingerprint = JSON.stringify(snapshot);
     for (const record of this.records.values()) {
       if (
@@ -70,7 +71,7 @@ export class ApprovalManager {
       input: snapshot,
       risk,
       summary,
-      preview,
+      preview: storedPreview,
       createdAt,
     };
     this.records.set(id, { status: "PENDING", action });
@@ -104,11 +105,16 @@ export class ApprovalManager {
     this.records.set(id, record);
   }
 
+  /**
+   * Detached copies. A UI holds these; handing out the live records would
+   * let a consumer rewrite `input` or `preview` after the human reviewed
+   * them and before `approve()` executes.
+   */
   pending(): PendingAction[] {
     const actions: PendingAction[] = [];
     for (const record of this.records.values()) {
       if (record.status === "PENDING") {
-        actions.push(record.action);
+        actions.push(structuredClone(record.action));
       }
     }
     return actions;
