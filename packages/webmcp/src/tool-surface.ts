@@ -8,6 +8,7 @@ export type { ToolResult } from "./results.ts";
 export type NativeExecutor = (
   capability: Capability,
   input: Record<string, unknown>,
+  signal?: AbortSignal,
 ) => Promise<ToolResult>;
 
 type ActiveTool = {
@@ -35,7 +36,14 @@ export class ToolSurfaceManager {
     private readonly audit: AuditBus,
     private readonly executor: NativeExecutor,
     private readonly notify?: () => void,
+    private readonly exposedTo?: string[],
   ) {}
+
+  private registerOptions(controller: AbortController) {
+    return this.exposedTo && this.exposedTo.length > 0
+      ? { signal: controller.signal, exposedTo: this.exposedTo }
+      : { signal: controller.signal };
+  }
 
   nativeNames(): string[] {
     return [...this.active.entries()]
@@ -150,7 +158,7 @@ export class ToolSurfaceManager {
   private async registerLive(capability: Capability): Promise<void> {
     const controller = new AbortController();
     const tool = toNativeTool(capability, this.executor);
-    await this.adapter.registerTool(tool, { signal: controller.signal });
+    await this.adapter.registerTool(tool, this.registerOptions(controller));
     const print = fingerprint(capability);
     this.active.set(capability.name, {
       fingerprint: print,
@@ -183,7 +191,7 @@ export class ToolSurfaceManager {
         return toolRetired(name);
       },
     };
-    await this.adapter.registerTool(tool, { signal: controller.signal });
+    await this.adapter.registerTool(tool, this.registerOptions(controller));
     const print = JSON.stringify({
       name: tool.name,
       description: tool.description,
@@ -223,9 +231,11 @@ function toNativeTool(
     description: capability.description,
     inputSchema: capability.inputSchema,
     annotations: capability.annotations,
-    execute: async (input, _options) => {
+    // The spec hands every execution an AbortSignal; forward it so a
+    // cancelled client call actually cancels the handler's work.
+    execute: async (input, options) => {
       const args = asRecord(input);
-      return executor(capability, args);
+      return executor(capability, args, options?.signal);
     },
   };
   if (capability.title !== undefined) {

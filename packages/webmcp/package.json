@@ -1,20 +1,54 @@
 {
   "name": "@agentdesk/webmcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "description": "Capability-virtualization runtime for WebMCP: publish the right tools at the right time, explain capability state, and keep consequential actions under human control.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentdesksdk/agentdesk.git",
+    "directory": "packages/webmcp"
+  },
+  "homepage": "https://github.com/agentdesksdk/agentdesk#readme",
+  "bugs": "https://github.com/agentdesksdk/agentdesk/issues",
+  "keywords": [
+    "webmcp",
+    "mcp",
+    "model-context",
+    "agent",
+    "tools",
+    "capability",
+    "governance"
+  ],
+  "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts"
-    }
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
   },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
-    "src"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm run build",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "pack:smoke": "node scripts/pack-smoke.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

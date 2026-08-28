@@ -9,11 +9,13 @@ import {
   type Capability,
   type CapabilityName,
   type Change,
+  type ExecutionContext,
   type RiskLevel,
   type Unavailability,
 } from "./capability.ts";
 import { CapabilityCatalog } from "./catalog.ts";
-import { decidePolicy } from "./policy.ts";
+import { decidePolicy, riskBasedPolicy, type PolicyEngine } from "./policy.ts";
+import { defaultValidator, type Validator } from "./validation.ts";
 import {
   PresentationBus,
   resolvePresentation,
@@ -26,8 +28,9 @@ import {
   capabilityUnavailable,
   errorResult,
   isReceiptEnvelope,
+  policyDenied,
   toToolResult,
-  type Receipt,
+  validationFailed,
   type ToolResult,
 } from "./results.ts";
 import { ToolSurfaceManager } from "./tool-surface.ts";
@@ -101,6 +104,11 @@ export type AgentDeskRuntime = {
    * WebMCP result is authoritative whether or not anyone subscribes.
    */
   subscribePresentation: (listener: PresentationListener) => () => void;
+  /**
+   * Streams audit events as they happen, for export to an external
+   * observability backend. A throwing listener cannot affect execution.
+   */
+  subscribeAudit: (listener: (event: AuditEvent) => void) => () => void;
   invoke: (name: string, input?: Record<string, unknown>) => Promise<ToolResult>;
   approve: (actionId: string) => Promise<ToolResult>;
   reject: (actionId: string) => ToolResult;
@@ -112,6 +120,12 @@ export function createAgentDeskRuntime(options: {
   adapter?: WebMcpAdapter;
   exposure?: Exposure;
   describeContext?: (ctx: AppContext) => Record<string, unknown>;
+  /** Replace the risk-based default with your own decisions. */
+  policy?: PolicyEngine;
+  /** Replace the built-in schema checker with Ajv, Zod, or similar. */
+  validate?: Validator;
+  /** Origins allowed to see registered tools (spec: `exposedTo`). */
+  exposedTo?: string[];
 }): AgentDeskRuntime {
   const audit = new AuditBus();
   const approvals = new ApprovalManager();
@@ -124,6 +138,8 @@ export function createAgentDeskRuntime(options: {
         : undefined,
     );
 
+  const policy = options.policy ?? riskBasedPolicy;
+  const validate = options.validate ?? defaultValidator;
   const appCapabilities = options.capabilities ?? [];
   const catalog = new CapabilityCatalog([
     ...builtinCapabilities(),
@@ -137,11 +153,29 @@ export function createAgentDeskRuntime(options: {
   let lastRouting: RoutingReport | null = null;
   const listeners = new Set<(snapshot: RuntimeSnapshot) => void>();
 
+  /**
+   * Incremented by stop() and reset(). An execution that resolves after
+   * its epoch ended cannot write to audit or approval state, so a slow
+   * handler can never repopulate a runtime the operator just cleared.
+   */
+  let epoch = 0;
+  let epochController = new AbortController();
+  let executionCounter = 0;
+  const idempotency = new Map<string, ToolResult>();
+
+  function endEpoch(): void {
+    epoch += 1;
+    epochController.abort();
+    epochController = new AbortController();
+  }
+
   const surface = new ToolSurfaceManager(
     adapter,
     audit,
-    (capability, input) => runCapability(capability, input, "native"),
+    (capability, input, signal) =>
+      runCapability(capability, input, "native", signal),
     () => emit(),
+    options.exposedTo,
   );
 
   function appOnly(capability: Capability): boolean {
@@ -212,6 +246,8 @@ export function createAgentDeskRuntime(options: {
     capability: Capability,
     input: Record<string, unknown>,
     via: "native" | "invoke",
+    signal?: AbortSignal,
+    idempotencyKey?: string,
   ): Promise<ToolResult> {
     if (capability.name === FIND_CAPABILITIES) {
       const raw = readString(input, "query") ?? readString(input, "task") ?? "";
@@ -257,8 +293,32 @@ export function createAgentDeskRuntime(options: {
       emit();
       return capabilityUnavailable(capability.name, inputCheck);
     }
+    const validation = validate(capability.inputSchema, input);
+    if (!validation.valid) {
+      audit.append({
+        kind: "capability_unavailable",
+        capability: capability.name,
+        reasonCode: "VALIDATION_FAILED",
+        at: now(),
+      });
+      emit();
+      return validationFailed(capability.name, validation.issues);
+    }
+
+    const decision = policy({ capability, input, context });
+    if (decision.kind === "deny") {
+      audit.append({
+        kind: "policy_denied",
+        capability: capability.name,
+        reason: decision.reason,
+        at: now(),
+      });
+      emit();
+      return policyDenied(capability.name, decision.reason);
+    }
+
     present(capability, "capability_started", input);
-    if (decidePolicy(capability) === "approval_required") {
+    if (decision.kind === "require_approval") {
       const summary =
         capability.describeApproval?.(input, context) ??
         capability.title ??
@@ -290,7 +350,12 @@ export function createAgentDeskRuntime(options: {
         action.preview,
       );
     }
-    const outcome = await executeNow(capability, input);
+    const outcome = await executeNow(
+      capability,
+      input,
+      signal,
+      idempotencyKey,
+    );
     return outcome.result;
   }
 
@@ -312,7 +377,13 @@ export function createAgentDeskRuntime(options: {
       return errorResult(`unknown capability: ${name}`);
     }
     try {
-      return await runCapability(routed, readRecord(input.input), "invoke");
+      return await runCapability(
+        routed,
+        readRecord(input.input),
+        "invoke",
+        undefined,
+        readString(input, "idempotency_key"),
+      );
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err));
     }
@@ -325,17 +396,44 @@ export function createAgentDeskRuntime(options: {
   async function executeNow(
     capability: Capability,
     input: Record<string, unknown>,
+    signal?: AbortSignal,
+    idempotencyKey?: string,
   ): Promise<ExecutionOutcome> {
+    if (idempotencyKey !== undefined) {
+      const previous = idempotency.get(`${capability.name}:${idempotencyKey}`);
+      if (previous) {
+        return { ok: true, value: undefined, result: previous };
+      }
+    }
+
+    const executionId = `EXE-${++executionCounter}`;
+    const startedEpoch = epoch;
+    const linked = linkSignals(signal, epochController.signal);
+    const execContext: ExecutionContext = {
+      route: context.route,
+      state: context.state,
+      signal: linked.signal,
+      executionId,
+    };
+    if (idempotencyKey !== undefined) {
+      execContext.idempotencyKey = idempotencyKey;
+    }
+
     audit.append({
       kind: "execution_started",
       capability: capability.name,
+      executionId,
       at: now(),
     });
     try {
-      const value = await capability.execute(input, context);
+      const value = await capability.execute(input, execContext);
+      if (startedEpoch !== epoch) {
+        return { ok: true, value, result: toToolResult(value) };
+      }
       const event: Extract<AuditEvent, { kind: "execution_completed" }> = {
         kind: "execution_completed",
         capability: capability.name,
+        executionId,
         at: now(),
       };
       if (isReceiptEnvelope(value)) {
@@ -344,8 +442,15 @@ export function createAgentDeskRuntime(options: {
       audit.append(event);
       present(capability, "capability_completed", input);
       emit();
-      return { ok: true, value, result: toToolResult(value) };
+      const result = toToolResult(value);
+      if (idempotencyKey !== undefined) {
+        idempotency.set(`${capability.name}:${idempotencyKey}`, result);
+      }
+      return { ok: true, value, result };
     } catch (err) {
+      if (startedEpoch !== epoch) {
+        return { ok: false, result: errorResult("runtime was reset") };
+      }
       if (err instanceof CapabilityUnavailableError) {
         audit.append({
           kind: "capability_unavailable",
@@ -363,12 +468,15 @@ export function createAgentDeskRuntime(options: {
       audit.append({
         kind: "execution_failed",
         capability: capability.name,
+        executionId,
         error: message,
         at: now(),
       });
       present(capability, "capability_failed", input);
       emit();
       return { ok: false, result: errorResult(message) };
+    } finally {
+      linked.dispose();
     }
   }
 
@@ -540,6 +648,7 @@ export function createAgentDeskRuntime(options: {
     },
     async stop() {
       started = false;
+      endEpoch();
       approvals.clear();
       await surface.clear();
       emit();
@@ -584,7 +693,9 @@ export function createAgentDeskRuntime(options: {
       return findCapabilities(query);
     },
     async reset() {
+      endEpoch();
       approvals.clear();
+      idempotency.clear();
       routedNames = new Set();
       lastRouting = null;
       if (started) {
@@ -608,6 +719,9 @@ export function createAgentDeskRuntime(options: {
     },
     subscribePresentation(listener) {
       return presentation.subscribe(listener);
+    },
+    subscribeAudit(listener) {
+      return audit.subscribe(listener);
     },
     async invoke(name, input = {}) {
       if (!started) {
@@ -766,6 +880,11 @@ function builtinCapabilities(): Capability[] {
             type: "object",
             description: "Arguments for the capability",
           },
+          idempotency_key: {
+            type: "string",
+            description:
+              "Optional. Retrying with the same key returns the first result instead of executing again.",
+          },
         },
       },
       execute: unreachable(INVOKE_CAPABILITY),
@@ -800,6 +919,38 @@ function builtinCapabilities(): Capability[] {
       execute: unreachable(GET_ACTION_STATUS),
     }),
   ];
+}
+
+/**
+ * Combines the client's execution signal with the runtime lifecycle
+ * signal. Hand-rolled rather than AbortSignal.any so the package works on
+ * Node 18, and disposed in a finally block so long-lived runtime signals
+ * do not accumulate listeners.
+ */
+function linkSignals(
+  ...signals: Array<AbortSignal | undefined>
+): { signal: AbortSignal; dispose: () => void } {
+  const present = signals.filter((s): s is AbortSignal => s !== undefined);
+  const controller = new AbortController();
+  const already = present.find((s) => s.aborted);
+  if (already) {
+    controller.abort(already.reason);
+    return { signal: controller.signal, dispose: () => {} };
+  }
+  const onAbort = (event: Event) => {
+    controller.abort((event.target as AbortSignal).reason);
+  };
+  for (const s of present) {
+    s.addEventListener("abort", onAbort, { once: true });
+  }
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      for (const s of present) {
+        s.removeEventListener("abort", onAbort);
+      }
+    },
+  };
 }
 
 /** A preview is advisory; a broken one must not block the approval. */

@@ -91,6 +91,63 @@ document.modelContext.registerTool(...)
 | `runtime.ts` | The pipeline, bootstrap tools, exposure modes, snapshots |
 | `webmcp-adapter.ts` | The only `document.modelContext` touchpoint |
 
+## WebMCP surface coverage
+
+Verified against the spec's `index.bs` IDL. `registerTool`'s second
+argument carries `signal` and `exposedTo`; the execute callback's second
+argument is `{ signal }`; annotations are exactly `readOnlyHint` and
+`untrustedContentHint`; unregistration is abort-only.
+
+| Spec surface | Status |
+| --- | --- |
+| `registerTool(tool, {signal, exposedTo})` | Implemented, including `exposedTo` |
+| Execute callback `{signal}` | Forwarded into handlers as `ctx.signal` |
+| Abort-based unregistration | Implemented (ToolSurfaceManager) |
+| `name`/`title`/`description`/`inputSchema` | Implemented |
+| `readOnlyHint`/`untrustedContentHint` | Implemented; no other keys exist |
+| `getTools({fromOrigins})` | Optional client (`createWebMcpClient`) |
+| `executeTool(tool, input, {signal})` | Optional client |
+| `toolchange` | Optional client (`onToolChange`) |
+| Permissions Policy `tools` | Documented for deployment; nothing to implement in-page |
+| Declarative form tools | Not implemented; explainer-only, not normative |
+
+The consumer-side methods live in `client.ts`, not the runtime, because
+AgentDesk's role is being a tool *provider* and control plane. Per-method
+browser parity is not guaranteed by the spec, so the client probes with
+`probeFeatures()` and returns a structured `{ok: false, reason}` rather
+than throwing when a method is absent.
+
+## Execution lifecycle
+
+Every execution gets an `executionId` that correlates its
+`execution_started`, `execution_completed`, and `execution_failed` audit
+events. The handler receives an `ExecutionContext`: the app context plus
+`signal`, `executionId`, and any `idempotencyKey`.
+
+The signal is the client's WebMCP execution signal linked with a runtime
+lifecycle signal, so a handler aborts when either the client cancels or the
+operator calls `stop()`/`reset()`. Those two also end the current *epoch*;
+an execution that resolves after its epoch ended returns its value to the
+caller but cannot write to audit or approval state, so a slow handler can
+never repopulate a runtime that was just cleared.
+
+`invoke_capability` accepts an optional `idempotency_key`. A retry with the
+same key returns the first result instead of executing again.
+
+## Validation and policy are pluggable
+
+The browser performs no schema validation: the spec types `inputSchema` as
+a bare object and hands raw input to the handler. AgentDesk validates at
+the boundary before policy, approval, or execution, returning a structured
+`VALIDATION_FAILED` with per-field issues. Pass `validate` to swap in Ajv,
+Zod, or Standard Schema.
+
+Policy is a function, not a table. The default is risk-based
+(`riskBasedPolicy`), and `policy` replaces it with anything returning
+`allow`, `require_approval`, or `deny` with a reason, which is how limits
+("refund <= $500") and tenant rules get expressed without the SDK growing
+an RBAC vocabulary.
+
 ## Previews and receipts
 
 Two distinct artifacts, deliberately not merged:
@@ -159,19 +216,21 @@ Fixed and regression-tested:
   the retired catalog registered.
 - Handlers returning `undefined` yield `"null"`, never a malformed result.
 
-Known limitations, deliberate for the hackathon scope:
+Known limitations:
 
-- No `AbortSignal` forwarding into capability handlers; cancellation of an
-  in-flight handler is not supported.
-- `stop()`/`reset()` do not await in-flight executions; a slow handler that
-  resolves after reset can append late audit events. No execution epochs.
-- No idempotency keys on approval creation or write capabilities.
-- Input schemas are descriptive; enforcement is per-capability
-  (`checkInput`, handler guards), not compiled JSON-schema validation.
-- The npm package exports TypeScript source for the workspace bundler; no
-  built `dist/` artifacts are published. Consume it inside the monorepo.
 - Routing is lexical; non-English intent vocabularies rely on
   per-capability keywords, not semantics.
+- Idempotency and approval records live in memory. A page reload loses
+  pending approvals and dedupe keys; durable storage is not implemented.
+- The bundled validator covers the JSON Schema subset this SDK emits
+  (types, required, enum, ranges, lengths, pattern, array items). Unknown
+  keywords are ignored rather than rejected, so exotic schemas pass rather
+  than fail shut. Supply Ajv via the `validate` option for full coverage.
+- Declarative (HTML form) WebMCP tools are not catalogued. That API is an
+  explainer, not part of the normative spec, so the shape is not stable
+  enough to build against.
+- Multi-client conformance is unverified beyond the clients recorded in
+  `testing.md`.
 
 ## Exposure modes
 

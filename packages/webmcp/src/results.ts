@@ -3,7 +3,9 @@ import type { Change, RiskLevel, Unavailability } from "./capability.ts";
 export type ToolCode =
   | "TOOL_RETIRED"
   | "APPROVAL_REQUIRED"
-  | "CAPABILITY_UNAVAILABLE";
+  | "CAPABILITY_UNAVAILABLE"
+  | "VALIDATION_FAILED"
+  | "POLICY_DENIED";
 
 export type ToolResult = {
   content: Array<{ type: string; text: string }>;
@@ -122,6 +124,40 @@ export function isReceiptEnvelope(value: unknown): value is ReceiptEnvelope {
     typeof value === "object" &&
     value !== null &&
     (value as Record<symbol, unknown>)[RECEIPT] === true
+  );
+}
+
+export function validationFailed(
+  capability: string,
+  issues: Array<{ path: string; message: string }>,
+): ToolResult {
+  return coded(
+    "VALIDATION_FAILED",
+    {
+      status: "VALIDATION_FAILED",
+      code: "VALIDATION_FAILED",
+      capability,
+      issues,
+      next: "Fix the arguments and call again. Nothing was executed.",
+    },
+    true,
+  );
+}
+
+export function policyDenied(
+  capability: string,
+  reason: string,
+): ToolResult {
+  return coded(
+    "POLICY_DENIED",
+    {
+      status: "POLICY_DENIED",
+      code: "POLICY_DENIED",
+      capability,
+      reason,
+      next: "This action is not permitted in the current context.",
+    },
+    true,
   );
 }
 

@@ -27,6 +27,12 @@ export type AuditEvent =
       at: number;
     }
   | {
+      kind: "policy_denied";
+      capability: string;
+      reason: string;
+      at: number;
+    }
+  | {
       kind: "approval_requested";
       capability: string;
       actionId: string;
@@ -36,24 +42,53 @@ export type AuditEvent =
     }
   | { kind: "approval_approved"; actionId: string; capability: string; at: number }
   | { kind: "approval_rejected"; actionId: string; capability: string; at: number }
-  | { kind: "execution_started"; capability: string; at: number }
+  | {
+      kind: "execution_started";
+      capability: string;
+      executionId: string;
+      at: number;
+    }
   | {
       kind: "execution_completed";
       capability: string;
+      executionId: string;
       receipt?: Receipt;
       at: number;
     }
-  | { kind: "execution_failed"; capability: string; error: string; at: number };
+  | {
+      kind: "execution_failed";
+      capability: string;
+      executionId: string;
+      error: string;
+      at: number;
+    };
 
 const MAX_EVENTS = 1000;
 
+export type AuditListener = (event: AuditEvent) => void;
+
 export class AuditBus {
   private events: AuditEvent[] = [];
+  private readonly listeners = new Set<AuditListener>();
+
+  subscribe(listener: AuditListener): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
 
   append(event: AuditEvent): void {
     this.events.push(event);
     if (this.events.length > MAX_EVENTS) {
       this.events.splice(0, this.events.length - MAX_EVENTS);
+    }
+    for (const listener of this.listeners) {
+      try {
+        listener(event);
+      } catch (err) {
+        console.error("agentdesk audit listener threw", err);
+      }
     }
   }
 

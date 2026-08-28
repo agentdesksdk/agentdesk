@@ -12,6 +12,23 @@ export type AppContext = {
   state: Record<string, unknown>;
 };
 
+/**
+ * What a handler receives as its second argument. Extends AppContext so
+ * existing handlers that read `route`/`state` keep working unchanged, and
+ * adds the execution metadata WebMCP gives us.
+ *
+ * `signal` is the WebMCP execution signal (spec: ToolExecuteCallbackOptions)
+ * linked with the runtime's lifecycle, so it aborts when the client cancels
+ * the call OR when the runtime is stopped or reset. Pass it to fetch.
+ */
+export type ExecutionContext = AppContext & {
+  signal: AbortSignal;
+  /** Unique per execution attempt; correlates audit events. */
+  executionId: string;
+  /** Caller-supplied dedupe key, when one was provided. */
+  idempotencyKey?: string;
+};
+
 export type RiskLevel = "READ" | "WRITE" | "CONSEQUENTIAL";
 
 /** One field-level before/after pair. Values must be JSON-serializable. */
@@ -131,7 +148,7 @@ export type Capability = {
   ) => Change[];
   execute: (
     input: Record<string, unknown>,
-    ctx: AppContext,
+    ctx: ExecutionContext,
   ) => Promise<unknown> | unknown;
 };
 
@@ -182,7 +199,7 @@ export type CapabilitySpec = {
   ) => Change[];
   execute: (
     input: Record<string, unknown>,
-    ctx: AppContext,
+    ctx: ExecutionContext,
   ) => Promise<unknown> | unknown;
 };
 

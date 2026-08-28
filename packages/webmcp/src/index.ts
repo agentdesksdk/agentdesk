@@ -10,6 +10,7 @@ export {
   type CapabilityName,
   type CapabilitySpec,
   type Change,
+  type ExecutionContext,
   type InputSchema,
   type Policy,
   type Presentation,
@@ -40,21 +41,52 @@ export {
 } from "./runtime.ts";
 export {
   createWebMcpAdapter,
+  getModelContext,
+  probeFeatures,
+  type ModelContextLike,
   type NativeToolDefinition,
+  type RegisteredTool,
   type RegisterToolFn,
+  type RegisterToolOptions,
   type WebMcpAdapter,
+  type WebMcpFeatures,
 } from "./webmcp-adapter.ts";
+export {
+  createWebMcpClient,
+  type WebMcpClient,
+} from "./client.ts";
+export {
+  defaultValidator,
+  type ValidationIssue,
+  type ValidationResult,
+  type Validator,
+} from "./validation.ts";
+export {
+  decidePolicy,
+  riskBasedPolicy,
+  type PolicyDecision,
+  type PolicyEngine,
+  type PolicyRequest,
+} from "./policy.ts";
+export {
+  toObservabilityEvent,
+  OBSERVABILITY_SCHEMA_VERSION,
+  type ObservabilityEvent,
+  type ObservabilityExporter,
+} from "./observability.ts";
 export {
   type ActionRecord,
   type ActionStatus,
   type PendingAction,
 } from "./approval.ts";
-export type { AuditEvent } from "./audit.ts";
+export type { AuditEvent, AuditListener } from "./audit.ts";
 export type { ToolResult, ToolCode } from "./results.ts";
 export {
   approvalRequired,
   capabilityUnavailable,
+  policyDenied,
   receipt,
   toolRetired,
+  validationFailed,
   type Receipt,
 } from "./results.ts";
