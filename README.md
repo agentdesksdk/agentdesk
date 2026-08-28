@@ -71,6 +71,27 @@ the native tools, so an agent with a stale list is never stranded. Stale
 native calls hit a tombstone and get a structured `TOOL_RETIRED` response
 telling them to call `find_capabilities` again.
 
+Measured client behavior (Codex in-app browser, 2026-08-28): AgentDesk
+dynamically updates the native WebMCP surface, with client rediscovery
+occurring when the client refreshes its tool snapshot, typically the next
+turn; `invoke_capability` covers clients whose discovery lags behind the
+page. Full matrix in [docs/testing.md](docs/testing.md).
+
+## Approval is a state machine, not a modal
+
+Every consequential action gets an auditable record with an
+execution-time re-check, so approving stale state fails closed instead of
+mutating:
+
+```text
+PENDING ──approve──▶ re-check availability + input ──▶ APPROVED_EXECUTED (result attached)
+   │                          │
+   │                          └─ state changed while pending ──▶ FAILED_UNAVAILABLE (reason code)
+   └──reject──▶ REJECTED (zero side effects)
+```
+
+Agents confirm outcomes later via `get_action_status(approval_id)`.
+
 ## Demo: Meridian Ops
 
 A fictional operations console (customers, orders, inventory, shipping,

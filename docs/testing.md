@@ -68,12 +68,26 @@ or a WebMCP-enabled extension client).
 
 ### Results
 
-Do not fill a cell without actually observing the behavior.
+Do not fill a cell without actually observing the behavior. Observed
+2026-08-28 against the local build; Codex column from a live Codex in-app
+browser session.
 
-| Client | Dynamic pickup | Retired behavior | Re-register | invoke_capability | Approval |
-| --- | --- | --- | --- | --- | --- |
-| Codex in-app browser | Registered immediately; callable after refreshing the WebMCP tool snapshot | Stale snapshot rejected; refreshed tombstone returned structured `TOOL_RETIRED` | Passed after snapshot refresh (`Hello, ChatGPT!`) | Passed (`pong`) | Immediate `APPROVAL_REQUIRED`; approval `APR-1001` resolved as `APPROVED_EXECUTED` |
-| Chrome WebMCP | | | | | |
+| Test | Codex in-app browser | ChatGPT in-app browser | Chrome 149+ WebMCP |
+| --- | --- | --- | --- |
+| Bootstrap tools discovered | ✅ four bootstrap tools listed | ⬜ | ⬜ |
+| `find_capabilities` works | ✅ routed and activated tools | ⬜ | ⬜ |
+| New native tool discovered immediately | ⚠️ registered immediately, callable only after the client refreshed its tool snapshot | ⬜ | ⬜ |
+| Discovered on next turn | ✅ | ⬜ | ⬜ |
+| Retired tool behavior | ✅ stale call returned structured `TOOL_RETIRED` | ⬜ | ⬜ |
+| Same-name re-registration | ✅ after snapshot refresh (`Hello, ChatGPT!`) | ⬜ | ⬜ |
+| `invoke_capability` fallback | ✅ (`pong`) | ⬜ | ⬜ |
+| Approval flow | ✅ immediate `APPROVAL_REQUIRED`; `APR-1001` resolved `APPROVED_EXECUTED` | ⬜ | ⬜ |
+
+Observed wording for the submission (matches the Codex column): AgentDesk
+dynamically updates the native WebMCP surface, with client rediscovery
+occurring when the client refreshes its tool snapshot (typically the next
+turn); `invoke_capability` covers clients whose discovery lags behind the
+page.
 
 ### Hero flow (demo app)
 
