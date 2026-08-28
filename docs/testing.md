@@ -66,6 +66,24 @@ or a WebMCP-enabled extension client).
 1. Open the P0 page; the banner should read "WebMCP native: YES".
 2. Repeat steps 2–10 above with the Chrome agent surface.
 
+### Harness readiness (automated, no WebMCP client)
+
+Verified 2026-08-29 by driving the P0 page in a plain Chrome with no
+WebMCP. This proves the harness is ready for the manual runs below; it
+does not and cannot substitute for them.
+
+| Behavior | Result |
+| --- | --- |
+| `hello_dynamic_tool` typed execution | `{"greeting":"Hello, Audit!","deterministic":true}` |
+| Stale call after retire | `CAPABILITY_UNAVAILABLE` / `CAPABILITY_RETIRED` |
+| Compatibility path `invoke_capability({name:"ping"})` | `pong` |
+| `request_demo_approval` returns immediately | 1 pending, `get_action_status` → `PENDING` |
+| Native tool list | empty, correctly reported as unsupported |
+
+The last row is the point: native registration, retirement, and
+re-registration are only observable in a browser that implements WebMCP.
+Those cells stay empty below until someone runs them there.
+
 ### Results
 
 Do not fill a cell without actually observing the behavior. Observed
