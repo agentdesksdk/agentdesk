@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231a7f4e'/%3E%3Ctext x='16' y='22' font-family='sans-serif' font-size='16' font-weight='700' fill='white' text-anchor='middle'%3EP0%3C/text%3E%3C/svg%3E"
+    />
+    <title>AgentDesk P0 — WebMCP compatibility harness</title>
+    <style>
+      :root {
+        color: #1a2233;
+        background: #f6f7f9;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-size: 15px;
+      }
+      body {
+        max-width: 62rem;
+        margin: 1.5rem auto 4rem;
+        padding: 0 1rem;
+      }
+      h1 {
+        font-size: 1.4rem;
+        margin-bottom: 0.2rem;
+      }
+      h2 {
+        font-size: 0.95rem;
+        margin: 1.4rem 0 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #5b6577;
+      }
+      button {
+        margin: 0 0.4rem 0.4rem 0;
+        padding: 0.5rem 0.8rem;
+        background: #fff;
+        color: #1a2233;
+        border: 1px solid #cdd4de;
+        border-radius: 8px;
+        cursor: pointer;
+        font: inherit;
+        font-size: 0.9rem;
+      }
+      button:hover {
+        border-color: #2456c8;
+        color: #2456c8;
+      }
+      pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.8rem;
+        background: #fff;
+        border: 1px solid #e3e7ee;
+        border-radius: 10px;
+        padding: 0.8rem;
+        overflow: auto;
+        white-space: pre-wrap;
+        margin: 0;
+      }
+      .banner {
+        padding: 0.7rem 1rem;
+        border-radius: 10px;
+        margin: 1rem 0;
+        font-size: 0.9rem;
+      }
+      .banner.ok {
+        background: #e3f4ea;
+        border: 1px solid #94d3b2;
+        color: #1a7f4e;
+      }
+      .banner.warn {
+        background: #fdf3d7;
+        border: 1px solid #ecd9a0;
+        color: #9a6700;
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 10px;
+        margin: 0.8rem 0 1rem;
+      }
+      .stat {
+        background: #fff;
+        border: 1px solid #e3e7ee;
+        border-radius: 10px;
+        padding: 0.6rem 0.8rem;
+      }
+      .stat .label {
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #5b6577;
+      }
+      .stat .value {
+        font-size: 1.4rem;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      .cols {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      .pending-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 0;
+      }
+      .pending-row span {
+        flex: 1;
+        font-size: 0.85rem;
+      }
+      #pending {
+        background: #fff;
+        border: 1px solid #e3e7ee;
+        border-radius: 10px;
+        padding: 0.8rem;
+        font-size: 0.85rem;
+      }
+      ol {
+        line-height: 1.5;
+        font-size: 0.9rem;
+      }
+      code {
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        background: #eef1f6;
+        border-radius: 4px;
+        padding: 0 4px;
+        font-size: 0.85em;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>AgentDesk P0 — WebMCP compatibility harness</h1>
+    <p>
+      Bare HTML/TypeScript. No React. Bootstrap tools
+      (<code>get_context</code>, <code>find_capabilities</code>,
+      <code>invoke_capability</code>, <code>get_action_status</code>) register at
+      document startup; everything else routes dynamically.
+    </p>
+    <div id="support" class="banner warn">Checking WebMCP…</div>
+
+    <h2>Controls</h2>
+    <div>
+      <button id="btn-register">Register dynamic tool</button>
+      <button id="btn-retire">Retire dynamic tool</button>
+      <button id="btn-reregister">Re-register dynamic tool</button>
+      <button id="btn-scene">Change simulated route/context</button>
+      <button id="btn-reset">Reset</button>
+    </div>
+    <div>
+      <button id="btn-hello">Call hello_dynamic_tool</button>
+      <button id="btn-invoke-compat">invoke_capability(hello_dynamic_tool)</button>
+      <button id="btn-approval">request_demo_approval</button>
+      <button id="btn-context">get_context</button>
+    </div>
+
+    <h2>Counters</h2>
+    <div class="stats">
+      <div class="stat"><div class="label">Registered tools</div><div class="value" id="stat-registered">0</div></div>
+      <div class="stat"><div class="label">Retired / aborts</div><div class="value" id="stat-retired">0</div></div>
+      <div class="stat"><div class="label">Invocations</div><div class="value" id="stat-invocations">0</div></div>
+      <div class="stat"><div class="label">Abort events</div><div class="value" id="stat-aborts">0</div></div>
+      <div class="stat"><div class="label">Dynamic registrations</div><div class="value" id="stat-dynamic">0</div></div>
+      <div class="stat"><div class="label">Stale calls</div><div class="value" id="stat-stale">0</div></div>
+    </div>
+
+    <div class="cols">
+      <div>
+        <h2>Active tools (route: <span id="route">/</span>)</h2>
+        <pre id="active-tools"></pre>
+      </div>
+      <div>
+        <h2>Retired tools (tombstones)</h2>
+        <pre id="retired-tools"></pre>
+      </div>
+    </div>
+
+    <h2>Pending approvals</h2>
+    <div id="pending">(no pending approvals)</div>
+
+    <h2>Invocation log</h2>
+    <pre id="invocations">(none yet)</pre>
+
+    <h2>Audit events</h2>
+    <pre id="events"></pre>
+
+    <h2>Manual test script (ask the agent)</h2>
+    <ol>
+      <li>Ask the agent to list its tools. Expect only the four bootstrap tools.</li>
+      <li>Ask it to call <code>find_capabilities</code> with query <code>hello</code>. Watch <code>hello_dynamic_tool</code> register above.</li>
+      <li>Ask it to call <code>hello_dynamic_tool</code> with <code>{"name":"ChatGPT"}</code> — note whether it sees the new tool this turn or the next.</li>
+      <li>Click “Retire dynamic tool”, then ask it to call <code>hello_dynamic_tool</code> anyway. Expect a structured <code>TOOL_RETIRED</code> response.</li>
+      <li>Click “Re-register dynamic tool” and repeat the call.</li>
+      <li>Ask it to call <code>invoke_capability</code> with <code>{"name":"ping"}</code> — works regardless of stale tool lists.</li>
+      <li>Ask it to call <code>request_demo_approval</code>. It must return <code>APPROVAL_REQUIRED</code> immediately (no hanging call). Approve here, then ask it to call <code>get_action_status</code> with the approval_id.</li>
+    </ol>
+    <script type="module" src="/p0.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+[build]
+command = "pnpm build"
+publish = "apps/demo/dist"
+
+[[redirects]]
+from = "/p0/*"
+to = "/p0/index.html"
+status = 200
+
+[[redirects]]
+from = "/*"
+to = "/index.html"
+status = 200

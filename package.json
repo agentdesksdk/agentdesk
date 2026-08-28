@@ -1,0 +1,14 @@
+{
+  "name": "agentdesk",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.14.0",
+  "scripts": {
+    "dev": "pnpm --filter @agentdesk/demo dev",
+    "p0": "pnpm --filter @agentdesk/p0 dev",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm -r build && node scripts/assemble-dist.mjs",
+    "preview": "pnpm --filter @agentdesk/demo preview"
+  }
+}

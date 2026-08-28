@@ -1,0 +1,8 @@
+# GitHub origins linked from https://webmcp.devpost.com/resources
+# name<TAB>git-url<TAB>recurse-submodules(0|1)
+webmcp	https://github.com/webmachinelearning/webmcp.git	0
+agents	https://github.com/cloudflare/agents.git	0
+shop	https://github.com/vercel/shop.git	0
+modern-web-guidance	https://github.com/GoogleChrome/modern-web-guidance.git	0
+webmcp-tools	https://github.com/GoogleChromeLabs/webmcp-tools.git	1
+use-webmcp-tool	https://github.com/GoogleChromeLabs/use-webmcp-tool.git	0
