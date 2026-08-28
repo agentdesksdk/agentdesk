@@ -39,15 +39,21 @@ export type AuditEvent =
   | { kind: "execution_completed"; capability: string; at: number }
   | { kind: "execution_failed"; capability: string; error: string; at: number };
 
+const MAX_EVENTS = 1000;
+
 export class AuditBus {
   private events: AuditEvent[] = [];
 
   append(event: AuditEvent): void {
     this.events.push(event);
+    if (this.events.length > MAX_EVENTS) {
+      this.events.splice(0, this.events.length - MAX_EVENTS);
+    }
   }
 
+  /** Detached copy; mutating a snapshot cannot rewrite history. */
   list(): readonly AuditEvent[] {
-    return this.events;
+    return [...this.events];
   }
 
   clear(): void {

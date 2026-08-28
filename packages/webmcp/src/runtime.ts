@@ -156,7 +156,12 @@ export function createAgentDeskRuntime(options: {
   function emit(): void {
     const current = snapshot();
     for (const listener of listeners) {
-      listener(current);
+      try {
+        listener(current);
+      } catch (err) {
+        // An observer must never change an operation's outcome.
+        console.error("agentdesk snapshot listener threw", err);
+      }
     }
   }
 
@@ -184,9 +189,9 @@ export function createAgentDeskRuntime(options: {
     via: "native" | "invoke",
   ): Promise<ToolResult> {
     if (capability.name === FIND_CAPABILITIES) {
-      const query =
-        readString(input, "query") ?? readString(input, "task") ?? "";
-      return toToolResult(await findCapabilities(query));
+      const raw = readString(input, "query") ?? readString(input, "task") ?? "";
+      // Bound what enters routing, lastRouting, and the audit log.
+      return toToolResult(await findCapabilities(raw.slice(0, 400)));
     }
     if (capability.name === INVOKE_CAPABILITY) {
       return dispatchInvoke(input);
@@ -414,8 +419,9 @@ export function createAgentDeskRuntime(options: {
         return out;
       }),
       activated_tools: activated,
+      limit: 5,
       instruction:
-        "These capabilities are active WebMCP tools. Prefer the native typed tools. If your client has not refreshed its tool list, call invoke_capability with the capability name.",
+        "Up to 5 of the most relevant capabilities are active WebMCP tools; refine the query to surface others. Prefer the native typed tools. If your client has not refreshed its tool list, call invoke_capability with the capability name.",
     };
   }
 
@@ -484,8 +490,9 @@ export function createAgentDeskRuntime(options: {
       if (started) {
         return;
       }
+      await surface.reconcile(desiredNative());
       started = true;
-      await reconcile();
+      emit();
     },
     async stop() {
       started = false;
@@ -520,7 +527,11 @@ export function createAgentDeskRuntime(options: {
         at: now(),
       });
       if (started) {
-        await reconcile();
+        await surface.reconcile(desiredNative());
+        // A mode switch is an explicit operator action, not context drift;
+        // keeping 78 tombstones would defeat the small-surface premise.
+        await surface.clearTombstones();
+        emit();
       } else {
         emit();
       }
@@ -542,12 +553,19 @@ export function createAgentDeskRuntime(options: {
     getSnapshot: snapshot,
     subscribe(listener) {
       listeners.add(listener);
-      listener(snapshot());
+      try {
+        listener(snapshot());
+      } catch (err) {
+        console.error("agentdesk snapshot listener threw", err);
+      }
       return () => {
         listeners.delete(listener);
       };
     },
     async invoke(name, input = {}) {
+      if (!started) {
+        return errorResult("runtime is not started");
+      }
       if (name === INVOKE_CAPABILITY) {
         return dispatchInvoke(input);
       }
@@ -558,12 +576,27 @@ export function createAgentDeskRuntime(options: {
       return runCapability(routed, input, "invoke");
     },
     async approve(actionId) {
-      const action = approvals.pendingAction(actionId);
+      const action = approvals.claim(actionId);
       if (!action) {
-        return errorResult(`unknown pending action: ${actionId}`);
+        const record = approvals.get(actionId);
+        if (!record) {
+          return errorResult(`unknown pending action: ${actionId}`);
+        }
+        return toToolResult({
+          status: record.status,
+          approval_id: actionId,
+          capability: record.action.capability,
+          note: "This approval was already claimed or resolved; the action did not run again.",
+        });
       }
       const routed = routeCapability(catalog, action.capability);
       if (isRouteError(routed)) {
+        approvals.resolve(actionId, {
+          status: "FAILED",
+          action,
+          error: `unknown capability: ${action.capability}`,
+          resolvedAt: now(),
+        });
         return errorResult(`unknown capability: ${action.capability}`);
       }
       const availability = routed.availability(context);
@@ -671,8 +704,9 @@ function builtinCapabilities(): Capability[] {
       name: INVOKE_CAPABILITY,
       title: "Invoke capability",
       description:
-        "Invoke a named application capability. Use find_capabilities first. Works even if your tool list is stale. Consequential capabilities return APPROVAL_REQUIRED instead of mutating state.",
+        "Invoke a named application capability. Use find_capabilities first. Works even if your tool list is stale. Can execute write capabilities; consequential capabilities return APPROVAL_REQUIRED instead of mutating state.",
       surface: "native",
+      readOnlyHint: false,
       inputSchema: {
         type: "object",
         required: ["name"],

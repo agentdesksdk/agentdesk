@@ -1,4 +1,4 @@
-import type { AppContext, Capability } from "./capability.ts";
+﻿import type { AppContext, Capability } from "./capability.ts";
 import type { CapabilityCatalog } from "./catalog.ts";
 
 export type RouteError = {
@@ -85,7 +85,7 @@ export function rankCapabilities(
     if (keywordHits > 0) {
       score += ROUTING_WEIGHTS.keyword * Math.min(keywordHits, 2);
     }
-    if (capability.routes.some((prefix) => ctx.route.startsWith(prefix))) {
+    if (capability.routes.some((prefix) => routeMatches(ctx.route, prefix))) {
       score += ROUTING_WEIGHTS.route;
     }
     if (score > 0) {
@@ -100,11 +100,21 @@ export function rankCapabilities(
   return ranked.slice(0, Math.min(limit, MAX_ROUTED));
 }
 
+/** "/" is the exact root route, not a universal prefix. */
+function routeMatches(currentRoute: string, prefix: string): boolean {
+  if (prefix === "/") {
+    return currentRoute === "/";
+  }
+  return currentRoute.startsWith(prefix);
+}
+
 export function tokenize(text: string): string[] {
   return text
     .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/'s\b/g, "")
-    .split(/[^a-z0-9]+/)
+    .split(/[^\p{L}\p{N}]+/u)
     .filter((token) => token.length > 0)
     .map(stem);
 }

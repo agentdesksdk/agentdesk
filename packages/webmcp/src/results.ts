@@ -101,7 +101,12 @@ export function toToolResult(value: unknown): ToolResult {
   if (isToolResult(value)) {
     return value;
   }
-  return textResult(typeof value === "string" ? value : JSON.stringify(value));
+  if (typeof value === "string") {
+    return textResult(value);
+  }
+  // JSON.stringify(undefined) is undefined, which would violate the
+  // advertised { type, text } shape; normalize to null.
+  return textResult(JSON.stringify(value === undefined ? null : value));
 }
 
 export function isToolResult(value: unknown): value is ToolResult {

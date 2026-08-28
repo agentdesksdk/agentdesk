@@ -91,6 +91,47 @@ document.modelContext.registerTool(...)
 | `runtime.ts` | The pipeline, bootstrap tools, exposure modes, snapshots |
 | `webmcp-adapter.ts` | The only `document.modelContext` touchpoint |
 
+## Hardening contract (from the 2026-08-28 stress test)
+
+Fixed and regression-tested:
+
+- Approval execution atomically claims `PENDING → EXECUTING`; concurrent
+  approvals execute exactly once and the loser gets a structured
+  already-resolved response.
+- Approved input is deep-cloned at request time; mutating the caller's
+  object after the human saw the summary cannot change what executes.
+- An identical still-pending request is deduplicated instead of creating a
+  second approval.
+- Snapshot listeners are isolated; an observer exception can never turn a
+  committed write into an apparent failure or duplicate a terminal audit
+  outcome.
+- `start()` only marks the runtime started after successful registration,
+  so a transient failure is retryable; `invoke()` before start is rejected.
+- `invoke_capability` is not advertised read-only, and routing is
+  discoverability, not authorization (any available catalog capability can
+  be invoked by name; policy still gates writes and approvals).
+- `/` in a capability's routes matches only the exact root route;
+  tokenization is Unicode-aware with diacritic folding.
+- Discovery queries are truncated to 400 chars before routing and audit;
+  the audit log is capped at 1000 events and snapshots are detached copies.
+- An explicit exposure-mode switch compacts tombstones instead of keeping
+  the retired catalog registered.
+- Handlers returning `undefined` yield `"null"`, never a malformed result.
+
+Known limitations, deliberate for the hackathon scope:
+
+- No `AbortSignal` forwarding into capability handlers; cancellation of an
+  in-flight handler is not supported.
+- `stop()`/`reset()` do not await in-flight executions; a slow handler that
+  resolves after reset can append late audit events. No execution epochs.
+- No idempotency keys on approval creation or write capabilities.
+- Input schemas are descriptive; enforcement is per-capability
+  (`checkInput`, handler guards), not compiled JSON-schema validation.
+- The npm package exports TypeScript source for the workspace bundler; no
+  built `dist/` artifacts are published. Consume it inside the monorepo.
+- Routing is lexical; non-English intent vocabularies rely on
+  per-capability keywords, not semantics.
+
 ## Exposure modes
 
 The same runtime serves both experiment arms:

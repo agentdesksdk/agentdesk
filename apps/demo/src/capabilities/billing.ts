@@ -1,7 +1,9 @@
 import {
+  AVAILABLE,
   CapabilityUnavailableError,
   unavailable,
   type Capability,
+  type Unavailability,
 } from "@agentdesk/webmcp";
 import { getState, mutate } from "../data/store.ts";
 import {
@@ -21,6 +23,71 @@ import {
 } from "./helpers.ts";
 
 const domain = "billing";
+
+function orderFromInput(input: Record<string, unknown>) {
+  const id =
+    typeof input.order_id === "string" || typeof input.order_id === "number"
+      ? String(input.order_id).replace(/^#/, "")
+      : undefined;
+  return id !== undefined
+    ? getState().orders.find((o) => o.id === id)
+    : undefined;
+}
+
+/**
+ * Collected funds minus credits already issued against this order
+ * (currently the shipping refund). Refunds must never exceed this.
+ */
+function refundableBalance(
+  input: Record<string, unknown>,
+): { orderId: string; amount: number } | null {
+  const order = orderFromInput(input);
+  const invoice = order
+    ? getState().invoices.find((inv) => inv.orderId === order.id)
+    : undefined;
+  if (!order || !invoice) {
+    return null;
+  }
+  if (invoice.status !== "paid" && invoice.status !== "partially_refunded") {
+    return null;
+  }
+  const priorCredits = order.shippingRefunded ? order.shippingFee : 0;
+  return {
+    orderId: order.id,
+    amount: Math.max(0, Math.round((invoice.total - priorCredits) * 100) / 100),
+  };
+}
+
+function refundPaymentBlocker(
+  input: Record<string, unknown>,
+): Unavailability | null {
+  const order = orderFromInput(input);
+  if (!order) {
+    return null;
+  }
+  const invoice = getState().invoices.find((inv) => inv.orderId === order.id);
+  if (!invoice) {
+    return unavailable("INVALID_STATE", `Order ${order.id} has no invoice.`);
+  }
+  if (invoice.status === "due") {
+    return unavailable(
+      "PAYMENT_NOT_COLLECTED",
+      `Invoice ${invoice.id} is still due; there is no collected payment to refund.`,
+      "void_invoice",
+    );
+  }
+  if (invoice.status === "void") {
+    return unavailable("INVALID_STATE", `Invoice ${invoice.id} is already void.`);
+  }
+  const refundable = refundableBalance(input);
+  if (!refundable || refundable.amount <= 0) {
+    return unavailable(
+      "ALREADY_REFUNDED",
+      `The collected balance for order ${order.id} has already been fully credited.`,
+    );
+  }
+  return null;
+}
 
 function requireInvoice(input: Record<string, unknown>) {
   const id = requireStr(input, "invoice_id");
@@ -153,6 +220,35 @@ export const billingCapabilities: Capability[] = [
       },
       ["customer_id", "amount", "reason"],
     ),
+    checkInput: (input) => {
+      const amount =
+        typeof input.amount === "number" && Number.isFinite(input.amount)
+          ? input.amount
+          : undefined;
+      const customerId =
+        typeof input.customer_id === "string" && input.customer_id.trim() !== ""
+          ? input.customer_id.trim()
+          : undefined;
+      if (amount === undefined || amount <= 0 || customerId === undefined) {
+        return unavailable(
+          "INVALID_INPUT",
+          "customer_id and a positive amount are required before requesting approval.",
+        );
+      }
+      const exists = getState().customers.some(
+        (c) =>
+          c.id === customerId ||
+          c.name.toLowerCase() === customerId.toLowerCase(),
+      );
+      if (!exists) {
+        return unavailable(
+          "MISSING_CUSTOMER",
+          `No customer ${customerId} exists.`,
+          "search_customers",
+        );
+      }
+      return AVAILABLE;
+    },
     describeApproval: (input) =>
       `Issue a ${money(Number(input.amount ?? 0))} credit to customer ${String(input.customer_id)}: ${String(input.reason ?? "")}`,
     execute: (input) => {
@@ -180,49 +276,41 @@ export const billingCapabilities: Capability[] = [
     name: "refund_payment",
     title: "Refund payment",
     description:
-      "Refund the full invoice for an order. Requires human approval.",
+      "Refund the remaining collected balance of an order's invoice. Requires human approval.",
     domain,
     consequential: true,
     intents: ["refund payment", "full refund"],
     keywords: ["refund", "payment", "invoice"],
     entities: ["orderId"],
     inputSchema: obj({ order_id: s("Order id") }, ["order_id"]),
+    checkInput: (input) => refundPaymentBlocker(input) ?? AVAILABLE,
     describeApproval: (input) => {
-      const order = getState().orders.find(
-        (o) => o.id === String(input.order_id ?? "").replace(/^#/, ""),
-      );
-      const invoice = order
-        ? getState().invoices.find((inv) => inv.orderId === order.id)
-        : undefined;
-      return invoice
-        ? `Refund the full ${money(invoice.total)} payment for Order #${invoice.orderId}.`
+      const refundable = refundableBalance(input);
+      return refundable
+        ? `Refund the remaining ${money(refundable.amount)} collected for Order #${refundable.orderId}.`
         : `Refund the payment for Order #${String(input.order_id)}.`;
     },
     execute: (input) => {
       const order = requireOrder(input);
-      const invoice = getState().invoices.find((inv) => inv.orderId === order.id);
-      if (!invoice || invoice.status === "void") {
-        throw new CapabilityUnavailableError(
-          unavailable(
-            "INVALID_STATE",
-            `Order ${order.id} has no refundable invoice.`,
-          ),
-        );
+      const blocker = refundPaymentBlocker(input);
+      if (blocker) {
+        throw new CapabilityUnavailableError(blocker);
       }
+      const refundable = refundableBalance(input)!;
       mutate((draft) => {
-        const target = draft.invoices.find((inv) => inv.id === invoice.id);
+        const target = draft.invoices.find((inv) => inv.orderId === order.id);
         if (target) {
           target.status = "void";
         }
         draft.credits.push({
           id: `CR-${4001 + draft.credits.length}`,
           customerId: order.customerId,
-          amount: invoice.total,
-          reason: `Full refund for order ${order.id}`,
+          amount: refundable.amount,
+          reason: `Refund of collected balance for order ${order.id}`,
           issuedAt: new Date().toISOString(),
         });
       });
-      return { order_id: order.id, refunded: true, amount: invoice.total };
+      return { order_id: order.id, refunded: true, amount: refundable.amount };
     },
   }),
   createStateTransitionCapability({

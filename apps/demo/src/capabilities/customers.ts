@@ -1,4 +1,9 @@
-import { AVAILABLE, unavailable, type Capability } from "@agentdesk/webmcp";
+import {
+  AVAILABLE,
+  CapabilityUnavailableError,
+  unavailable,
+  type Capability,
+} from "@agentdesk/webmcp";
 import { getState, mutate } from "../data/store.ts";
 import { orderTotal } from "../data/types.ts";
 import {
@@ -231,11 +236,32 @@ export const customerCapabilities: Capability[] = [
       },
       ["primary_id", "duplicate_id"],
     ),
+    checkInput: (input) => {
+      const primary =
+        typeof input.primary_id === "string" ? input.primary_id : undefined;
+      const duplicate =
+        typeof input.duplicate_id === "string" ? input.duplicate_id : undefined;
+      if (primary !== undefined && duplicate !== undefined && primary === duplicate) {
+        return unavailable(
+          "INVALID_INPUT",
+          "primary_id and duplicate_id must be different customers; a self-merge would delete the customer.",
+        );
+      }
+      return AVAILABLE;
+    },
     describeApproval: (input) =>
       `Merge customer ${String(input.duplicate_id)} into ${String(input.primary_id)}. The duplicate profile is removed.`,
     execute: (input) => {
       const primary = requireCustomer(input, "primary_id");
       const duplicate = requireCustomer(input, "duplicate_id");
+      if (primary.id === duplicate.id) {
+        throw new CapabilityUnavailableError(
+          unavailable(
+            "INVALID_INPUT",
+            "primary_id and duplicate_id must be different customers; a self-merge would delete the customer.",
+          ),
+        );
+      }
       mutate((draft) => {
         for (const order of draft.orders) {
           if (order.customerId === duplicate.id) {

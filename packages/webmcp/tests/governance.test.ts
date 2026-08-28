@@ -324,11 +324,10 @@ describe("exposure modes", () => {
       "get_context",
       "invoke_capability",
     ]);
-    expect(snapshot.tombstones).toEqual([
-      "get_invoice",
-      "search_notes",
-      "update_price",
-    ]);
+    // An explicit mode switch compacts tombstones instead of keeping the
+    // whole retired catalog registered.
+    expect(snapshot.tombstones).toEqual([]);
+    expect(model.tools.size).toBe(4);
     const invokeResult = await model.execute("invoke_capability", {
       name: "get_invoice",
       input: {},

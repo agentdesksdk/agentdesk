@@ -122,8 +122,8 @@ export const inventoryCapabilities: Capability[] = [
     execute: (input) => {
       const product = requireProduct(input);
       const delta = num(input, "delta");
-      if (delta === undefined || delta === 0) {
-        throw new Error("delta must be a non-zero number");
+      if (delta === undefined || delta === 0 || !Number.isInteger(delta)) {
+        throw new Error("delta must be a non-zero whole number of units");
       }
       if (product.stock + delta < 0) {
         throw new CapabilityUnavailableError(
@@ -156,8 +156,8 @@ export const inventoryCapabilities: Capability[] = [
     execute: (input) => {
       const product = requireProduct(input);
       const quantity = num(input, "quantity");
-      if (quantity === undefined || quantity <= 0) {
-        throw new Error("quantity must be a positive number");
+      if (quantity === undefined || quantity <= 0 || !Number.isInteger(quantity)) {
+        throw new Error("quantity must be a positive whole number of units");
       }
       if (product.stock - product.reserved < quantity) {
         throw new CapabilityUnavailableError(
@@ -191,8 +191,8 @@ export const inventoryCapabilities: Capability[] = [
     execute: (input) => {
       const product = requireProduct(input);
       const quantity = num(input, "quantity");
-      if (quantity === undefined || quantity <= 0) {
-        throw new Error("quantity must be a positive number");
+      if (quantity === undefined || quantity <= 0 || !Number.isInteger(quantity)) {
+        throw new Error("quantity must be a positive whole number of units");
       }
       const released = Math.min(quantity, product.reserved);
       mutate((draft) => {
@@ -244,8 +244,8 @@ export const inventoryCapabilities: Capability[] = [
     execute: (input) => {
       const product = requireProduct(input);
       const quantity = num(input, "quantity");
-      if (quantity === undefined || quantity <= 0) {
-        throw new Error("quantity must be a positive number");
+      if (quantity === undefined || quantity <= 0 || !Number.isInteger(quantity)) {
+        throw new Error("quantity must be a positive whole number of units");
       }
       return {
         purchase_order: `PO-${product.sku}-${quantity}`,
