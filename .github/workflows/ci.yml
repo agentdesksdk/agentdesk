@@ -16,7 +16,13 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Each check reports on its own so one run tells you everything that is
+      # broken, rather than a chain of skips behind the first failure.
       - run: pnpm typecheck
+        if: ${{ !cancelled() }}
       - run: pnpm test
+        if: ${{ !cancelled() }}
       - run: pnpm build
+        if: ${{ !cancelled() }}
       - run: pnpm test:pack
+        if: ${{ !cancelled() }}
