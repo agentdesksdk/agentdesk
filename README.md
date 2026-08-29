@@ -169,7 +169,9 @@ const plan = await runtime.prepare({
     { capability: "add_order_note", input: { order_id: "10428", note: "Refunded." } },
   ],
 });
-runtime.approvePlan(plan.id);
+// The approver is named explicitly and must be human; the agent that asked
+// for the plan cannot authorize it.
+runtime.approvePlan(plan.id, { id: "operator-1", name: "Amein", kind: "human" });
 await runtime.commitPlan(plan.id);
 
 // Who did what, and whether reading state back confirmed it.

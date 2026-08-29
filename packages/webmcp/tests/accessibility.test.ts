@@ -165,7 +165,7 @@ describe("humanInitiated distinguishes an approval from background work", () => 
         { capability: "add_order_note", input: { order_id: "10428" } },
       ],
     });
-    runtime.approvePlan(plan.id);
+    runtime.approvePlan(plan.id, { id: "operator-1", name: "Amein", kind: "human" });
     await runtime.commitPlan(plan.id);
 
     expect(completed(events).humanInitiated).toBe(false);

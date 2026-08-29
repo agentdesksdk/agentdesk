@@ -73,7 +73,7 @@ export type AuditEvent =
       risk: RiskLevel;
       at: number;
     }
-  | { kind: "plan_approved"; planId: string; at: number }
+  | { kind: "plan_approved"; planId: string; actor?: Actor; at: number }
   | { kind: "plan_rejected"; planId: string; at: number }
   | {
       kind: "plan_drifted";
@@ -116,12 +116,14 @@ export type AuditEvent =
       kind: "rollback_performed";
       capability: string;
       receiptId: string;
+      actor?: Actor;
       at: number;
     }
   | {
       kind: "receipt_reviewed";
       capability: string;
       receiptId: string;
+      actor?: Actor;
       at: number;
     };
 

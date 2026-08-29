@@ -16,11 +16,19 @@ here so the findings below stay resolvable after the branches are pruned.
 
 Current gates on `2f1f332`: 326 tests passed, all three TypeScript projects typechecked, SDK and both applications built, assembled distribution passed, and the packed SDK imported and executed under plain Node.
 
+The three acting-identity findings below are resolved on the unmerged
+branch `fix/acting-identity`, whose reproduction commit is `32b99db`.
+Record the squash sha in each document and in the table above once it
+lands. Gates on that branch: 333 tests passed, all three TypeScript
+projects typechecked, SDK and both applications built, assembled
+distribution passed, the packed SDK imported and executed under plain
+Node, and the design doc check passed.
+
 | Severity | Status | Finding |
 | --- | --- | --- |
-| P1 | OPEN | [Execution actor changes while the handler is in flight](2026-08-29-p1-execution-actor-changes-mid-flight.md) |
-| P1 | PARTIALLY FIXED | [Human review is attributed to the agent](2026-08-29-p1-human-review-attributed-to-agent.md) |
-| P1 | OPEN | [Plan approval is attributed to the requesting agent](2026-08-29-p1-plan-approval-attributed-to-agent.md) |
+| P1 | RESOLVED | [Execution actor changes while the handler is in flight](2026-08-29-p1-execution-actor-changes-mid-flight.md) |
+| P1 | RESOLVED | [Human review is attributed to the agent](2026-08-29-p1-human-review-attributed-to-agent.md) |
+| P1 | RESOLVED | [Plan approval is attributed to the requesting agent](2026-08-29-p1-plan-approval-attributed-to-agent.md) |
 | P1 | RESOLVED | [Presentation callback failure corrupts a completed write outcome](2026-08-29-p1-presentation-callback-corrupts-write-outcome.md) |
 | P1 | OPEN | [Reset allows in-flight plans and rollbacks to repopulate audit state](2026-08-29-p1-reset-leaks-in-flight-terminal-events.md) |
 | P1 | OPEN | [Single-action approval has no approver identity](2026-08-29-p1-single-action-approval-has-no-approver.md) |

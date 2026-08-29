@@ -147,8 +147,10 @@ export type AgentDeskRuntime = {
     operations: Array<{ capability: string; input?: Record<string, unknown> }>;
     summary?: string;
   }) => Promise<OperationPlan>;
+  /** Refuses unless the resolved approver is a human. */
   approvePlan: (
     planId: string,
+    by?: Actor,
   ) => { ok: true; plan: OperationPlan } | { ok: false; reason: string };
   rejectPlan: (
     planId: string,
@@ -323,6 +325,7 @@ export function createAgentDeskRuntime(options: {
     capability: Capability,
     phase: PresentationPhase,
     input: Record<string, unknown>,
+    actingActor: Actor | undefined,
     execution?: { executionId: string; humanInitiated: boolean },
   ): void {
     const event = resolvePresentation(
@@ -331,7 +334,7 @@ export function createAgentDeskRuntime(options: {
       input,
       context,
       now(),
-      actor,
+      actingActor,
     );
     if (execution) {
       event.executionId = execution.executionId;
@@ -468,7 +471,7 @@ export function createAgentDeskRuntime(options: {
       return policyDenied(capability.name, decision.reason);
     }
 
-    present(capability, "capability_started", input);
+    present(capability, "capability_started", input, actor);
     if (decision.kind === "require_approval") {
       const summary =
         capability.describeApproval?.(input, context) ??
@@ -501,7 +504,7 @@ export function createAgentDeskRuntime(options: {
         summary,
         at: now(),
       });
-      present(capability, "approval_requested", input);
+      present(capability, "approval_requested", input, actor);
       emit();
       return approvalRequired(
         capability.name,
@@ -659,11 +662,16 @@ export function createAgentDeskRuntime(options: {
       execContext.idempotencyKey = idempotencyKey;
     }
 
+    // Read once, before the handler can suspend. A setActor while the
+    // handler is awaiting would otherwise split one execution across two
+    // actors, and nothing downstream could say which one ran it.
+    const actingActor = actor;
+
     audit.append({
       kind: "execution_started",
       capability: capability.name,
       executionId,
-      ...(actor !== undefined ? { actor } : {}),
+      ...(actingActor !== undefined ? { actor: actingActor } : {}),
       at: now(),
     });
     try {
@@ -679,7 +687,7 @@ export function createAgentDeskRuntime(options: {
         kind: "execution_completed",
         capability: capability.name,
         executionId,
-        ...(actor !== undefined ? { actor } : {}),
+        ...(actingActor !== undefined ? { actor: actingActor } : {}),
         at: now(),
       };
       let verification: VerificationResult = { status: "UNSUPPORTED" };
@@ -701,10 +709,10 @@ export function createAgentDeskRuntime(options: {
           verification,
           at: now(),
           ...(planId !== undefined ? { planId } : {}),
-          ...(actor !== undefined ? { executedBy: actor } : {}),
+          ...(actingActor !== undefined ? { executedBy: actingActor } : {}),
         });
       }
-      present(capability, "capability_completed", input, {
+      present(capability, "capability_completed", input, actingActor, {
         executionId,
         humanInitiated,
       });
@@ -744,10 +752,10 @@ export function createAgentDeskRuntime(options: {
         capability: capability.name,
         executionId,
         error: message,
-        ...(actor !== undefined ? { actor } : {}),
+        ...(actingActor !== undefined ? { actor: actingActor } : {}),
         at: now(),
       });
-      present(capability, "capability_failed", input, {
+      present(capability, "capability_failed", input, actingActor, {
         executionId,
         humanInitiated,
       });
@@ -1142,15 +1150,26 @@ export function createAgentDeskRuntime(options: {
       return plan;
     },
 
-    approvePlan(planId) {
+    approvePlan(planId, by) {
+      // An approval is the record that a person authorized this plan.
+      // Falling back to the ambient actor would let the requesting agent
+      // sign off on its own plan, which is the one claim it exists to make.
+      // Checked before the transition is claimed, so a refused approval
+      // cannot strand the plan in APPROVED.
+      const approver = by ?? actor;
+      if (approver === undefined || approver.kind !== "human") {
+        return {
+          ok: false,
+          reason:
+            "a plan approval must name a human authorizer; pass one to approvePlan rather than relying on the acting actor",
+        };
+      }
       const claimed = plans.transition(planId, "DRAFT", "APPROVED");
       if (!claimed) {
         return { ok: false, reason: `plan ${planId} is not awaiting approval` };
       }
-      if (actor !== undefined) {
-        plans.resolve(planId, { approvedBy: actor });
-      }
-      audit.append({ kind: "plan_approved", planId, at: now() });
+      plans.resolve(planId, { approvedBy: approver });
+      audit.append({ kind: "plan_approved", planId, actor: approver, at: now() });
       emit();
       return { ok: true, plan: plans.get(planId)! };
     },
@@ -1321,6 +1340,7 @@ export function createAgentDeskRuntime(options: {
         kind: "receipt_reviewed",
         capability: stored.capability,
         receiptId,
+        actor: reviewer,
         at: now(),
       });
       emit();
@@ -1350,6 +1370,9 @@ export function createAgentDeskRuntime(options: {
               : `${receiptId} is already being rolled back`,
         };
       }
+      // Same capture rule as an execution: the undo belongs to whoever
+      // claimed it, not to whoever happens to be acting when it finishes.
+      const actingActor = actor;
       if (routed.verify) {
         const drift = await runVerification(
           routed,
@@ -1375,6 +1398,7 @@ export function createAgentDeskRuntime(options: {
           kind: "rollback_performed",
           capability: stored.capability,
           receiptId,
+          ...(actingActor !== undefined ? { actor: actingActor } : {}),
           at: now(),
         });
         emit();

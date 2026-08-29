@@ -1,8 +1,20 @@
 # P1: Execution actor changes while the handler is in flight
 
-Status: OPEN
+Status: RESOLVED on `fix/acting-identity`
 
 Reviewed commit: `812e5b9`
+
+Validated: `packages/webmcp/tests/acting-identity.test.ts` passed on
+`fix/acting-identity`, 7 of 7, alongside the full 333-test suite.
+`runExecution` reads the actor once into a local before its first audit
+append and uses it for both execution events, the stored receipt, and the
+presentation event, and `present()` now takes that actor rather than
+closing over the mutable binding. The mid-flight probe that produced the
+evidence below now reports `agent-a` on `execution_started`,
+`execution_completed`, the receipt's `executedBy`, and the
+`capability_completed` presentation event. `rollback` captures the actor at
+the moment its claim succeeds and records it on `rollback_performed`, which
+previously named nobody at all.
 
 ## Finding
 

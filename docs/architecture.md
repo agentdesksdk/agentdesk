@@ -295,6 +295,15 @@ the highest risk across them (`highestRisk`), the `requestedBy` actor, the
 `expectedRevision` the plan was built against, and a `status`.
 `approvePlan` adds `approvedBy`.
 
+`approvePlan(planId, by?)` resolves its approver as `by ?? actor` and
+refuses when that resolves to nothing or to an actor whose `kind` is not
+`"human"`, the same contract `markReviewed(receiptId, by?)` uses. In the
+normal configuration the ambient actor is the agent, so an approval that
+did not name a human would record the requester as its own authorizer. The
+check runs before the DRAFT to APPROVED transition is claimed, so a refused
+approval leaves the plan in DRAFT and callers never mutate ambient actor
+state around an approval click.
+
 ```ts
 import { createAgentDeskRuntime } from "@agentdesk/webmcp";
 
@@ -316,7 +325,7 @@ const plan = await runtime.prepare({
 });
 // plan.status === "DRAFT", plan.risk === "CONSEQUENTIAL"
 
-runtime.approvePlan(plan.id);
+runtime.approvePlan(plan.id, { id: "operator-1", name: "Amein", kind: "human" });
 const committed = await runtime.commitPlan(plan.id);
 if (!committed.ok) {
   console.warn(committed.reason);
@@ -482,12 +491,16 @@ are frozen.
 
 Provenance is split three ways, because one blended actor hides the thing
 an auditor most needs to see. `plan.requestedBy` is who asked, captured at
-`prepare`. `plan.approvedBy` is who authorized, captured at `approvePlan`.
-`receipt.executedBy` is who acted, captured at execution. They differ
-whenever `setActor` is called between those points, and that difference is
-the record. `setActor` clones and deep-freezes what it stores, so a caller
+`prepare`. `plan.approvedBy` is who authorized, named explicitly at
+`approvePlan` and required to be human. `receipt.executedBy` is who acted,
+captured once when the execution starts. `receipt.reviewedBy` is who looked
+afterwards, named explicitly at `markReviewed` and also required to be
+human. The three actor-mutating paths stay independent: approving and
+reviewing take their identity as an argument and never touch the ambient
+actor. `setActor` clones and deep-freezes what it stores, so a caller
 mutating its own object afterwards cannot rewrite history already
-recorded.
+recorded, and an execution reads it once at the start, so a `setActor` while
+a handler is suspended cannot retroactively re-attribute work in flight.
 
 The input is kept for a specific reason. A rollback has to address the same
 entity the original call addressed, and reconstructing that from a change
@@ -502,7 +515,9 @@ concern. Use `subscribeAudit` or export these entries to persist them.
 `rollback(receiptId)` calls the capability's optional
 `rollback(input, ctx, changes)` with the original input and the changes the
 receipt recorded, marks the receipt as rolled back, and appends a
-`rollback_performed` event.
+`rollback_performed` event naming the actor that won the claim. That actor
+is captured at the claim, before the first `await`, for the same reason an
+execution captures its own.
 
 Every receipt carries a `rollbackState` of READY, ROLLING_BACK, or
 ROLLED_BACK. `ReceiptStore.claimRollback` moves READY to ROLLING_BACK and
@@ -547,21 +562,30 @@ rollback returns `{ ok: false, reason }` and the receipt returns to READY.
 
 ### Audit events
 
-Eight event kinds are added to the `AuditEvent` union, all carrying `at`:
+Nine event kinds are added to the `AuditEvent` union, all carrying `at`:
 
 | Kind | Payload beyond `planId` |
 | --- | --- |
 | `plan_prepared` | `operations`, `risk` |
-| `plan_approved` | none |
+| `plan_approved` | `actor`, the human approver |
 | `plan_rejected` | none |
 | `plan_drifted` | `expectedRevision`, `observedRevision` |
 | `plan_committed` | `outcomes` (capability, status, verification) |
 | `plan_partial` | `outcomes` (capability, status, verification) |
 | `plan_failed` | `outcomes` (capability, status, verification) |
-| `rollback_performed` | `capability`, `receiptId` (no `planId`) |
+| `rollback_performed` | `capability`, `receiptId`, `actor` (no `planId`) |
+| `receipt_reviewed` | `capability`, `receiptId`, `actor` (no `planId`) |
 
-The actor appears on `execution_started`, `execution_completed`, and
-`execution_failed`, and nowhere else in the audit log. The other kinds
+Six kinds carry an acting identity, and every one of them uses the same
+optional `actor` field so the stream stays queryable on one key.
+`execution_started`, `execution_completed`, and `execution_failed` name who
+ran the capability, captured once when the execution starts. `plan_approved`
+names the human who authorized the plan. `receipt_reviewed` names the human
+who reviewed the receipt. `rollback_performed` names who claimed the undo.
+The role-specific names live on the plan and the receipt (`requestedBy`,
+`approvedBy`, `executedBy`, `reviewedBy`); the audit stream deliberately
+does not mirror them, because an auditor asking "what did this person do"
+should not have to union four differently named fields. The remaining kinds
 record what the runtime did rather than who asked for it.
 
 They flow through the same `AuditBus` as everything else, so

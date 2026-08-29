@@ -12,6 +12,8 @@ function revision(): string {
   ].join("#");
 }
 
+const OPERATOR = { id: "operator", name: "Operator", kind: "human" as const };
+
 async function startRuntime() {
   const runtime = createAgentDeskRuntime({
     capabilities,
@@ -94,7 +96,7 @@ describe("demo verification and rollback", () => {
         { capability: "refund_shipping", input: { order_id: "10428" } },
       ],
     });
-    expect(runtime.approvePlan(plan.id).ok).toBe(true);
+    expect(runtime.approvePlan(plan.id, OPERATOR).ok).toBe(true);
 
     // Someone else refunds the same order between review and commit.
     await refundHeroOrder(runtime);
@@ -121,7 +123,7 @@ describe("demo verification and rollback", () => {
     expect(plan.risk).toBe("CONSEQUENTIAL");
     expect(plan.operations[0]?.preview.length).toBeGreaterThan(0);
 
-    runtime.approvePlan(plan.id);
+    runtime.approvePlan(plan.id, OPERATOR);
     const committed = await runtime.commitPlan(plan.id);
 
     expect(committed.ok).toBe(true);

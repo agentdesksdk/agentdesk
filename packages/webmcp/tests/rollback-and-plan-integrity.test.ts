@@ -6,6 +6,8 @@ import { createMockModelContext } from "./mock-model-context.ts";
 
 type Store = { value: number; rollbackCalls: number };
 
+const APPROVER = { id: "operator-1", name: "Amein", kind: "human" as const };
+
 function ledgerCapability(store: Store) {
   return defineCapability({
     name: "set_value",
@@ -110,7 +112,7 @@ describe("a committed plan means the work actually happened", () => {
     await runtime.start();
 
     const plan = await runtime.prepare({ operations: [{ capability: "set_value" }] });
-    runtime.approvePlan(plan.id);
+    runtime.approvePlan(plan.id, APPROVER);
     store.value = 5;
 
     const committed = await runtime.commitPlan(plan.id);
@@ -146,7 +148,7 @@ describe("a committed plan means the work actually happened", () => {
     await runtime.start();
 
     const plan = await runtime.prepare({ operations: [{ capability: "set_value" }] });
-    runtime.approvePlan(plan.id);
+    runtime.approvePlan(plan.id, APPROVER);
 
     const committed = await runtime.commitPlan(plan.id);
 
@@ -158,7 +160,7 @@ describe("a committed plan means the work actually happened", () => {
     const store: Store = { value: 0, rollbackCalls: 0 };
     const runtime = await ledgerRuntime(store);
     const plan = await runtime.prepare({ operations: [{ capability: "set_value" }] });
-    runtime.approvePlan(plan.id);
+    runtime.approvePlan(plan.id, APPROVER);
     await runtime.commitPlan(plan.id);
 
     const outcome = runtime.getPlan(plan.id)?.outcomes?.[0];
@@ -174,7 +176,7 @@ describe("provenance survives a change of actor", () => {
     const runtime = await ledgerRuntime(store);
 
     const plan = await runtime.prepare({ operations: [{ capability: "set_value" }] });
-    runtime.approvePlan(plan.id);
+    runtime.approvePlan(plan.id, APPROVER);
     runtime.setActor({ id: "actor-b", name: "B", kind: "agent" });
     await runtime.commitPlan(plan.id);
 
