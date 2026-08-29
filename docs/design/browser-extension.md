@@ -82,13 +82,70 @@ anything reachable there is assumed tampered. MAIN registers and relays.
 It never evaluates policy, holds the audit log, or decides what is
 consequential.
 
+## Two enforcement modes
+
+The extension cannot enforce uniformly across every capability on a page,
+and an earlier draft of this document assumed it could. A tool the site
+registered imperatively has no removal handle the extension can reach.
+`removeAttribute` retires a form-derived tool because the attribute is in
+the DOM the content script shares. Nothing equivalent exists for a tool
+registered through `document.modelContext.registerTool` by page script.
+The extension can enumerate and invoke that tool. It cannot retire it,
+rename it, or stand in front of it.
+
+So every capability carries a mode, and the mode decides which guarantees
+AgentDesk is allowed to claim.
+
+| Mode | Registration owner | AgentDesk can enforce | AgentDesk cannot |
+| --- | --- | --- | --- |
+| `owned` | AgentDesk | Virtualization, policy, approval, audit | — |
+| `augment` | The website | Discovery, guidance, its own audit of its own calls | Hiding, interception, exclusive approval |
+
+`owned` covers declarative tools the extension authored by attribute
+injection and, if the registration experiment passes, imperative tools it
+registered. `augment` covers everything the page registered itself.
+
+In `augment` mode the agent sees the site's tools alongside AgentDesk's.
+The honest claim is that AgentDesk adds a governed path and a record of
+what it did, not that it is the only path. Any UI that implies otherwise
+is lying to the operator. The inspector must label augmented origins as
+such.
+
 ## Capability sources
 
-**Native WebMCP already on the page.** Discovered with `getTools()`. The
-site's author declared these, so they are the highest-trust source, and
-AgentDesk adds routing, policy, and audit only. Parse `inputSchema`; in
-Chrome 152 it comes back as a JSON string rather than the object the IDL
-declares.
+**Native WebMCP already on the page.** Discovered with `getTools()`.
+Always `augment` mode. Parse `inputSchema`; in Chrome 152 it comes back
+as a JSON string rather than the object the IDL declares.
+
+The site's author declared these, which makes them authoritative about
+the site's own mechanics and says nothing about whether their text is
+safe to feed a model. Provenance is not one axis, and collapsing it into
+"highest trust" was the earlier draft's mistake. Four independent
+dimensions:
+
+```ts
+type CapabilityProvenance = {
+  /** Where the declaration came from. */
+  sourceKind: "native" | "declarative" | "inferred" | "authored";
+  /** How much the source knows about what the operation means. */
+  semanticProvenance: "declared" | "contract" | "structural" | "observed";
+  /** Who runs it, and therefore who can enforce a gate on it. */
+  executionOwnership: "agentdesk" | "page" | "browser";
+  /** Descriptions and outputs are attacker-controlled until proven otherwise. */
+  contentTrust: "untrusted";
+};
+```
+
+`contentTrust` has one value on purpose. A tool description and a tool
+result are page-authored strings on their way into a model's context, so
+they are untrusted on every source including native. The runtime already
+carries this as `untrustedContentHint` on a capability. The extension
+sets it for every discovered tool without exception.
+
+The dimensions move independently. A native tool is `sourceKind: native`,
+`semanticProvenance: declared`, `executionOwnership: page`, and still
+untrusted content. That combination is precisely why it is high quality
+and unenforceable at the same time.
 
 **Declarative, by attribute injection.** Measured working. The scanner
 finds a form, derives a name and description, sets `toolname` and
@@ -125,6 +182,40 @@ adds no approval card. The cost is that the call blocks, and that cost is
 disclosed in the tool description rather than hidden, so a client knows
 the call will not return promptly.
 
+### Completion accounting
+
+Ceding the gate does not cede the record. If AgentDesk logs only what the
+agent asked for, the audit proves what was filled and not what a human
+ultimately submitted, and those differ exactly when it matters. A person
+who corrects the amount from 5000 to 50 before submitting, or who
+abandons the form, leaves an audit saying 5000 was requested and nothing
+saying what happened next.
+
+So a form-derived capability records three events, not one.
+
+| Event | Source | Recorded |
+| --- | --- | --- |
+| `filled` | Our own `executeTool` call | The values the agent supplied |
+| `submitted` | `submit` listener on the form | The values actually in the fields at submit |
+| `abandoned` | Navigation or teardown with no submit | That the call never completed |
+
+The submitted values come from reading the form's own elements in the
+`submit` handler rather than from the agent's input, because the point is
+to capture the human's edit. Listen in the capture phase so a handler
+that calls `preventDefault` does not hide the event, and treat a
+`submit` event whose `defaultPrevented` is true as intent rather than
+completion, since the page may be running its own validation.
+
+Activation matters too. A tool call sits pending until the human acts, so
+the extension records when the form was focused or otherwise activated.
+A call that was never activated is a different failure from one that was
+activated and rejected, and the operator reviewing an audit needs to tell
+them apart.
+
+None of this is inferable after the fact, which is why it belongs in the
+first milestone that ships a declarative form rather than in a later
+audit pass.
+
 For imperative capabilities the extension authored, AgentDesk's two-phase
 approval applies normally, because the extension controls execution.
 
@@ -144,11 +235,45 @@ a site integrated AgentDesk or not. It also avoids the failure the
 proposal correctly identifies, where scanning a CRM yields 117 tools and
 recreates the context problem AgentDesk exists to solve.
 
-Inferred capabilities route exactly like authored ones. That works today
-without modification: `Capability.execute` is an arbitrary function, and
-the runtime already accepts an injectable `adapter`. Only four files in
-`packages/webmcp/src` reference the adapter at all, so the `@agentdesk/core`
-extraction this needs is closer to a rename than a rewrite.
+**This holds in `owned` mode only.** "Never the generated catalog" is a
+statement about what AgentDesk registers, not about what the agent can
+see. On an `augment` origin the site's own tools stay listed next to
+these four, because the extension has no way to withdraw them. The
+reduction is real for everything AgentDesk owns and is not a promise
+about the page as a whole.
+
+Inferred capabilities route exactly like authored ones, because
+`Capability.execute` is an arbitrary function and the runtime accepts an
+injectable adapter.
+
+The `@agentdesk/core` extraction that follows is real refactoring, and an
+earlier draft understated it. The adapter is referenced in four files,
+which is where the "rename" reading came from, but the runtime does not
+merely reference it. `createAgentDeskRuntime` constructs the concrete
+WebMCP adapter as its default and then constructs the tool surface around
+it, so the WebMCP provider role is wired in by construction rather than
+injected at a boundary.
+
+```ts
+type CapabilityProvider = {
+  readonly kind: "webmcp" | "extension";
+  readonly supported: boolean;
+  start(surface: ToolSurface): Promise<void>;
+  stop(): Promise<void>;
+};
+```
+
+The interface comes first and the extraction follows it. Until the
+runtime takes a `CapabilityProvider` rather than building one, the native
+SDK and the extension cannot share governance, and any document claiming
+they already do is describing an intention.
+
+<!-- code-anchors
+packages/webmcp/src/runtime.ts createWebMcpAdapter ToolSurfaceManager
+packages/webmcp/src/capability.ts untrustedContentHint RiskLevel
+packages/webmcp/src/webmcp-adapter.ts createWebMcpAdapter
+-->
+
 
 ## Risk defaults
 
@@ -159,6 +284,13 @@ the page actually declares.
 A classifier may propose that a button looks safe. Policy decides whether
 it runs. Those are different components and the model is never the second
 one.
+
+The two axes are the same ones `auto-sdk.md` defines. `mutability` says
+whether the operation changes state and `consequence` says whether a human
+has to see it first, and only the second one gates. `WRITE` does not stop
+for a human in this runtime, so an inferred mutation is CONSEQUENTIAL
+rather than `WRITE`. Nothing the extension infers may be downgraded by
+inference; a downgrade needs an origin-level override a person wrote.
 
 ## Permissions
 
@@ -193,13 +325,21 @@ shim if it is needed.
 
 ```ts
 export default defineContentScript({
-  matches: ["<all_urls>"],
+  matches: [],
   registration: "runtime",
   runAt: "document_idle",
   world: "ISOLATED",
   async main(ctx) { /* core boots here */ },
 });
 ```
+
+`matches` is deliberately empty. WXT's `registration: "runtime"` omits the
+script from the manifest's `content_scripts` and copies whatever `matches`
+holds into `host_permissions`, so writing `["<all_urls>"]` here would
+request broad host access at install and contradict the permission model
+above. An earlier draft did exactly that, and the contradiction is the
+reason this note exists. The real match list is supplied per origin at
+`browser.scripting.registerContentScripts` time, after a grant.
 
 Values are snake_case (`document_idle`) even though the option names are
 camelCase. A `world: "MAIN"` entrypoint's `main()` receives no `ctx`.
@@ -243,19 +383,51 @@ installing the SDK.
 
 ## Sequencing, and what I would not do
 
-I would not build this before the hackathon submission. It is the most
-interesting product here and the most dangerous, since it operates inside
-authenticated sessions with inferred semantics. It deserves a security
-review, not a deadline. Deployment, the compatibility matrix, and the
-video are worth more this week.
+This is the most interesting product here and the most dangerous, since it
+operates inside authenticated sessions with inferred semantics. The gate
+on building it is a security review, not a date.
 
 I would not build the signed adapter registry in v1. Signing,
 distribution, revocation, and trust roots are a product on their own. Ship
 built-in adapters in the extension bundle, versioned with the extension,
 and let a registry follow once inference has proven worth curating.
 
-The first milestone worth anything is narrow. Run the ISOLATED
-registration experiment. Then one origin, opt-in, forms only, no
-imperative generation, no MAIN world, bootstrap contract registered, audit
-visible. That tests every load-bearing assumption here and is cheap to
-throw away if Chrome 153 changes the declarative behaviour.
+## The first milestone branches on the experiment
+
+The first milestone cannot be stated as a single deliverable, because an
+earlier draft promised one that contradicts itself. It listed "forms
+only, no MAIN world" together with "bootstrap contract registered", and
+those cannot both hold. Attribute injection registers form tools. The
+four `agentdesk_*` tools are imperative, so they need
+`document.modelContext.registerTool` from somewhere, which is the exact
+question the experiment exists to answer.
+
+Run the experiment first, then take the branch it selects.
+
+| Result | Milestone 1 delivers | Bootstrap virtualization |
+| --- | --- | --- |
+| ISOLATED registration works | One origin, opt-in, forms plus the four bootstrap tools registered from the trusted core, audit visible | Promised, `owned` mode |
+| ISOLATED fails, MAIN acceptable | The same, with registration relayed through a minimal MAIN-world courier that decides nothing | Promised, `owned` mode, with the courier's tamper exposure documented |
+| ISOLATED fails, MAIN excluded | One origin, opt-in, declarative forms only, completion accounting, audit visible | Not promised, and not implied anywhere in the UI |
+
+The third row is a real product, not a failure state. Declarative forms
+with honest completion accounting on an `augment` origin still beat no
+governance at all. What it must not do is claim a reduced tool surface it
+cannot deliver.
+
+Each branch is cheap to throw away if Chrome 153 changes the declarative
+behaviour, which is the point of sizing the milestone this way.
+
+### Gates
+
+Milestone 1 is done when all of these hold on one real origin.
+
+- The registration experiment has a written result in
+  `declarative-webmcp-findings.md`, pass or fail.
+- No host permission is requested at install, verified by reading the
+  built `manifest.json`.
+- A form-derived call produces `filled`, `submitted`, and `abandoned`
+  records, with submitted values read from the form rather than from the
+  agent's input.
+- Every discovered capability carries all four provenance dimensions, and
+  the inspector shows the origin's mode.
