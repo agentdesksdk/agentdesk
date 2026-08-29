@@ -87,7 +87,7 @@ document.modelContext.registerTool(...)
 | `approval.ts` | `ApprovalManager`: pending actions and resolved records |
 | `audit.ts` | `AuditBus` and the audit event union |
 | `plan.ts` | `PlanStore`, `OperationPlan`, plan statuses, `Actor`, `VerificationResult` |
-| `receipts.ts` | `ReceiptStore`, the queryable history of what changed, with actor and plan |
+| `receipts.ts` | `ReceiptStore`, the queryable history of what changed, with the executing actor, plan, and rollback state |
 | `results.ts` | Structured tool results (`TOOL_RETIRED`, `APPROVAL_REQUIRED`, `CAPABILITY_UNAVAILABLE`) |
 | `tool-surface.ts` | Reconciliation, AbortController lifecycle, tombstones, schema-byte accounting |
 | `runtime.ts` | The pipeline, bootstrap tools, exposure modes, snapshots |
@@ -123,12 +123,21 @@ than throwing when a method is absent.
 
 Every execution gets an `executionId` that correlates its
 `execution_started`, `execution_completed`, and `execution_failed` audit
-events. The handler receives an `ExecutionContext`: the app context plus
-`signal`, `executionId`, and any `idempotencyKey`.
+events. It also lands on the stored receipt and on the plan's
+`OperationOutcome`, so a planned operation, its receipt, and its audit
+records all point at each other. Those three audit events also carry the
+acting `actor`. The handler receives an `ExecutionContext`: the app
+context plus `signal`, `executionId`, and any `idempotencyKey`.
 
 The signal is the client's WebMCP execution signal linked with a runtime
 lifecycle signal, so a handler aborts when either the client cancels or the
 operator calls `stop()`/`reset()`.
+
+`reset()` returns the runtime to its started-but-empty state. It ends the
+epoch, clears approvals, idempotency, plans, receipts, routing, and audit,
+and reconciles the tool surface. Nothing accumulated before the reset
+survives it. `stop()` is narrower and clears only approvals and the tool
+surface.
 
 **Abort does not roll anything back.** A signal is a request to stop, not a
 transaction boundary. If a handler already issued its write, aborting after
@@ -268,9 +277,9 @@ that only make sense together, and a human should read them as one unit.
 That unit is a *plan*. A plan is versioned, so the authorization stays tied
 to the state the human actually reviewed.
 
-Three artifacts sit behind this section. The plan says what will happen.
-The verification says whether it did happen. The receipt history says who
-made it happen and lets it be undone.
+Three artifacts sit behind this section. The plan says what will happen and
+who asked for it. The verification says whether it did happen. The receipt
+history says who made it happen and lets it be undone.
 
 ### Versioned operation plans
 
@@ -282,8 +291,9 @@ call is refused with `PREVIEW_UNAVAILABLE`. Approving blind is worse than
 failing.
 
 The returned `OperationPlan` carries the operations with their previews,
-the highest risk across them (`highestRisk`), the acting `actor`, the
+the highest risk across them (`highestRisk`), the `requestedBy` actor, the
 `expectedRevision` the plan was built against, and a `status`.
+`approvePlan` adds `approvedBy`.
 
 ```ts
 import { createAgentDeskRuntime } from "@agentdesk/webmcp";
@@ -313,11 +323,11 @@ if (!committed.ok) {
 }
 ```
 
-Seven statuses, moved only by the runtime:
+Eight statuses, moved only by the runtime:
 
 ```text
 DRAFT ──approvePlan──▶ APPROVED ──commitPlan──▶ COMMITTING ──▶ COMMITTED
-  │                        │                         │
+  │                        │                         ├─▶ PARTIAL
   │                        │                         └─▶ FAILED
   │                        └─ revision moved ──────────▶ DRIFTED
   └──rejectPlan──▶ REJECTED (zero side effects)
@@ -333,8 +343,25 @@ gates a single approval uses, minus the approval itself, which the plan
 already carries: policy, context availability, `checkInput`, schema
 validation, then the same `executeNow` that `approve()` calls. An operation
 blocked by one of those gates is recorded as `SKIPPED` with the reason and
-does not stop the rest. Any `FAILED` operation makes the plan `FAILED`.
-Outcomes land on `plan.outcomes`.
+does not stop the rest. Outcomes land on `plan.outcomes`, each carrying the
+`executionId` of the execution it ran.
+
+The terminal status is resolved from those outcomes in one pass.
+
+- Any `FAILED` outcome makes the plan `FAILED`, and `commitPlan` returns
+  `{ ok: false }`.
+- Otherwise, every outcome `COMPLETED` with no `MISMATCH` verification
+  makes the plan `COMMITTED`, and `commitPlan` returns `{ ok: true }`.
+- Otherwise the plan is `PARTIAL`, and `commitPlan` returns
+  `{ ok: false }`.
+
+`COMMITTED` is a claim that the work happened, so a plan only earns it by
+running everything and having nothing disproved. `PARTIAL` covers an
+all-skipped plan, a partly-skipped plan, and a plan carrying a `MISMATCH`.
+The refusal reason names the skipped capabilities and the mismatched ones
+separately, so a caller can tell "nothing ran" from "it ran and
+verification disproved it". `UNSUPPORTED` verification does not block
+success, since most capabilities declare no verifier and that is normal.
 
 Reusing the single-approval execute path is the point, not a convenience.
 A second execution mechanism would be a second place for the gates to sit,
@@ -425,7 +452,9 @@ plain value is recorded as `UNSUPPORTED` even if the capability declares
 `verify`.
 
 The result rides on the stored receipt and, for planned work, on the
-operation outcome and the `plan_committed` audit event.
+operation outcome and the `plan_committed`, `plan_partial`, or
+`plan_failed` audit event. Verification is also what a rollback re-runs
+before it undoes anything.
 
 ### Receipt history
 
@@ -443,12 +472,22 @@ runtime.queryReceipts({
 });
 ```
 
-Every filter is optional and they combine as an AND. Results come back
-newest first, and `limit` applies after ordering. Each `StoredReceipt`
-carries the acting actor when one was set, the originating `planId` when
-the write came from a committed plan, the exact input the capability ran
-with, the handler's receipt, the verification result, and a timestamp.
-Stored entries are frozen.
+Every filter is optional and they combine as an AND. `actorId` matches
+`executedBy.id`. Results come back newest first, and `limit` applies after
+ordering. Each `StoredReceipt` carries `executedBy` when an actor was set,
+the originating `planId` when the write came from a committed plan, the
+exact input the capability ran with, the handler's receipt, the
+verification result, a `rollbackState`, and a timestamp. Stored entries
+are frozen.
+
+Provenance is split three ways, because one blended actor hides the thing
+an auditor most needs to see. `plan.requestedBy` is who asked, captured at
+`prepare`. `plan.approvedBy` is who authorized, captured at `approvePlan`.
+`receipt.executedBy` is who acted, captured at execution. They differ
+whenever `setActor` is called between those points, and that difference is
+the record. `setActor` clones and deep-freezes what it stores, so a caller
+mutating its own object afterwards cannot rewrite history already
+recorded.
 
 The input is kept for a specific reason. A rollback has to address the same
 entity the original call addressed, and reconstructing that from a change
@@ -465,24 +504,50 @@ concern. Use `subscribeAudit` or export these entries to persist them.
 receipt recorded, marks the receipt as rolled back, and appends a
 `rollback_performed` event.
 
-It refuses in three cases, each with a reason string rather than a silent
-no-op: an unknown receipt id, a receipt that was already rolled back, and a
-capability that declares no `rollback`. The third message says the
-capability does not support rollback. Most applications cannot undo, and
-saying so plainly is better than a compensating action the SDK invented.
+Every receipt carries a `rollbackState` of READY, ROLLING_BACK, or
+ROLLED_BACK. `ReceiptStore.claimRollback` moves READY to ROLLING_BACK and
+returns false otherwise. It is the receipt-side twin of
+`PlanStore.transition`, and the runtime wins it synchronously before its
+first `await`. That is what makes it atomic on a single-threaded event
+loop. Two concurrent undos of one receipt therefore reach the compensating
+action once, and the loser is told the rollback is already in flight.
+
+A rollback that fails releases its claim back to READY. A compensating
+action that could not run is a retry, not a dead end.
+
+Before calling the handler, the runtime re-runs the capability's `verify`
+against the receipt's stored input and changes. Anything other than
+`VERIFIED` releases the claim and refuses with a conflict, because the
+application state no longer matches what the receipt described and undoing
+it would overwrite a later change. A verifier that throws counts as a
+conflict too. Undo is destructive, and unknown state is not safe to
+overwrite.
+
+**A capability with no verifier gets none of that protection.** The runtime
+cannot detect drift it has no way to read, so the rollback proceeds. Any
+capability that wants a safe undo has to declare `verify`.
+
+It refuses in five cases, each with a reason string rather than a silent
+no-op. An unknown receipt id. A capability that declares no `rollback`. A
+receipt already rolled back. A receipt whose rollback is already in
+flight. And a verification conflict.
 
 Handing the recorded `changes` to the rollback is what makes it more than a
 guess. The demo's `refund_shipping` restores the invoice status from the
 `before` value in the receipt and deletes the specific credit id the
-receipt named, rather than assuming what the prior state must have been.
+receipt named, rather than assuming what the prior state must have been. It
+also carries its own guard for the state the SDK verifier does not cover.
+Inside one `mutate`, it confirms the invoice status still equals the
+receipt's `after` value and the named credit still exists, then writes.
+A conflict throws and names what moved.
 
 Rollback is a capability-authored compensating action, not a transaction.
-It runs through the capability, not around it, and it can fail; a throwing
-rollback returns `{ ok: false, reason }` and the receipt is not marked.
+It runs through the capability, not around it, and it can fail. A throwing
+rollback returns `{ ok: false, reason }` and the receipt returns to READY.
 
 ### Audit events
 
-Seven event kinds are added to the `AuditEvent` union, all carrying `at`:
+Eight event kinds are added to the `AuditEvent` union, all carrying `at`:
 
 | Kind | Payload beyond `planId` |
 | --- | --- |
@@ -491,13 +556,19 @@ Seven event kinds are added to the `AuditEvent` union, all carrying `at`:
 | `plan_rejected` | none |
 | `plan_drifted` | `expectedRevision`, `observedRevision` |
 | `plan_committed` | `outcomes` (capability, status, verification) |
+| `plan_partial` | `outcomes` (capability, status, verification) |
 | `plan_failed` | `outcomes` (capability, status, verification) |
 | `rollback_performed` | `capability`, `receiptId` (no `planId`) |
 
+The actor appears on `execution_started`, `execution_completed`, and
+`execution_failed`, and nowhere else in the audit log. The other kinds
+record what the runtime did rather than who asked for it.
+
 They flow through the same `AuditBus` as everything else, so
 `subscribeAudit` delivers them and `getSnapshot().audit` includes them with
-no special handling. The demo's `ActivityPanel` does not render them yet;
-it switches on a fixed set of kinds and ignores the rest.
+no special handling. The demo's `ActivityPanel` renders every kind. Its
+`switch` ends in a `never`-typed default, so a new kind fails to compile
+until it gets a case rather than vanishing from the panel.
 
 ## Presentation is separate from audit and from execution
 

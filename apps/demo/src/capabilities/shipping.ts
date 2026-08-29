@@ -207,12 +207,24 @@ export const shippingCapabilities: Capability[] = [
         typeof creditChange?.after === "string"
           ? creditChange.after.split(" ")[0]
           : undefined;
+      // Checked and written inside one mutate so nothing can move between
+      // reading the current state and overwriting it.
       mutate((draft) => {
+        const invoice = draft.invoices.find((i) => i.orderId === order.id);
+        if (invoiceChange && invoice && invoice.status !== invoiceChange.after) {
+          throw new Error(
+            `Invoice ${invoice.id} is now ${invoice.status}, not ${String(invoiceChange.after)} as the receipt recorded; something else changed it.`,
+          );
+        }
+        if (creditId && !draft.credits.some((c) => c.id === creditId)) {
+          throw new Error(
+            `Credit ${creditId} is already gone, so this refund has been reversed elsewhere.`,
+          );
+        }
         const target = draft.orders.find((o) => o.id === order.id);
         if (target) {
           target.shippingRefunded = false;
         }
-        const invoice = draft.invoices.find((i) => i.orderId === order.id);
         if (invoice && typeof invoiceChange?.before === "string") {
           invoice.status = invoiceChange.before as Invoice["status"];
         }

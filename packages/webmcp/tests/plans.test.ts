@@ -97,7 +97,7 @@ describe("versioned operation plans", () => {
     expect(plan.operations).toHaveLength(2);
     expect(plan.risk).toBe("CONSEQUENTIAL");
     expect(plan.expectedRevision).toBe("rev-1");
-    expect(plan.actor?.id).toBe("agent-1");
+    expect(plan.requestedBy?.id).toBe("agent-1");
     expect(ledger.log).toEqual([]);
   });
 
@@ -236,8 +236,12 @@ describe("versioned operation plans", () => {
     ledger.refunded = true;
 
     const committed = await runtime.commitPlan(plan.id);
-    expect(committed.ok).toBe(true);
+    expect(committed.ok).toBe(false);
+    if (!committed.ok) {
+      expect(committed.reason).toContain("refund_shipping");
+    }
     expect(ledger.log).toEqual(["note"]);
+    expect(runtime.getPlan(plan.id)?.status).toBe("PARTIAL");
     const outcomes = runtime.getPlan(plan.id)?.outcomes ?? [];
     expect(outcomes[0]?.status).toBe("SKIPPED");
     expect(outcomes[0]?.detail).toContain("ALREADY_REFUNDED");
@@ -330,7 +334,7 @@ describe("receipt history and provenance", () => {
     const all = runtime.queryReceipts();
     expect(all).toHaveLength(2);
     for (const entry of all) {
-      expect(entry.actor?.id).toBe("agent-1");
+      expect(entry.executedBy?.id).toBe("agent-1");
       expect(entry.planId).toBe(plan.id);
     }
     expect(runtime.queryReceipts({ capability: "refund_shipping" })).toHaveLength(1);
@@ -344,7 +348,7 @@ describe("receipt history and provenance", () => {
     runtime.setActor({ id: "human-7", name: "Amein", kind: "human" });
     await runtime.invoke("add_order_note", {});
 
-    expect(runtime.queryReceipts()[0]?.actor).toMatchObject({
+    expect(runtime.queryReceipts()[0]?.executedBy).toMatchObject({
       id: "human-7",
       kind: "human",
     });
