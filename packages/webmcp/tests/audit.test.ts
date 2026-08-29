@@ -445,9 +445,47 @@ describe("client cancellation, disposal, and origin filtering", () => {
       origin: "https://a.example",
     };
     await client.callTool(tool, {}, { signal: controller.signal });
-    expect(executeTool).toHaveBeenCalledWith(tool, {}, {
+    expect(executeTool).toHaveBeenCalledWith(tool, "{}", {
       signal: controller.signal,
     });
+  });
+
+  it("serializes input, matching what shipped Chrome accepts", async () => {
+    const executeTool = vi.fn(async (_t: unknown, input: unknown) => {
+      if (typeof input !== "string") {
+        throw new Error("Failed to parse input arguments");
+      }
+      return `got ${input}`;
+    });
+    const client = createWebMcpClient(
+      fakeModelContext({ executeTool }) as never,
+    );
+    const tool: RegisteredTool = {
+      name: "hello",
+      description: "d",
+      origin: "https://a.example",
+    };
+    const result = await client.callTool(tool, { name: "Native" });
+    expect(result).toEqual({ ok: true, output: 'got {"name":"Native"}' });
+  });
+
+  it("falls back to the object form for a spec-conformant implementation", async () => {
+    const executeTool = vi.fn(async (_t: unknown, input: unknown) => {
+      if (typeof input === "string") {
+        throw new Error("expects an object");
+      }
+      return "object accepted";
+    });
+    const client = createWebMcpClient(
+      fakeModelContext({ executeTool }) as never,
+    );
+    const tool: RegisteredTool = {
+      name: "hello",
+      description: "d",
+      origin: "https://a.example",
+    };
+    const result = await client.callTool(tool, { name: "Native" });
+    expect(result).toEqual({ ok: true, output: "object accepted" });
   });
 
   it("reports an aborted call as a structured failure", async () => {

@@ -87,6 +87,7 @@ export {
   approvalRequired,
   capabilityUnavailable,
   executionCancelled,
+  idempotencyCapacity,
   idempotencyConflict,
   policyDenied,
   previewUnavailable,

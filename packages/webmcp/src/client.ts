@@ -27,7 +27,7 @@ export type WebMcpClient = {
   >;
   callTool: (
     tool: RegisteredTool,
-    input?: object,
+    input?: object | string,
     options?: { signal?: AbortSignal },
   ) => Promise<{ ok: true; output: string } | { ok: false; reason: string }>;
   onToolChange: (listener: () => void) => () => void;
@@ -64,16 +64,33 @@ export function createWebMcpClient(
           reason: "executeTool is not available in this browser",
         };
       }
+      const callOptions = options?.signal ? { signal: options.signal } : undefined;
+      // The spec types inputObject as `object` and serializes it
+      // internally, but Chrome 152 rejects an object with "Failed to parse
+      // input arguments" and requires a pre-serialized JSON string
+      // (observed 2026-08-29). Send the string, then fall back to the
+      // object so a spec-conformant implementation also works.
+      const serialized =
+        typeof input === "string" ? input : JSON.stringify(input ?? {});
       try {
-        // The spec serializes inputObject internally; pass a plain object.
-        const output = await native.executeTool(
-          tool,
-          input,
-          options?.signal ? { signal: options.signal } : undefined,
-        );
-        return { ok: true, output };
-      } catch (err) {
-        return { ok: false, reason: describe(err) };
+        return {
+          ok: true,
+          output: await native.executeTool(tool, serialized, callOptions),
+        };
+      } catch (stringErr) {
+        // A cancelled call must not be retried, and a caller who supplied
+        // their own string gets their error verbatim.
+        if (typeof input === "string" || options?.signal?.aborted) {
+          return { ok: false, reason: describe(stringErr) };
+        }
+        try {
+          return {
+            ok: true,
+            output: await native.executeTool(tool, input, callOptions),
+          };
+        } catch {
+          return { ok: false, reason: describe(stringErr) };
+        }
       }
     },
 

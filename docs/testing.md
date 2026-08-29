@@ -4,7 +4,7 @@
 
 ```bash
 pnpm install
-pnpm test        # SDK (115 tests) + demo (96 tests)
+pnpm test        # SDK (130) + P0 startup (4) + demo (96)
 pnpm typecheck   # strict TS across all packages
 pnpm build       # SDK build + P0 + demo static build + site assembly
 pnpm test:pack   # packs the SDK and imports it under plain Node
@@ -91,22 +91,49 @@ recorded below.
 Do not fill a cell without actually observing the behavior.
 
 **Codex in-app browser: complete.** Native WebMCP was exposed at
-`http://127.0.0.1:4177/p0/` and the full checklist ran there. ChatGPT and
-Chrome remain unverified; nobody has run them.
+`http://127.0.0.1:4177/p0/` and the full checklist ran there.
 
-| Test | Codex in-app browser | ChatGPT in-app browser | Chrome 149+ WebMCP |
+**Chrome 152: complete.** The same page was driven over CDP against a real
+`document.modelContext`, covering the consumer surface (`getTools`,
+`executeTool`) the Codex run did not reach. ChatGPT remains unverified;
+nobody has run it.
+
+| Test | Codex in-app browser | Chrome 152 | ChatGPT in-app browser |
 | --- | --- | --- | --- |
-| Bootstrap tools discovered | ✅ four bootstrap tools | ⬜ | ⬜ |
-| `find_capabilities({query:"hello"})` | ✅ registered `hello_dynamic_tool`, `ping`, `request_demo_approval` | ⬜ | ⬜ |
-| Dynamic call | ✅ `{"greeting":"Hello, Audit!","deterministic":true}` | ⬜ | ⬜ |
-| New native tool discovered immediately | ⚠️ registered immediately, callable after the client refreshed its tool snapshot | ⬜ | ⬜ |
-| Discovered on next turn | ✅ | ⬜ | ⬜ |
-| Retired tool behavior | ✅ structured `TOOL_RETIRED` | ⬜ | ⬜ |
-| Same-name re-registration | ✅ `{"greeting":"Hello, Codex!","deterministic":true}` | ⬜ | ⬜ |
-| `invoke_capability` fallback | ✅ `invoke_capability({name:"ping"})` returned `pong` | ⬜ | ⬜ |
-| Approval flow | ✅ immediate `APPROVAL_REQUIRED`, `APR-1001` | ⬜ | ⬜ |
-| Approval status after approving | ✅ `APPROVED_EXECUTED` | ⬜ | ⬜ |
-| Browser console | ✅ no warnings or errors | ⬜ | ⬜ |
+| Bootstrap tools discovered | ✅ four bootstrap tools | ✅ four bootstrap tools | ⬜ |
+| `find_capabilities({query:"hello"})` | ✅ registered `hello_dynamic_tool`, `ping`, `request_demo_approval` | ✅ `hello_dynamic_tool` added to the native surface | ⬜ |
+| Dynamic call | ✅ `{"greeting":"Hello, Audit!","deterministic":true}` | ✅ via `executeTool`, `{"greeting":"Hello, Native!","deterministic":true}` | ⬜ |
+| New native tool discovered immediately | ⚠️ registered immediately, callable after the client refreshed its tool snapshot | ✅ `getTools()` returned it in the same turn | ⬜ |
+| Discovered on next turn | ✅ | ✅ | ⬜ |
+| Retired tool behavior | ✅ structured `TOOL_RETIRED` | ✅ structured `CAPABILITY_UNAVAILABLE` / `CAPABILITY_RETIRED` | ⬜ |
+| Same-name re-registration | ✅ `{"greeting":"Hello, Codex!","deterministic":true}` | ✅ re-registered under the same name | ⬜ |
+| `invoke_capability` fallback | ✅ `invoke_capability({name:"ping"})` returned `pong` | ✅ returned `pong` | ⬜ |
+| Approval flow | ✅ immediate `APPROVAL_REQUIRED`, `APR-1001` | ✅ immediate `APPROVAL_REQUIRED`, evidence `summary` | ⬜ |
+| Approval status after approving | ✅ `APPROVED_EXECUTED` | ✅ handler ran only after approval | ⬜ |
+| Browser console | ✅ no warnings or errors | ✅ no warnings or errors | ⬜ |
+| `getTools()` | not exercised | ✅ 7 tools with `origin` `http://127.0.0.1:4177` | ⬜ |
+| `executeTool()` | not exercised | ⚠️ requires a JSON **string**; a plain object throws | ⬜ |
+
+### Chrome 152 divergence from the spec IDL
+
+Observed 2026-08-29 on Chrome 152.0.0.0 (Windows) at
+`http://127.0.0.1:4177/p0/`, with `registerTool`, `getTools`, and
+`executeTool` all present.
+
+The spec types `executeTool`'s second argument as `object inputObject` and
+serializes it internally. Chrome 152 rejects an object:
+
+```text
+executeTool(tool, {})                        → UnknownError: Failed to parse input arguments
+executeTool(tool, undefined)                 → UnknownError: Failed to parse input arguments
+executeTool(tool, "{}")                      → {"content":[{"type":"text","text":"pong"}]}
+executeTool(tool, '{"name":"Native"}')       → {"content":[{"type":"text","text":"{\"greeting\":\"Hello, Native!\"…
+```
+
+`createWebMcpClient` therefore serializes input to a JSON string and falls
+back to the object form if the string is rejected, so it works against
+both the shipped implementation and a spec-conformant one. It does not
+retry after an abort.
 
 Observed wording for the submission, matching the Codex column. AgentDesk
 dynamically updates the native WebMCP surface, with client rediscovery

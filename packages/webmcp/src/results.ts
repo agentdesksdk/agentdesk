@@ -7,6 +7,7 @@ export type ToolCode =
   | "VALIDATION_FAILED"
   | "POLICY_DENIED"
   | "IDEMPOTENCY_CONFLICT"
+  | "IDEMPOTENCY_CAPACITY"
   | "PREVIEW_UNAVAILABLE"
   | "EXECUTION_CANCELLED";
 
@@ -182,6 +183,24 @@ export function idempotencyConflict(
       reason:
         "This idempotency key was already used for this capability with different input.",
       next: "Use a new idempotency_key, or resend the original input to get the original result.",
+    },
+    true,
+  );
+}
+
+export function idempotencyCapacity(
+  capability: string,
+  limit: number,
+): ToolResult {
+  return coded(
+    "IDEMPOTENCY_CAPACITY",
+    {
+      status: "IDEMPOTENCY_CAPACITY",
+      code: "IDEMPOTENCY_CAPACITY",
+      capability,
+      limit,
+      reason: `All ${limit} idempotency slots are held by in-flight executions, so this key cannot be tracked without breaking the retention bound.`,
+      next: "Retry once earlier work settles, or call without an idempotency_key to execute without deduplication.",
     },
     true,
   );

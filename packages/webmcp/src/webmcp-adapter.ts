@@ -67,7 +67,7 @@ export type ModelContextLike = EventTarget & {
   getTools?: (options?: { fromOrigins?: string[] }) => Promise<RegisteredTool[]>;
   executeTool?: (
     tool: RegisteredTool,
-    inputObject?: object,
+    inputObject?: object | string,
     options?: { signal?: AbortSignal },
   ) => Promise<string>;
 };

@@ -437,7 +437,7 @@ describe("consumer client", () => {
 
     const called = await client.callTool(tool, { q: "desk" });
     expect(called).toEqual({ ok: true, output: "result-text" });
-    expect(executeTool).toHaveBeenCalledWith(tool, { q: "desk" }, undefined);
+    expect(executeTool).toHaveBeenCalledWith(tool, '{"q":"desk"}', undefined);
   });
 
   it("surfaces toolchange notifications", async () => {

@@ -106,7 +106,7 @@ argument is `{ signal }`; annotations are exactly `readOnlyHint` and
 | `name`/`title`/`description`/`inputSchema` | Implemented |
 | `readOnlyHint`/`untrustedContentHint` | Implemented; no other keys exist |
 | `getTools({fromOrigins})` | Optional client (`createWebMcpClient`) |
-| `executeTool(tool, input, {signal})` | Optional client |
+| `executeTool(tool, input, {signal})` | Optional client; input serialized (see `testing.md`) |
 | `toolchange` | Optional client (`onToolChange`) |
 | Permissions Policy `tools` | Documented for deployment; nothing to implement in-page |
 | Declarative form tools | Not implemented; the spec section exists but is a TODO |

@@ -31,6 +31,7 @@ import {
   capabilityUnavailable,
   errorResult,
   executionCancelled,
+  idempotencyCapacity,
   idempotencyConflict,
   isReceiptEnvelope,
   policyDenied,
@@ -190,23 +191,22 @@ export function createAgentDeskRuntime(options: {
   const idempotency = new Map<string, IdempotencyEntry>();
 
   /**
-   * Evicts settled entries only. Dropping an in-flight one would let a
-   * retry start a second execution, which is the exact duplicate this
-   * store exists to prevent.
+   * Makes room for one more key by evicting settled entries oldest-first.
+   * In-flight entries are never evicted, since dropping one would let a
+   * retry start the duplicate execution this store exists to prevent.
+   * Returns false when the bound cannot be honoured, so the caller can
+   * refuse rather than let the store grow without limit.
    */
-  function rememberIdempotent(key: string, entry: IdempotencyEntry): void {
-    idempotency.set(key, entry);
-    if (idempotency.size <= IDEMPOTENCY_LIMIT) {
-      return;
-    }
+  function reserveIdempotencySlot(): boolean {
     for (const [candidate, held] of idempotency) {
-      if (idempotency.size <= IDEMPOTENCY_LIMIT) {
+      if (idempotency.size < IDEMPOTENCY_LIMIT) {
         break;
       }
-      if (held.settled && candidate !== key) {
+      if (held.settled) {
         idempotency.delete(candidate);
       }
     }
+    return idempotency.size < IDEMPOTENCY_LIMIT;
   }
 
   /** Stable across property insertion order, so `{a,b}` matches `{b,a}`. */
@@ -484,6 +484,12 @@ export function createAgentDeskRuntime(options: {
         }
         return { ok: true, value: undefined, result: await previous.inFlight };
       }
+      if (!reserveIdempotencySlot()) {
+        return {
+          ok: false,
+          result: idempotencyCapacity(capability.name, IDEMPOTENCY_LIMIT),
+        };
+      }
       let settle: (result: ToolResult) => void = () => {};
       const entry: IdempotencyEntry = {
         fingerprint,
@@ -492,7 +498,7 @@ export function createAgentDeskRuntime(options: {
         }),
         settled: false,
       };
-      rememberIdempotent(slot, entry);
+      idempotency.set(slot, entry);
       const outcome = await runExecution(
         capability,
         input,

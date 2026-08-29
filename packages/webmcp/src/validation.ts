@@ -47,7 +47,8 @@ export const defaultValidator: Validator = (schema, input) => {
 
   for (const [key, raw] of Object.entries(input)) {
     const property = properties[key];
-    if (!property || raw === undefined || raw === null) {
+    // null is a value, not an absence: it must satisfy the declared type.
+    if (!property || raw === undefined) {
       continue;
     }
     issues.push(...checkValue(key, raw, property));
@@ -114,14 +115,8 @@ function checkValue(
         message: `${path} must be at most ${property.maxLength} characters`,
       });
     }
-    if (typeof property.pattern === "string") {
-      let re: RegExp | undefined;
-      try {
-        re = new RegExp(property.pattern);
-      } catch {
-        re = undefined;
-      }
-      if (re && !re.test(value)) {
+    if (typeof property.pattern === "string" && compiles(property.pattern)) {
+      if (!new RegExp(property.pattern).test(value)) {
         issues.push({ path, message: `${path} must match ${property.pattern}` });
       }
     }
@@ -146,14 +141,13 @@ function checkValue(
       PropertySchema
     >;
     for (const key of asStringArray(property.required)) {
-      const child = nested[key];
-      if (child === undefined || child === null || child === "") {
+      if (!(key in nested) || nested[key] === undefined) {
         issues.push({ path: `${path}.${key}`, message: `${path}.${key} is required` });
       }
     }
     for (const [key, child] of Object.entries(nested)) {
       const childSchema = nestedProps[key];
-      if (childSchema && child !== undefined && child !== null) {
+      if (childSchema && child !== undefined) {
         issues.push(...checkValue(`${path}.${key}`, child, childSchema));
       }
     }
@@ -197,11 +191,15 @@ const SUPPORTED = new Set([
  */
 function shapeIsEnforceable(key: string, value: unknown): boolean {
   switch (key) {
-    case "type":
-      return (
-        typeof value === "string" ||
-        (Array.isArray(value) && value.every((v) => typeof v === "string"))
-      );
+    case "type": {
+      const names =
+        typeof value === "string"
+          ? [value]
+          : Array.isArray(value) && value.every((v) => typeof v === "string")
+            ? (value as string[])
+            : undefined;
+      return names !== undefined && names.every((n) => KNOWN_TYPES.has(n));
+    }
     case "enum":
       return Array.isArray(value);
     case "required":
@@ -215,7 +213,7 @@ function shapeIsEnforceable(key: string, value: unknown): boolean {
     case "maxLength":
       return typeof value === "number";
     case "pattern":
-      return typeof value === "string";
+      return typeof value === "string" && compiles(value);
     default:
       return true;
   }
@@ -250,6 +248,21 @@ export function unsupportedSchemaKeywords(schema: InputSchema): string[] {
   return [...found].sort();
 }
 
+const KNOWN_TYPES = new Set([
+  "string",
+  "number",
+  "integer",
+  "boolean",
+  "array",
+  "object",
+  "null",
+]);
+
+/**
+ * An unrecognized type name fails rather than passing. Returning true for
+ * anything unknown would let `type: "date-time"` accept every value while
+ * looking validated.
+ */
 function matchesType(value: unknown, expected: string): boolean {
   switch (expected) {
     case "string":
@@ -269,7 +282,16 @@ function matchesType(value: unknown, expected: string): boolean {
     case "null":
       return value === null;
     default:
-      return true;
+      return false;
+  }
+}
+
+function compiles(pattern: string): boolean {
+  try {
+    new RegExp(pattern);
+    return true;
+  } catch {
+    return false;
   }
 }
 
