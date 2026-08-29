@@ -49,3 +49,26 @@ Both calls reached the compensating action. The runtime invited the second call 
 
 Use a rollback handler that commits one observable side effect and then throws. Call `rollback()` twice. Assert that the handler runs once and the second call is refused as indeterminate rather than retried.
 
+
+## Confirmed on `main`
+
+Still reproduces at `f3a120e`, so the merges of #2 and #5 did not close it.
+
+The blast radius is narrower than "can run twice" suggests, and the boundary
+is worth knowing before anyone fixes this. A probe ran the same
+commit-then-throw handler twice, once for a capability declaring `verify` and
+once without.
+
+| `verify` declared | Compensating action ran | Second call |
+| --- | --- | --- |
+| no | twice | retried, same error |
+| yes | once | refused, `rollback conflict on RCPT-1` |
+
+With a verifier the drift check added in #2 already refuses the retry,
+because a compensation that landed leaves state no longer matching the
+receipt. Without one there is nothing between the caught exception and a
+second compensating write.
+
+That is the same constraint `docs/design/operation-plan.md` records for
+generated capabilities. They rarely declare `verify`, so the case with no
+protection here is the same case that has no protection there.
