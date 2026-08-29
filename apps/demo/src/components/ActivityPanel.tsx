@@ -1,6 +1,7 @@
-import type { AuditEvent, Receipt } from "@agentdesk/webmcp";
+import type { AuditEvent, Receipt, VerificationResult } from "@agentdesk/webmcp";
 import { render } from "./ApprovalCards.tsx";
 import { useRuntime } from "./hooks.ts";
+import { agentdesk } from "../runtime/agentdesk.ts";
 
 type Rendered = {
   key: string;
@@ -10,6 +11,7 @@ type Rendered = {
   risk?: string;
   meta?: string;
   receipt?: Receipt;
+  executionId?: string;
 };
 
 function collapse(events: readonly AuditEvent[]): Rendered[] {
@@ -105,6 +107,7 @@ function collapse(events: readonly AuditEvent[]): Rendered[] {
           at: event.at,
           head: "Success",
           cap: event.capability,
+          executionId: event.executionId,
         };
         if (event.receipt) {
           row.receipt = event.receipt;
@@ -121,6 +124,52 @@ function collapse(events: readonly AuditEvent[]): Rendered[] {
           meta: event.error,
         });
         break;
+      case "plan_prepared":
+        out.push({
+          key,
+          at: event.at,
+          head: `Plan prepared · ${event.operations.length} operation${event.operations.length === 1 ? "" : "s"}`,
+          risk: event.risk,
+          meta: event.operations.join(", "),
+        });
+        break;
+      case "plan_approved":
+        out.push({ key, at: event.at, head: "Human approved plan", meta: event.planId });
+        break;
+      case "plan_rejected":
+        out.push({ key, at: event.at, head: "Human rejected plan", meta: event.planId });
+        break;
+      case "plan_drifted":
+        out.push({
+          key,
+          at: event.at,
+          head: "Plan refused, application changed after review",
+          meta: event.planId,
+        });
+        break;
+      case "plan_committed":
+        out.push({ key, at: event.at, head: "Plan committed", meta: event.planId });
+        break;
+      case "plan_failed":
+        out.push({
+          key,
+          at: event.at,
+          head: "Plan failed",
+          meta: event.outcomes
+            .filter((o) => o.status === "FAILED")
+            .map((o) => o.capability)
+            .join(", "),
+        });
+        break;
+      case "rollback_performed":
+        out.push({
+          key,
+          at: event.at,
+          head: "Rolled back",
+          cap: event.capability,
+          meta: event.receiptId,
+        });
+        break;
     }
   }
   flush();
@@ -131,9 +180,25 @@ function clock(at: number): string {
   return new Date(at).toLocaleTimeString([], { hour12: false });
 }
 
+function verificationLabel(result: VerificationResult): string {
+  switch (result.status) {
+    case "VERIFIED":
+      return "Verified against application state";
+    case "PARTIAL":
+      return `Partly verified · ${result.unverified.join(", ")}`;
+    case "MISMATCH":
+      return `Mismatch on ${result.field} · expected ${render(result.expected)}, read back ${render(result.observed)}`;
+    case "UNSUPPORTED":
+      return "No verifier declared";
+  }
+}
+
 export function ActivityPanel() {
   const snapshot = useRuntime();
   const rows = collapse(snapshot.audit).slice(0, 80);
+  const stored = new Map(
+    agentdesk.queryReceipts().map((entry) => [entry.executionId, entry]),
+  );
   return (
     <div className="activity">
       <div className="rail-section" style={{ borderBottom: "none", padding: "14px 0 4px" }}>
@@ -168,6 +233,37 @@ export function ActivityPanel() {
                       <span className="after">{render(change.after)}</span>
                     </div>
                   ))}
+                  {(() => {
+                    const entry = row.executionId
+                      ? stored.get(row.executionId)
+                      : undefined;
+                    if (!entry) {
+                      return null;
+                    }
+                    return (
+                      <div className="receipt-foot">
+                        <span
+                          className={`verify ${entry.verification.status}`}
+                          title={verificationLabel(entry.verification)}
+                        >
+                          {verificationLabel(entry.verification)}
+                        </span>
+                        {entry.rolledBackAt !== undefined ? (
+                          <span className="undone">Rolled back</span>
+                        ) : entry.receipt.undoable !== true ? null : (
+                          <button
+                            type="button"
+                            className="undo"
+                            onClick={() => {
+                              void agentdesk.rollback(entry.id);
+                            }}
+                          >
+                            Undo
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : null}
             </div>

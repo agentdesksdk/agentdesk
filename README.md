@@ -152,6 +152,40 @@ PENDING ──approve──▶ re-check availability + input ──▶ APPROVED_
 
 Agents confirm outcomes later via `get_action_status(approval_id)`.
 
+## Plans, verification, and rollback
+
+Some work is several actions that a human should review as one unit.
+`prepare()` builds a versioned plan with a preview per operation and
+executes nothing.
+The plan pins the application revision it was reviewed against, so if the
+application moves before commit, the commit is refused and the plan is
+marked `DRIFTED` rather than running against state nobody approved. Commit
+is an atomic claim, so a double commit executes once.
+
+```ts
+const plan = await runtime.prepare({
+  operations: [
+    { capability: "refund_shipping", input: { order_id: "10428" } },
+    { capability: "add_order_note", input: { order_id: "10428", note: "Refunded." } },
+  ],
+});
+runtime.approvePlan(plan.id);
+await runtime.commitPlan(plan.id);
+
+// Who did what, and whether reading state back confirmed it.
+const [entry] = runtime.queryReceipts({ planId: plan.id });
+if (entry) {
+  await runtime.rollback(entry.id); // refused if the capability cannot undo
+}
+```
+
+A capability can also declare `verify`, which reads state back after the
+write, so a handler that reports a change it did not make is recorded as a
+`MISMATCH`. A capability with no verifier reports `UNSUPPORTED` instead of
+implying it was checked. Rollback is optional in the same way and says so
+plainly rather than inventing a compensating action. Detail in
+[docs/architecture.md](docs/architecture.md).
+
 ## Demo: Meridian Ops
 
 A fictional operations console (customers, orders, inventory, shipping,

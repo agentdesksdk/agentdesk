@@ -61,6 +61,48 @@ export type AuditEvent =
       executionId: string;
       error: string;
       at: number;
+    }
+  | {
+      kind: "plan_prepared";
+      planId: string;
+      operations: string[];
+      risk: RiskLevel;
+      at: number;
+    }
+  | { kind: "plan_approved"; planId: string; at: number }
+  | { kind: "plan_rejected"; planId: string; at: number }
+  | {
+      kind: "plan_drifted";
+      planId: string;
+      expectedRevision: string;
+      observedRevision: string;
+      at: number;
+    }
+  | {
+      kind: "plan_committed";
+      planId: string;
+      outcomes: Array<{
+        capability: string;
+        status: string;
+        verification: string;
+      }>;
+      at: number;
+    }
+  | {
+      kind: "plan_failed";
+      planId: string;
+      outcomes: Array<{
+        capability: string;
+        status: string;
+        verification: string;
+      }>;
+      at: number;
+    }
+  | {
+      kind: "rollback_performed";
+      capability: string;
+      receiptId: string;
+      at: number;
     };
 
 const MAX_EVENTS = 1000;
@@ -112,7 +154,7 @@ export function now(): number {
   return Date.now();
 }
 
-function deepFreeze<T>(value: T): T {
+export function deepFreeze<T>(value: T): T {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) {
     return value;
   }

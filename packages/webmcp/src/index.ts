@@ -20,6 +20,20 @@ export {
 } from "./capability.ts";
 export { CapabilityCatalog } from "./catalog.ts";
 export {
+  highestRisk,
+  type Actor,
+  type OperationOutcome,
+  type OperationPlan,
+  type PlanId,
+  type PlannedOperation,
+  type PlanStatus,
+  type VerificationResult,
+} from "./plan.ts";
+export {
+  type ReceiptQuery,
+  type StoredReceipt,
+} from "./receipts.ts";
+export {
   type PresentationEvent,
   type PresentationListener,
   type PresentationPhase,

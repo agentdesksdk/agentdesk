@@ -34,3 +34,27 @@ The extension's registration path is treated as unproven rather than
 assumed. Chrome documents that extensions may query and execute WebMCP
 tools; an extension registering one is undocumented everywhere. One
 experiment settles it and belongs ahead of any product work.
+
+## What stays deferred
+
+A competitive review raised four capabilities that AgentDesk does not have.
+Three of them are already designed here and stay deferred. Building any of
+them now would trade a working submission for an unfinished one.
+
+Making a non-agentic site agent-capable without touching its source is
+`browser-extension.md`. Discovering legacy forms and buttons and turning
+them into capabilities is the same document. Generating a capability
+manifest from metadata an application already has is `auto-sdk.md`. An
+adapter contract that lets third parties describe their own applications
+depends on that manifest surviving contact with a real specification, which
+has not happened.
+
+The fourth, acting on behalf of a named actor with a reviewable plan and a
+provable record of what changed, was not a design problem. It was a missing
+runtime surface, and it shipped. Versioned plans, drift detection,
+post-write verification, queryable receipt history, and rollback are in
+`packages/webmcp` and documented in `docs/architecture.md`.
+
+The line between the two groups is whether the work needs a browser
+extension or a code generator. Everything that does is deferred. Everything
+that is a property of the runtime itself was in scope and is done.

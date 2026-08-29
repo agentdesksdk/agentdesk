@@ -25,6 +25,16 @@ import {
   type PresentationListener,
   type PresentationPhase,
 } from "./presentation.ts";
+import {
+  PlanStore,
+  highestRisk,
+  type Actor,
+  type OperationOutcome,
+  type OperationPlan,
+  type PlannedOperation,
+  type VerificationResult,
+} from "./plan.ts";
+import { ReceiptStore, type ReceiptQuery, type StoredReceipt } from "./receipts.ts";
 import { isRouteError, rankCapabilities, routeCapability } from "./router.ts";
 import {
   approvalRequired,
@@ -97,6 +107,8 @@ export type RuntimeSnapshot = {
   schemaBytes: number;
   /** Live size of the bounded idempotency store. */
   idempotencyEntries: number;
+  actor?: Actor;
+  plans: OperationPlan[];
   audit: readonly AuditEvent[];
 };
 
@@ -122,6 +134,40 @@ export type AgentDeskRuntime = {
   invoke: (name: string, input?: Record<string, unknown>) => Promise<ToolResult>;
   approve: (actionId: string) => Promise<ToolResult>;
   reject: (actionId: string) => ToolResult;
+
+  /** Records who is acting on subsequent operations. */
+  setActor: (actor: Actor | undefined) => void;
+
+  /**
+   * Builds a reviewable, versioned plan. Nothing executes until
+   * `approvePlan` then `commitPlan`, and commit refuses if the application
+   * revision moved since the plan was prepared.
+   */
+  prepare: (request: {
+    operations: Array<{ capability: string; input?: Record<string, unknown> }>;
+    summary?: string;
+  }) => Promise<OperationPlan>;
+  approvePlan: (
+    planId: string,
+  ) => { ok: true; plan: OperationPlan } | { ok: false; reason: string };
+  rejectPlan: (
+    planId: string,
+  ) => { ok: true; plan: OperationPlan } | { ok: false; reason: string };
+  commitPlan: (
+    planId: string,
+  ) => Promise<
+    | { ok: true; plan: OperationPlan }
+    | { ok: false; reason: string; plan?: OperationPlan }
+  >;
+  getPlan: (planId: string) => OperationPlan | undefined;
+  listPlans: () => OperationPlan[];
+
+  /** Queryable history of what actually changed, with verification. */
+  queryReceipts: (filter?: ReceiptQuery) => StoredReceipt[];
+  /** Optional. Reports unsupported rather than pretending every app undoes. */
+  rollback: (
+    receiptId: string,
+  ) => Promise<{ ok: true; result: unknown } | { ok: false; reason: string }>;
 };
 
 export function createAgentDeskRuntime(options: {
@@ -136,10 +182,21 @@ export function createAgentDeskRuntime(options: {
   validate?: Validator;
   /** Origins allowed to see registered tools (spec: `exposedTo`). */
   exposedTo?: string[];
+  /**
+   * Current application revision. Captured when a plan is prepared and
+   * compared again at commit, so a human cannot approve a plan built
+   * against state that has since moved.
+   */
+  revision?: (ctx: AppContext) => string;
+  /** Who is acting. Recorded on audit events, receipts, and presentation. */
+  actor?: Actor;
 }): AgentDeskRuntime {
   const audit = new AuditBus();
   const approvals = new ApprovalManager();
   const presentation = new PresentationBus();
+  const plans = new PlanStore();
+  const receipts = new ReceiptStore();
+  let actor: Actor | undefined = options.actor;
   const adapter =
     options.adapter ??
     createWebMcpAdapter(
@@ -248,7 +305,7 @@ export function createAgentDeskRuntime(options: {
     input: Record<string, unknown>,
   ): void {
     presentation.emit(
-      resolvePresentation(capability, phase, input, context, now()),
+      resolvePresentation(capability, phase, input, context, now(), actor),
     );
   }
 
@@ -269,6 +326,8 @@ export function createAgentDeskRuntime(options: {
       lastRouting,
       schemaBytes: surface.schemaBytes(),
       idempotencyEntries: idempotency.size,
+      plans: plans.list(),
+      ...(actor !== undefined ? { actor } : {}),
       audit: audit.list(),
     };
   }
@@ -462,14 +521,43 @@ export function createAgentDeskRuntime(options: {
   }
 
   type ExecutionOutcome =
-    | { ok: true; value: unknown; result: ToolResult }
+    | {
+        ok: true;
+        value: unknown;
+        result: ToolResult;
+        verification?: VerificationResult;
+      }
     | { ok: false; result: ToolResult };
+
+  /**
+   * A broken verifier must not turn a completed write into a failure, so a
+   * throw is reported as an unverifiable outcome rather than propagated.
+   */
+  async function runVerification(
+    capability: Capability,
+    input: Record<string, unknown>,
+    changes: readonly Change[],
+  ): Promise<VerificationResult> {
+    if (!capability.verify) {
+      return { status: "UNSUPPORTED" };
+    }
+    try {
+      return await capability.verify(input, context, changes);
+    } catch (err) {
+      return {
+        status: "PARTIAL",
+        unverified: changes.map((change) => change.field),
+        note: `verifier failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
 
   async function executeNow(
     capability: Capability,
     input: Record<string, unknown>,
     signal?: AbortSignal,
     idempotencyKey?: string,
+    planId?: string,
   ): Promise<ExecutionOutcome> {
     if (idempotencyKey !== undefined) {
       const slot = `${capability.name}:${idempotencyKey}`;
@@ -504,12 +592,13 @@ export function createAgentDeskRuntime(options: {
         input,
         signal,
         idempotencyKey,
+        planId,
       );
       entry.settled = true;
       settle(outcome.result);
       return outcome;
     }
-    return runExecution(capability, input, signal, undefined);
+    return runExecution(capability, input, signal, undefined, planId);
   }
 
   async function runExecution(
@@ -517,6 +606,7 @@ export function createAgentDeskRuntime(options: {
     input: Record<string, unknown>,
     signal: AbortSignal | undefined,
     idempotencyKey: string | undefined,
+    planId?: string,
   ): Promise<ExecutionOutcome> {
     const executionId = `EXE-${++executionCounter}`;
     const startedEpoch = epoch;
@@ -551,13 +641,31 @@ export function createAgentDeskRuntime(options: {
         executionId,
         at: now(),
       };
+      let verification: VerificationResult = { status: "UNSUPPORTED" };
       if (isReceiptEnvelope(value)) {
         event.receipt = value.receipt;
+        verification = await runVerification(
+          capability,
+          input,
+          value.receipt.changes,
+        );
       }
       audit.append(event);
+      if (isReceiptEnvelope(value)) {
+        receipts.record({
+          capability: capability.name,
+          executionId,
+          input,
+          receipt: value.receipt,
+          verification,
+          at: now(),
+          ...(planId !== undefined ? { planId } : {}),
+          ...(actor !== undefined ? { actor } : {}),
+        });
+      }
       present(capability, "capability_completed", input);
       emit();
-      return { ok: true, value, result: toToolResult(value) };
+      return { ok: true, value, result: toToolResult(value), verification };
     } catch (err) {
       if (startedEpoch !== epoch) {
         return { ok: false, result: executionCancelled(capability.name) };
@@ -589,6 +697,93 @@ export function createAgentDeskRuntime(options: {
     } finally {
       linked.dispose();
     }
+  }
+
+  /**
+   * Runs one approved operation through the same gates a single approval
+   * uses, minus the approval itself, which the plan already carries.
+   */
+  async function commitOperation(
+    planId: string,
+    operation: PlannedOperation,
+  ): Promise<OperationOutcome> {
+    const routed = routeCapability(catalog, operation.capability);
+    if (isRouteError(routed)) {
+      return {
+        capability: operation.capability,
+        status: "FAILED",
+        detail: `unknown capability: ${operation.capability}`,
+        verification: { status: "UNSUPPORTED" },
+      };
+    }
+
+    const blocked = (detail: string): OperationOutcome => ({
+      capability: operation.capability,
+      status: "SKIPPED",
+      detail,
+      verification: { status: "UNSUPPORTED" },
+    });
+
+    try {
+      const decision = policy({
+        capability: routed,
+        input: operation.input,
+        context,
+      });
+      if (decision.kind === "deny") {
+        return blocked(decision.reason);
+      }
+      const availability = evaluateAvailability(routed, context);
+      if (!availability.available) {
+        return blocked(`${availability.reasonCode}: ${availability.reason}`);
+      }
+      const inputCheck = routed.checkInput?.(operation.input, context);
+      if (inputCheck && !inputCheck.available) {
+        return blocked(`${inputCheck.reasonCode}: ${inputCheck.reason}`);
+      }
+      const validation = validate(routed.inputSchema, operation.input);
+      if (!validation.valid) {
+        return blocked(
+          validation.issues.map((issue) => issue.message).join("; "),
+        );
+      }
+
+      const outcome = await executeNow(
+        routed,
+        operation.input,
+        undefined,
+        undefined,
+        planId,
+      );
+      if (!outcome.ok) {
+        return {
+          capability: operation.capability,
+          status: "FAILED",
+          detail: firstText(outcome.result),
+          verification: { status: "UNSUPPORTED" },
+        };
+      }
+      return {
+        capability: operation.capability,
+        status: "COMPLETED",
+        verification: outcome.verification ?? { status: "UNSUPPORTED" },
+      };
+    } catch (err) {
+      return {
+        capability: operation.capability,
+        status: "FAILED",
+        detail: err instanceof Error ? err.message : String(err),
+        verification: { status: "UNSUPPORTED" },
+      };
+    }
+  }
+
+  function describePlan(operations: readonly PlannedOperation[]): string {
+    return operations.length === 1
+      ? `Run ${operations[0]!.capability}`
+      : `Run ${operations.length} operations: ${operations
+          .map((operation) => operation.capability)
+          .join(", ")}`;
   }
 
   async function findCapabilities(
@@ -833,6 +1028,205 @@ export function createAgentDeskRuntime(options: {
     },
     subscribeAudit(listener) {
       return audit.subscribe(listener);
+    },
+
+    setActor(next) {
+      actor = next;
+      emit();
+    },
+
+    async prepare(request) {
+      const operations: PlannedOperation[] = [];
+      for (const requested of request.operations) {
+        const routed = routeCapability(catalog, requested.capability);
+        if (isRouteError(routed)) {
+          throw new Error(`unknown capability: ${requested.capability}`);
+        }
+        const input = requested.input ?? {};
+        const preview = safePreview(routed, input, context);
+        if (!preview.ok && routed.risk === "CONSEQUENTIAL") {
+          throw new Error(
+            `${routed.name} declares a change preview and it failed: ${preview.error}`,
+          );
+        }
+        operations.push({
+          capability: routed.name,
+          input: structuredClone(input),
+          preview: preview.changes,
+        });
+      }
+
+      const risk = highestRisk(
+        operations.map(
+          (operation) => catalog.get(operation.capability)?.risk ?? "CONSEQUENTIAL",
+        ),
+      );
+      const revision = options.revision?.(context);
+      const plan = plans.create({
+        operations,
+        summary: request.summary ?? describePlan(operations),
+        risk,
+        createdAt: now(),
+        ...(revision !== undefined ? { expectedRevision: revision } : {}),
+        ...(actor !== undefined ? { actor } : {}),
+      });
+      audit.append({
+        kind: "plan_prepared",
+        planId: plan.id,
+        operations: operations.map((operation) => operation.capability),
+        risk,
+        at: now(),
+      });
+      emit();
+      return plan;
+    },
+
+    approvePlan(planId) {
+      const plan = plans.transition(planId, "DRAFT", "APPROVED");
+      if (!plan) {
+        return { ok: false, reason: `plan ${planId} is not awaiting approval` };
+      }
+      audit.append({ kind: "plan_approved", planId, at: now() });
+      emit();
+      return { ok: true, plan };
+    },
+
+    rejectPlan(planId) {
+      const plan = plans.transition(planId, "DRAFT", "REJECTED");
+      if (!plan) {
+        return { ok: false, reason: `plan ${planId} is not awaiting approval` };
+      }
+      plans.resolve(planId, { resolvedAt: now() });
+      audit.append({ kind: "plan_rejected", planId, at: now() });
+      emit();
+      return { ok: true, plan };
+    },
+
+    async commitPlan(planId) {
+      const claimed = plans.transition(planId, "APPROVED", "COMMITTING");
+      if (!claimed) {
+        const existing = plans.get(planId);
+        return {
+          ok: false,
+          reason: existing
+            ? `plan ${planId} is ${existing.status}, not APPROVED`
+            : `unknown plan: ${planId}`,
+        };
+      }
+
+      // The human approved a plan describing a specific state. If the
+      // application moved since, that approval no longer covers what would
+      // happen, so nothing runs.
+      const observedRevision = options.revision?.(context);
+      if (
+        claimed.expectedRevision !== undefined &&
+        observedRevision !== claimed.expectedRevision
+      ) {
+        plans.resolve(planId, {
+          status: "DRIFTED",
+          resolvedAt: now(),
+          ...(observedRevision !== undefined ? { observedRevision } : {}),
+        });
+        audit.append({
+          kind: "plan_drifted",
+          planId,
+          expectedRevision: claimed.expectedRevision,
+          observedRevision: observedRevision ?? "unknown",
+          at: now(),
+        });
+        emit();
+        return {
+          ok: false,
+          reason: "the application changed after this plan was reviewed",
+          plan: plans.get(planId)!,
+        };
+      }
+
+      const outcomes: OperationOutcome[] = [];
+      for (const operation of claimed.operations) {
+        outcomes.push(await commitOperation(planId, operation));
+      }
+
+      const failed = outcomes.some((outcome) => outcome.status === "FAILED");
+      plans.resolve(planId, {
+        status: failed ? "FAILED" : "COMMITTED",
+        outcomes,
+        resolvedAt: now(),
+        ...(observedRevision !== undefined ? { observedRevision } : {}),
+      });
+      audit.append({
+        kind: failed ? "plan_failed" : "plan_committed",
+        planId,
+        outcomes: outcomes.map((outcome) => ({
+          capability: outcome.capability,
+          status: outcome.status,
+          verification: outcome.verification.status,
+        })),
+        at: now(),
+      });
+      emit();
+      const settled = plans.get(planId)!;
+      if (failed) {
+        const broken = outcomes.filter((outcome) => outcome.status === "FAILED");
+        return {
+          ok: false,
+          reason: `${broken.length} of ${outcomes.length} operations failed: ${broken
+            .map((outcome) => `${outcome.capability} (${outcome.detail ?? "no detail"})`)
+            .join("; ")}`,
+          plan: settled,
+        };
+      }
+      return { ok: true, plan: settled };
+    },
+
+    getPlan(planId) {
+      return plans.get(planId);
+    },
+
+    listPlans() {
+      return plans.list();
+    },
+
+    queryReceipts(filter) {
+      return receipts.query(filter);
+    },
+
+    async rollback(receiptId) {
+      const stored = receipts.get(receiptId);
+      if (!stored) {
+        return { ok: false, reason: `unknown receipt: ${receiptId}` };
+      }
+      if (stored.rolledBackAt !== undefined) {
+        return { ok: false, reason: `${receiptId} was already rolled back` };
+      }
+      const routed = routeCapability(catalog, stored.capability);
+      if (isRouteError(routed) || !routed.rollback) {
+        return {
+          ok: false,
+          reason: `${stored.capability} does not support rollback`,
+        };
+      }
+      try {
+        const result = await routed.rollback(
+          stored.input,
+          context,
+          stored.receipt.changes,
+        );
+        receipts.markRolledBack(receiptId, now());
+        audit.append({
+          kind: "rollback_performed",
+          capability: stored.capability,
+          receiptId,
+          at: now(),
+        });
+        emit();
+        return { ok: true, result };
+      } catch (err) {
+        return {
+          ok: false,
+          reason: err instanceof Error ? err.message : String(err),
+        };
+      }
     },
     async invoke(name, input = {}) {
       if (!started) {

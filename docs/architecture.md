@@ -86,6 +86,8 @@ document.modelContext.registerTool(...)
 | `policy.ts` | Risk → allow / approval_required |
 | `approval.ts` | `ApprovalManager`: pending actions and resolved records |
 | `audit.ts` | `AuditBus` and the audit event union |
+| `plan.ts` | `PlanStore`, `OperationPlan`, plan statuses, `Actor`, `VerificationResult` |
+| `receipts.ts` | `ReceiptStore`, the queryable history of what changed, with actor and plan |
 | `results.ts` | Structured tool results (`TOOL_RETIRED`, `APPROVAL_REQUIRED`, `CAPABILITY_UNAVAILABLE`) |
 | `tool-surface.ts` | Reconciliation, AbortController lifecycle, tombstones, schema-byte accounting |
 | `runtime.ts` | The pipeline, bootstrap tools, exposure modes, snapshots |
@@ -258,6 +260,244 @@ The receipt is authoritative because only the handler observed both states.
 The preview can be wrong if state changes between rendering and approval,
 which is exactly why approval re-checks availability and input before
 executing.
+
+## Plans, verification, and provenance
+
+A single approval authorizes one call. Real work is often several calls
+that only make sense together, and a human should read them as one unit.
+That unit is a *plan*. A plan is versioned, so the authorization stays tied
+to the state the human actually reviewed.
+
+Three artifacts sit behind this section. The plan says what will happen.
+The verification says whether it did happen. The receipt history says who
+made it happen and lets it be undone.
+
+### Versioned operation plans
+
+`prepare()` builds a plan and executes nothing. Each requested operation is
+routed by name, its input is deep-cloned, and `previewChanges` runs to
+produce a per-operation preview. A CONSEQUENTIAL capability whose preview
+throws makes `prepare()` throw, for the same reason a single consequential
+call is refused with `PREVIEW_UNAVAILABLE`. Approving blind is worse than
+failing.
+
+The returned `OperationPlan` carries the operations with their previews,
+the highest risk across them (`highestRisk`), the acting `actor`, the
+`expectedRevision` the plan was built against, and a `status`.
+
+```ts
+import { createAgentDeskRuntime } from "@agentdesk/webmcp";
+
+const runtime = createAgentDeskRuntime({
+  capabilities,
+  revision: () => storeRevision(),
+  actor: { id: "agent-1", name: "Ops Agent", kind: "agent" },
+});
+await runtime.start();
+
+const plan = await runtime.prepare({
+  operations: [
+    { capability: "refund_shipping", input: { order_id: "10428" } },
+    {
+      capability: "add_order_note",
+      input: { order_id: "10428", note: "Shipping refunded per policy." },
+    },
+  ],
+});
+// plan.status === "DRAFT", plan.risk === "CONSEQUENTIAL"
+
+runtime.approvePlan(plan.id);
+const committed = await runtime.commitPlan(plan.id);
+if (!committed.ok) {
+  console.warn(committed.reason);
+}
+```
+
+Seven statuses, moved only by the runtime:
+
+```text
+DRAFT ──approvePlan──▶ APPROVED ──commitPlan──▶ COMMITTING ──▶ COMMITTED
+  │                        │                         │
+  │                        │                         └─▶ FAILED
+  │                        └─ revision moved ──────────▶ DRIFTED
+  └──rejectPlan──▶ REJECTED (zero side effects)
+```
+
+`approvePlan` and `rejectPlan` act only on a DRAFT and return
+`{ ok: false, reason }` otherwise, so an unapproved or rejected plan cannot
+be committed. `getPlan` and `listPlans` return detached copies, so a UI
+cannot edit a plan a human already reviewed.
+
+`commitPlan` runs the operations in order. Each one goes through the same
+gates a single approval uses, minus the approval itself, which the plan
+already carries: policy, context availability, `checkInput`, schema
+validation, then the same `executeNow` that `approve()` calls. An operation
+blocked by one of those gates is recorded as `SKIPPED` with the reason and
+does not stop the rest. Any `FAILED` operation makes the plan `FAILED`.
+Outcomes land on `plan.outcomes`.
+
+Reusing the single-approval execute path is the point, not a convenience.
+A second execution mechanism would be a second place for the gates to sit,
+and gates that exist twice drift apart. The availability re-check, the
+epoch guard, the audit events, and the receipt recording all come from the
+one implementation, so a fix to any of them applies to plans without anyone
+remembering to apply it.
+
+### Drift detection
+
+The runtime takes an optional `revision(ctx)` provider. It is called when
+a plan is prepared, stored as `expectedRevision`, and called again at
+commit. If the two differ, nothing executes, the plan becomes `DRIFTED`,
+the observed value is recorded on it, and a `plan_drifted` audit event is
+appended.
+
+This is what makes the approval mean something. A human approves a set of
+previews describing a specific application state. If someone else refunded
+the same order in between, that approval no longer describes what would
+happen, and running it anyway would be a change nobody authorized. The
+demo test for this covers exactly that sequence.
+
+A revision is whatever the application says it is. The demo derives one
+from order status, refund flags, credit count, and invoice status. Without
+a `revision` provider there is no `expectedRevision` and no drift check, so
+an application that wants this guarantee has to supply one.
+
+### Committing exactly once
+
+`PlanStore.transition(id, from, to)` is an atomic claim. It returns the
+plan only to the caller that found it in the `from` status, and every other
+caller gets `undefined`. `commitPlan` claims `APPROVED → COMMITTING` before
+doing anything else, so two concurrent commits of the same plan execute the
+operations once and the loser gets a structured refusal naming the current
+status. This mirrors the `PENDING → EXECUTING` claim in `ApprovalManager`.
+
+### Verification
+
+A handler reporting success is not evidence that the application is in the
+promised state. A capability can declare a verifier that reads state back
+after the write:
+
+```ts
+defineCapability({
+  name: "refund_shipping",
+  description: "Refund the shipping fee for an order.",
+  risk: "CONSEQUENTIAL",
+  previewChanges: (input) => [
+    { field: "shipping_refunded", before: false, after: true },
+  ],
+  verify: (input) =>
+    findOrder(String(input.order_id)).shippingRefunded
+      ? { status: "VERIFIED" }
+      : {
+          status: "MISMATCH",
+          field: "shipping_refunded",
+          expected: true,
+          observed: false,
+        },
+  execute: (input) => {
+    applyRefund(String(input.order_id));
+    return receipt({
+      entity: `Order #${String(input.order_id)}`,
+      changes: [{ field: "shipping_refunded", before: false, after: true }],
+      result: { refunded: true },
+    });
+  },
+});
+```
+
+The verifier receives the input, the app context, and the receipt's
+recorded changes. It returns one of four results:
+
+- `VERIFIED`. State matches what the change claimed.
+- `PARTIAL`, with the fields it could not confirm and an optional note.
+- `MISMATCH`, with the field, the expected value, and the observed one.
+  This is the case that catches a handler lying about what it did.
+- `UNSUPPORTED`. Reported for every capability with no verifier, rather
+  than implying an unverified write was checked.
+
+Two rules keep verification from becoming a new failure mode. A verifier
+that throws yields `PARTIAL` with a `verifier failed` note, never an error,
+because a broken verifier must not turn a completed write into a reported
+failure (`runVerification` in `runtime.ts`). And verification runs only
+when the handler returned a `receipt()` envelope, since the receipt's
+change list is what a verifier checks against. A handler that returns a
+plain value is recorded as `UNSUPPORTED` even if the capability declares
+`verify`.
+
+The result rides on the stored receipt and, for planned work, on the
+operation outcome and the `plan_committed` audit event.
+
+### Receipt history
+
+The audit log records that things happened. The receipt store records what
+they did, with the evidence attached, so "show me every refund this agent
+made" is one call rather than a scan.
+
+```ts
+runtime.queryReceipts({
+  capability: "refund_shipping",
+  actorId: "agent-1",
+  planId: plan.id,
+  since: Date.now() - 3_600_000,
+  limit: 20,
+});
+```
+
+Every filter is optional and they combine as an AND. Results come back
+newest first, and `limit` applies after ordering. Each `StoredReceipt`
+carries the acting actor when one was set, the originating `planId` when
+the write came from a committed plan, the exact input the capability ran
+with, the handler's receipt, the verification result, and a timestamp.
+Stored entries are frozen.
+
+The input is kept for a specific reason. A rollback has to address the same
+entity the original call addressed, and reconstructing that from a change
+list would be guesswork.
+
+The store is in-memory and bounded to 500 entries, evicted oldest-first,
+like the rest of the runtime's state. Durable storage is an application
+concern. Use `subscribeAudit` or export these entries to persist them.
+
+### Rollback
+
+`rollback(receiptId)` calls the capability's optional
+`rollback(input, ctx, changes)` with the original input and the changes the
+receipt recorded, marks the receipt as rolled back, and appends a
+`rollback_performed` event.
+
+It refuses in three cases, each with a reason string rather than a silent
+no-op: an unknown receipt id, a receipt that was already rolled back, and a
+capability that declares no `rollback`. The third message says the
+capability does not support rollback. Most applications cannot undo, and
+saying so plainly is better than a compensating action the SDK invented.
+
+Handing the recorded `changes` to the rollback is what makes it more than a
+guess. The demo's `refund_shipping` restores the invoice status from the
+`before` value in the receipt and deletes the specific credit id the
+receipt named, rather than assuming what the prior state must have been.
+
+Rollback is a capability-authored compensating action, not a transaction.
+It runs through the capability, not around it, and it can fail; a throwing
+rollback returns `{ ok: false, reason }` and the receipt is not marked.
+
+### Audit events
+
+Seven event kinds are added to the `AuditEvent` union, all carrying `at`:
+
+| Kind | Payload beyond `planId` |
+| --- | --- |
+| `plan_prepared` | `operations`, `risk` |
+| `plan_approved` | none |
+| `plan_rejected` | none |
+| `plan_drifted` | `expectedRevision`, `observedRevision` |
+| `plan_committed` | `outcomes` (capability, status, verification) |
+| `plan_failed` | `outcomes` (capability, status, verification) |
+| `rollback_performed` | `capability`, `receiptId` (no `planId`) |
+
+They flow through the same `AuditBus` as everything else, so
+`subscribeAudit` delivers them and `getSnapshot().audit` includes them with
+no special handling. The demo's `ActivityPanel` does not render them yet;
+it switches on a fixed set of kinds and ignores the rest.
 
 ## Presentation is separate from audit and from execution
 

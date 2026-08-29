@@ -14,6 +14,7 @@ import {
   createUpdateCapability,
 } from "./factories.ts";
 import {
+  findOrder,
   money,
   obj,
   orderRoute,
@@ -22,7 +23,7 @@ import {
   requireStr,
   s,
 } from "./helpers.ts";
-import type { Order } from "../data/types.ts";
+import type { Invoice, Order } from "../data/types.ts";
 
 const domain = "shipping";
 
@@ -48,6 +49,14 @@ function refundBlocker(order: Order) {
     );
   }
   return null;
+}
+
+function orderFromInput(input: Record<string, unknown>): Order | undefined {
+  const raw = input.order_id;
+  if (typeof raw !== "string" && typeof raw !== "number") {
+    return undefined;
+  }
+  return findOrder(String(raw));
 }
 
 function contextOrder(ctx: { state: Record<string, unknown> }) {
@@ -164,6 +173,48 @@ export const shippingCapabilities: Capability[] = [
       }
       return changes;
     },
+    verify: (input) => {
+      const order = orderFromInput(input);
+      if (!order) {
+        return { status: "PARTIAL", unverified: ["shipping_refunded"] };
+      }
+      return order.shippingRefunded
+        ? { status: "VERIFIED" }
+        : {
+            status: "MISMATCH",
+            field: "shipping_refunded",
+            expected: true,
+            observed: false,
+          };
+    },
+    // Restores from the values the receipt recorded, not from guesses about
+    // what the prior state must have been.
+    rollback: (input, _ctx, changes) => {
+      const order = orderFromInput(input);
+      if (!order) {
+        throw new Error(`Order #${String(input.order_id ?? "?")} no longer exists.`);
+      }
+      const invoiceChange = changes.find((c) => /^Invoice .+ status$/.test(c.field));
+      const creditChange = changes.find((c) => c.field === "Credit issued");
+      const creditId =
+        typeof creditChange?.after === "string"
+          ? creditChange.after.split(" ")[0]
+          : undefined;
+      mutate((draft) => {
+        const target = draft.orders.find((o) => o.id === order.id);
+        if (target) {
+          target.shippingRefunded = false;
+        }
+        const invoice = draft.invoices.find((i) => i.orderId === order.id);
+        if (invoice && typeof invoiceChange?.before === "string") {
+          invoice.status = invoiceChange.before as Invoice["status"];
+        }
+        if (creditId) {
+          draft.credits = draft.credits.filter((c) => c.id !== creditId);
+        }
+      });
+      return { order_id: order.id, shipping_refunded: false };
+    },
     execute: (input) => {
       const order = requireOrder(input);
       const blocker = refundBlocker(order);
@@ -214,8 +265,8 @@ export const shippingCapabilities: Capability[] = [
       return receipt({
         entity: `Order #${order.id}`,
         changes,
-        undoable: false,
-        note: "Reset Demo restores the seeded state.",
+        undoable: true,
+        note: "Reversible: rolling back clears the credit and restores the invoice.",
         result: {
           order_id: order.id,
           shipping_refunded: true,

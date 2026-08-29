@@ -711,6 +711,58 @@ input[type="text"]:focus {
   border-top: none;
 }
 
+.receipt-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.verify {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.verify.VERIFIED {
+  color: var(--good);
+}
+
+.verify.MISMATCH {
+  color: var(--danger);
+}
+
+.verify.PARTIAL,
+.verify.UNSUPPORTED {
+  color: var(--ink-soft);
+}
+
+.undo {
+  flex: none;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.undo:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.undone {
+  flex: none;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
 /* The rail is too narrow for four columns; stack field over the diff. */
 .receipt .change-row {
   grid-template-columns: auto auto 1fr;

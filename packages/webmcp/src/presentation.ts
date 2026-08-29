@@ -1,4 +1,5 @@
 import type { AppContext, Capability, RiskLevel } from "./capability.ts";
+import type { Actor } from "./plan.ts";
 
 export type PresentationPhase =
   | "intent_routed"
@@ -11,6 +12,8 @@ export type PresentationEvent = {
   phase: PresentationPhase;
   capability: string;
   risk?: RiskLevel;
+  /** Who is acting, so a UI can show presence rather than a bare event. */
+  actor?: Actor;
   /** Where the affected entity lives, already resolved to a path. */
   route?: string;
   /** Anchor the UI should scroll to and emphasize. */
@@ -54,6 +57,7 @@ export function resolvePresentation(
   input: Record<string, unknown>,
   ctx: AppContext,
   at: number,
+  actor?: Actor,
 ): PresentationEvent {
   const event: PresentationEvent = {
     phase,
@@ -61,6 +65,9 @@ export function resolvePresentation(
     risk: capability.risk,
     at,
   };
+  if (actor !== undefined) {
+    event.actor = actor;
+  }
   const spec = capability.presentation;
   if (!spec) {
     return event;

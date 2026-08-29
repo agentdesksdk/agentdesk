@@ -29,6 +29,8 @@ export type ExecutionContext = AppContext & {
   idempotencyKey?: string;
 };
 
+import type { VerificationResult } from "./plan.ts";
+
 export type RiskLevel = "READ" | "WRITE" | "CONSEQUENTIAL";
 
 /** One field-level before/after pair. Values must be JSON-serializable. */
@@ -153,6 +155,27 @@ export type Capability = {
    * missing preview can never silently degrade into an empty diff.
    */
   approvalEvidence: "diff" | "summary";
+  /**
+   * Reads state back after execution and reports whether it matches what
+   * the change was supposed to do. This is the difference between a
+   * handler claiming success and the application actually being in the
+   * promised state, so it runs against real state, not the return value.
+   */
+  verify?: (
+    input: Record<string, unknown>,
+    ctx: AppContext,
+    changes: readonly Change[],
+  ) => VerificationResult | Promise<VerificationResult>;
+  /**
+   * Optional. Most applications cannot undo, and pretending otherwise is
+   * worse than admitting it, so a capability without this reports
+   * UNSUPPORTED rather than failing.
+   */
+  rollback?: (
+    input: Record<string, unknown>,
+    ctx: AppContext,
+    changes: readonly Change[],
+  ) => unknown | Promise<unknown>;
   execute: (
     input: Record<string, unknown>,
     ctx: ExecutionContext,
@@ -206,6 +229,16 @@ export type CapabilitySpec = {
   ) => Change[];
   /** Required for a consequential capability with no `previewChanges`. */
   approvalEvidence?: "diff" | "summary";
+  verify?: (
+    input: Record<string, unknown>,
+    ctx: AppContext,
+    changes: readonly Change[],
+  ) => VerificationResult | Promise<VerificationResult>;
+  rollback?: (
+    input: Record<string, unknown>,
+    ctx: AppContext,
+    changes: readonly Change[],
+  ) => unknown | Promise<unknown>;
   execute: (
     input: Record<string, unknown>,
     ctx: ExecutionContext,
@@ -292,6 +325,12 @@ export function defineCapability(spec: CapabilitySpec): Capability {
   }
   if (spec.previewChanges !== undefined) {
     capability.previewChanges = spec.previewChanges;
+  }
+  if (spec.verify !== undefined) {
+    capability.verify = spec.verify;
+  }
+  if (spec.rollback !== undefined) {
+    capability.rollback = spec.rollback;
   }
   return capability;
 }

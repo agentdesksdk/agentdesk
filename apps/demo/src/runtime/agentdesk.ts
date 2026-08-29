@@ -24,6 +24,19 @@ export const webmcpNative =
 export const agentdesk = createAgentDeskRuntime({
   capabilities,
   ...(webmcpNative ? {} : { registerTool: async () => {} }),
+  actor: { id: "agent", name: "Agent", kind: "agent" },
+  // Cheap revision over the mutable parts of the store. A plan approved
+  // against one revision refuses to commit against another.
+  revision: () => {
+    const state = getState();
+    return [
+      state.orders
+        .map((o) => `${o.id}:${o.status}:${o.shippingRefunded}`)
+        .join("|"),
+      state.credits.length,
+      state.invoices.map((i) => `${i.id}:${i.status}`).join("|"),
+    ].join("#");
+  },
   describeContext: (ctx) => {
     const out: Record<string, unknown> = { ...ctx.state };
     const state = getState();

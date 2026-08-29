@@ -29,7 +29,8 @@ try {
 
   const target = join(work, "node_modules", "@agentdesk", "webmcp");
   mkdirSync(target, { recursive: true });
-  run("tar", ["-xzf", join(work, packed), "-C", target, "--strip-components=1"], work);
+  // Relative names only. GNU tar reads a Windows drive colon as a remote host.
+  run("tar", ["-xzf", packed, "-C", "node_modules/@agentdesk/webmcp", "--strip-components=1"], work);
 
   writeFileSync(
     join(work, "package.json"),
