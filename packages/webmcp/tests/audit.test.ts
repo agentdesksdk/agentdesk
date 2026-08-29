@@ -472,7 +472,8 @@ describe("client cancellation, disposal, and origin filtering", () => {
   it("falls back to the object form for a spec-conformant implementation", async () => {
     const executeTool = vi.fn(async (_t: unknown, input: unknown) => {
       if (typeof input === "string") {
-        throw new Error("expects an object");
+        // Only a pre-execution argument rejection may trigger the retry.
+        throw new Error("Failed to parse input arguments");
       }
       return "object accepted";
     });

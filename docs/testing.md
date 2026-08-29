@@ -4,7 +4,7 @@
 
 ```bash
 pnpm install
-pnpm test        # SDK (130) + P0 startup (4) + demo (96)
+pnpm test        # SDK (142) + P0 startup (4) + demo (96)
 pnpm typecheck   # strict TS across all packages
 pnpm build       # SDK build + P0 + demo static build + site assembly
 pnpm test:pack   # packs the SDK and imports it under plain Node
@@ -130,10 +130,21 @@ executeTool(tool, "{}")                      → {"content":[{"type":"text","tex
 executeTool(tool, '{"name":"Native"}')       → {"content":[{"type":"text","text":"{\"greeting\":\"Hello, Native!\"…
 ```
 
-`createWebMcpClient` therefore serializes input to a JSON string and falls
-back to the object form if the string is rejected, so it works against
-both the shipped implementation and a spec-conformant one. It does not
-retry after an abort.
+`createWebMcpClient` serializes input to a JSON string and learns the
+encoding from the first call. The fallback to the object form fires only
+on a rejection that provably happened before the tool ran, matched on the
+argument-format signature above. Any other failure means parsing
+succeeded and the handler may already have committed, so retrying could
+duplicate a write; the client returns the failure instead and remembers
+that the string form is correct. It never retries after an abort, and a
+caller who supplies their own string gets their error verbatim.
+
+Verified end to end in Chrome 152 through `window.agentdeskClient` on the
+P0 page: `getTools()` returned all seven registered tools, and
+`callTool(hello_dynamic_tool, {name: "Client"})` returned
+`{"greeting":"Hello, Client!","deterministic":true}` on both the first
+call and a repeat that used the learned encoding. Circular and BigInt
+input return `{ok: false, reason}` rather than rejecting the promise.
 
 Observed wording for the submission, matching the Codex column. AgentDesk
 dynamically updates the native WebMCP surface, with client rediscovery

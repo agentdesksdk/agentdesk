@@ -33,10 +33,23 @@ export type WebMcpClient = {
   onToolChange: (listener: () => void) => () => void;
 };
 
+/**
+ * The spec types `executeTool`'s input as `object` and serializes it
+ * internally; Chrome 152 rejects an object with "Failed to parse input
+ * arguments" and requires a pre-serialized JSON string (observed
+ * 2026-08-29). This is the only failure that provably occurs before the
+ * tool executes, so it is the only one safe to retry.
+ */
+function isArgumentFormatRejection(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /failed to parse input|invalid input argument/i.test(message);
+}
+
 export function createWebMcpClient(
   native: ModelContextLike | undefined = getModelContext(),
 ): WebMcpClient {
   const features = probeFeatures(native);
+  let encoding: "unknown" | "string" | "object" = "unknown";
 
   return {
     features,
@@ -65,31 +78,56 @@ export function createWebMcpClient(
         };
       }
       const callOptions = options?.signal ? { signal: options.signal } : undefined;
-      // The spec types inputObject as `object` and serializes it
-      // internally, but Chrome 152 rejects an object with "Failed to parse
-      // input arguments" and requires a pre-serialized JSON string
-      // (observed 2026-08-29). Send the string, then fall back to the
-      // object so a spec-conformant implementation also works.
-      const serialized =
-        typeof input === "string" ? input : JSON.stringify(input ?? {});
+
+      let serialized: string;
       try {
-        return {
-          ok: true,
-          output: await native.executeTool(tool, serialized, callOptions),
-        };
-      } catch (stringErr) {
-        // A cancelled call must not be retried, and a caller who supplied
-        // their own string gets their error verbatim.
-        if (typeof input === "string" || options?.signal?.aborted) {
-          return { ok: false, reason: describe(stringErr) };
-        }
+        serialized =
+          typeof input === "string" ? input : JSON.stringify(input ?? {});
+      } catch (err) {
+        return { ok: false, reason: `could not serialize input: ${describe(err)}` };
+      }
+      if (serialized === undefined) {
+        return { ok: false, reason: "input did not serialize to JSON" };
+      }
+
+      if (encoding === "object" && typeof input !== "string") {
         try {
           return {
             ok: true,
             output: await native.executeTool(tool, input, callOptions),
           };
-        } catch {
-          return { ok: false, reason: describe(stringErr) };
+        } catch (err) {
+          return { ok: false, reason: describe(err) };
+        }
+      }
+
+      try {
+        const output = await native.executeTool(tool, serialized, callOptions);
+        encoding = "string";
+        return { ok: true, output };
+      } catch (err) {
+        // Retry only on a rejection that provably happened before the tool
+        // ran. Any other failure means parsing succeeded and the handler
+        // may already have committed, so calling again could duplicate a
+        // write. Learning the encoding from that fact also stops probing.
+        if (
+          typeof input === "string" ||
+          options?.signal?.aborted ||
+          !isArgumentFormatRejection(err)
+        ) {
+          if (!isArgumentFormatRejection(err) && !options?.signal?.aborted) {
+            encoding = "string";
+          }
+          return { ok: false, reason: describe(err) };
+        }
+        encoding = "object";
+        try {
+          return {
+            ok: true,
+            output: await native.executeTool(tool, input, callOptions),
+          };
+        } catch (objectErr) {
+          return { ok: false, reason: describe(objectErr) };
         }
       }
     },

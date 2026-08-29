@@ -1,5 +1,6 @@
 ﻿import {
   createAgentDeskRuntime,
+  createWebMcpClient,
   type AppContext,
   type ToolResult,
 } from "@agentdesk/webmcp";
@@ -165,5 +166,10 @@ el("btn-context").addEventListener("click", () => {
   void invokeAndLog("get_context");
 });
 
-Object.assign(window, { agentdesk: runtime });
+// The consumer surface is half of what this harness exists to check, so
+// expose it for manual getTools/executeTool conformance runs.
+Object.assign(window, {
+  agentdesk: runtime,
+  agentdeskClient: createWebMcpClient(),
+});
 paint();

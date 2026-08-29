@@ -80,7 +80,14 @@ function checkValue(
     ];
   }
 
-  if (Array.isArray(property.enum) && !property.enum.includes(value)) {
+  // Skipped for non-primitive members rather than compared by reference,
+  // which would reject a structurally equal value. unsupportedSchemaKeywords
+  // reports the schema so the gap is visible instead of silent.
+  if (
+    Array.isArray(property.enum) &&
+    property.enum.every(isPrimitive) &&
+    !property.enum.includes(value)
+  ) {
     issues.push({
       path,
       message: `${path} must be one of ${property.enum.map(String).join(", ")}`,
@@ -198,15 +205,30 @@ function shapeIsEnforceable(key: string, value: unknown): boolean {
           : Array.isArray(value) && value.every((v) => typeof v === "string")
             ? (value as string[])
             : undefined;
-      return names !== undefined && names.every((n) => KNOWN_TYPES.has(n));
+      // An empty list constrains nothing while looking like a constraint.
+      return (
+        names !== undefined &&
+        names.length > 0 &&
+        names.every((n) => KNOWN_TYPES.has(n))
+      );
     }
+    // Membership is reference equality, so only primitives are enforceable.
     case "enum":
-      return Array.isArray(value);
+      return Array.isArray(value) && value.every(isPrimitive);
     case "required":
       return Array.isArray(value) && value.every((v) => typeof v === "string");
     case "items":
-    case "properties":
       return typeof value === "object" && value !== null && !Array.isArray(value);
+    case "properties":
+      return (
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value) &&
+        Object.values(value as Record<string, unknown>).every(
+          (child) =>
+            typeof child === "object" && child !== null && !Array.isArray(child),
+        )
+      );
     case "minimum":
     case "maximum":
     case "minLength":
@@ -284,6 +306,10 @@ function matchesType(value: unknown, expected: string): boolean {
     default:
       return false;
   }
+}
+
+function isPrimitive(value: unknown): boolean {
+  return value === null || typeof value !== "object";
 }
 
 function compiles(pattern: string): boolean {
