@@ -7,6 +7,7 @@ import type {
   Receipt,
   VerificationResult,
 } from "@agentdesk/webmcp";
+import { useAnnouncer } from "./announcer.ts";
 import { render } from "./ApprovalCards.tsx";
 import { useRuntime } from "./hooks.ts";
 import {
@@ -270,7 +271,7 @@ export function ActivityPanel() {
   const navigate = useNavigate();
   const { mode } = useParams();
   const revealTimer = useRef<number | undefined>(undefined);
-  const [announcement, setAnnouncement] = useState("");
+  const { announcement, announce } = useAnnouncer();
   const [pendingFocus, setPendingFocus] = useState<string | null>(null);
   const rows = collapse(snapshot.audit).slice(0, 80);
   const stored = new Map(
@@ -380,7 +381,7 @@ export function ActivityPanel() {
                                     entry.id,
                                     OPERATOR,
                                   );
-                                  setAnnouncement(
+                                  announce(
                                     outcome.ok
                                       ? reviewedAnnouncement(entry)
                                       : reviewRefusedAnnouncement(
@@ -403,7 +404,7 @@ export function ActivityPanel() {
                                 aria-label={`Undo ${action}`}
                                 onClick={() => {
                                   void agentdesk.rollback(entry.id).then((outcome) => {
-                                    setAnnouncement(
+                                    announce(
                                       outcome.ok
                                         ? rolledBackAnnouncement(entry)
                                         : rollbackRefusedAnnouncement(
