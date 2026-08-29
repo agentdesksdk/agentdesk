@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Build first. The apps resolve @agentdesk/webmcp through its published
+      # exports, so they typecheck and test against packages/webmcp/dist. On a
+      # clean checkout there is no dist, and every app check fails on a stale
+      # or absent one rather than on anything the PR did.
+      - run: pnpm build
+      # Each check reports on its own so one run tells you everything that is
+      # broken, rather than a chain of skips behind the first failure.
+      - run: pnpm typecheck
+        if: ${{ !cancelled() }}
+      - run: pnpm test
+        if: ${{ !cancelled() }}
+      - run: pnpm test:pack
+        if: ${{ !cancelled() }}
