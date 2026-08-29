@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type {
+  Actor,
   AffectedObject,
   AuditEvent,
   Receipt,
@@ -236,6 +237,13 @@ function clock(at: number): string {
   return new Date(at).toLocaleTimeString([], { hour12: false });
 }
 
+/**
+ * The person at the keyboard. A real deployment reads this from the session;
+ * the demo has one operator, but the review still has to be signed by a human
+ * rather than by the agent whose work is being reviewed.
+ */
+const OPERATOR: Actor = { id: "operator", name: "Operator", kind: "human" };
+
 const AFFECTED_ROUTE: Record<string, (id: string) => string> = {
   order: (id) => `/orders/${id}`,
 };
@@ -368,7 +376,10 @@ export function ActivityPanel() {
                                 className="undo"
                                 aria-label={`Mark ${action} reviewed`}
                                 onClick={() => {
-                                  const outcome = agentdesk.markReviewed(entry.id);
+                                  const outcome = agentdesk.markReviewed(
+                                    entry.id,
+                                    OPERATOR,
+                                  );
                                   setAnnouncement(
                                     outcome.ok
                                       ? reviewedAnnouncement(entry)
