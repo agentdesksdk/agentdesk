@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+﻿import { describe, expect, it, vi } from "vitest";
 import { createWebMcpClient } from "../src/client.ts";
 import {
   defaultValidator,
@@ -90,7 +90,7 @@ describe("encoding is chosen before the call, not negotiated by retrying", () =>
       annotations: { readOnlyHint: true },
     };
 
-    const negotiated = await client.negotiateEncoding(probe);
+    const negotiated = await client.negotiateEncoding({ tool: probe });
     expect(negotiated).toEqual({ ok: true, encoding: "object" });
     expect(client.encoding).toBe("object");
 
@@ -99,12 +99,90 @@ describe("encoding is chosen before the call, not negotiated by retrying", () =>
     expect(calls).toEqual([{ order_id: "10428" }]);
   });
 
+  it("negotiates with caller-supplied probe input", async () => {
+    const seen: unknown[] = [];
+    const executeTool = vi.fn(async (_t: unknown, input: unknown) => {
+      seen.push(input);
+      // A read-only search that still requires arguments.
+      const parsed = typeof input === "string" ? JSON.parse(input) : input;
+      if (!parsed || typeof parsed.query !== "string") {
+        throw new Error("query is required");
+      }
+      return "results";
+    });
+    const client = createWebMcpClient(
+      fakeModelContext({ executeTool }) as never,
+    );
+    const probe: RegisteredTool = {
+      name: "search_customers",
+      description: "Searches customers",
+      origin: "https://shop.example",
+      annotations: { readOnlyHint: true },
+    };
+
+    const negotiated = await client.negotiateEncoding({
+      tool: probe,
+      input: { query: "probe" },
+    });
+    expect(negotiated).toEqual({ ok: true, encoding: "string" });
+    expect(seen).toEqual([`{"query":"probe"}`]);
+  });
+
+  it("reaches the object encoding for a probe that requires arguments", async () => {
+    const executeTool = vi.fn(async (_t: unknown, input: unknown) => {
+      if (typeof input === "string") {
+        throw new Error("Failed to parse input arguments");
+      }
+      if (typeof (input as { query?: unknown }).query !== "string") {
+        throw new Error("query is required");
+      }
+      return "results";
+    });
+    const client = createWebMcpClient(
+      fakeModelContext({ executeTool }) as never,
+    );
+    const probe: RegisteredTool = {
+      name: "search_customers",
+      description: "Searches customers",
+      origin: "https://shop.example",
+      annotations: { readOnlyHint: true },
+    };
+
+    const negotiated = await client.negotiateEncoding({
+      tool: probe,
+      input: { query: "probe" },
+    });
+    expect(negotiated).toEqual({ ok: true, encoding: "object" });
+    expect(client.encoding).toBe("object");
+  });
+
+  it("says the probe input may be at fault when neither encoding works", async () => {
+    const executeTool = vi.fn(async () => {
+      throw new Error("query is required");
+    });
+    const client = createWebMcpClient(
+      fakeModelContext({ executeTool }) as never,
+    );
+    const probe: RegisteredTool = {
+      name: "search_customers",
+      description: "Searches customers",
+      origin: "https://shop.example",
+      annotations: { readOnlyHint: true },
+    };
+
+    const negotiated = await client.negotiateEncoding({ tool: probe });
+    expect(negotiated.ok).toBe(false);
+    if (!negotiated.ok) {
+      expect(negotiated.reason).toMatch(/probe input/i);
+    }
+  });
+
   it("refuses to negotiate against a tool that is not read-only", async () => {
     const executeTool = vi.fn(async () => "ok");
     const client = createWebMcpClient(
       fakeModelContext({ executeTool }) as never,
     );
-    const result = await client.negotiateEncoding(tool);
+    const result = await client.negotiateEncoding({ tool });
     expect(result.ok).toBe(false);
     expect(executeTool).not.toHaveBeenCalled();
   });

@@ -55,6 +55,7 @@ export {
 export {
   createWebMcpClient,
   type InputEncoding,
+  type NegotiationRequest,
   type WebMcpClient,
   type WebMcpClientOptions,
 } from "./client.ts";

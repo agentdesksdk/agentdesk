@@ -4,7 +4,7 @@
 
 ```bash
 pnpm install
-pnpm test        # SDK (147) + P0 startup (4) + demo (96)
+pnpm test        # SDK (150) + P0 startup (4) + demo (96)
 pnpm typecheck   # strict TS across all packages
 pnpm build       # SDK build + P0 + demo static build + site assembly
 pnpm test:pack   # packs the SDK and imports it under plain Node
@@ -145,20 +145,30 @@ call:
 
 ```ts
 createWebMcpClient(undefined, { encoding: "object" });   // explicit
-await client.negotiateEncoding(readOnlyTool);            // opt-in probe
+
+await client.negotiateEncoding({                         // opt-in probe
+  tool: readOnlyTool,
+  input: { query: "probe" },
+});
 ```
 
 `negotiateEncoding` may invoke its probe twice, so it refuses any tool not
 declared `readOnlyHint`. The caller's actual operation is never used to
-discover the encoding.
+discover the encoding. Pass `input` when the probe takes required
+arguments; without it the probe is called with `{}`, which a tool that
+throws on missing arguments would reject under both encodings and report
+as though neither works. When both attempts fail the reason says the probe
+input may itself be at fault, rather than blaming the browser.
 
 Verified end to end in Chrome 152 through `window.agentdeskClient` on the
 P0 page. Default encoding `string`;
 `callTool(hello_dynamic_tool, {name: "Client"})` returned
 `{"greeting":"Hello, Client!","deterministic":true}`;
-`negotiateEncoding(get_context)` returned `{ok: true, encoding: "string"}`;
-`negotiateEncoding(invoke_capability)` was refused because it is not
-read-only. Circular and BigInt input return `{ok: false, reason}` rather
+`negotiateEncoding({tool: get_context})` returned
+`{ok: true, encoding: "string"}`; the same call with
+`{tool: hello_dynamic_tool, input: {name: "Probe"}}` also returned
+`string`; and `negotiateEncoding({tool: invoke_capability})` was refused
+because it is not read-only. Circular and BigInt input return `{ok: false, reason}` rather
 than rejecting the promise.
 
 Observed wording for the submission, matching the Codex column. AgentDesk

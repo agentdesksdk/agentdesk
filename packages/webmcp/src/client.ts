@@ -30,6 +30,13 @@ export type WebMcpClientOptions = {
   encoding?: InputEncoding;
 };
 
+export type NegotiationRequest = {
+  /** Must be declared `readOnlyHint`; negotiation may invoke it twice. */
+  tool: RegisteredTool;
+  /** Arguments the probe requires. Defaults to `{}`. */
+  input?: object;
+};
+
 export type WebMcpClient = {
   features: WebMcpFeatures;
   /** The encoding used for every call. Never changed by `callTool`. */
@@ -38,9 +45,13 @@ export type WebMcpClient = {
    * Opt-in encoding discovery. Requires a tool the caller has declared
    * `readOnlyHint`, because it may invoke that tool twice. `callTool`
    * never negotiates, so a write is never used to probe the browser.
+   *
+   * Supply `input` when the probe takes required arguments; empty input
+   * would be rejected on both attempts and look like neither encoding
+   * works.
    */
   negotiateEncoding: (
-    probe: RegisteredTool,
+    request: NegotiationRequest,
   ) => Promise<
     { ok: true; encoding: InputEncoding } | { ok: false; reason: string }
   >;
@@ -91,7 +102,7 @@ export function createWebMcpClient(
       return encoding;
     },
 
-    async negotiateEncoding(probe) {
+    async negotiateEncoding({ tool: probe, input = {} }) {
       if (!native?.executeTool) {
         return {
           ok: false,
@@ -107,11 +118,20 @@ export function createWebMcpClient(
           reason: `${probe.name} is not declared readOnlyHint; negotiation may invoke the probe twice, so it must be a read-only tool`,
         };
       }
+      let text: string;
+      try {
+        text = JSON.stringify(input ?? {}) ?? "{}";
+      } catch (err) {
+        return {
+          ok: false,
+          reason: `could not serialize probe input: ${describe(err)}`,
+        };
+      }
       for (const candidate of ["string", "object"] as const) {
         try {
           await native.executeTool(
             probe,
-            candidate === "string" ? "{}" : {},
+            candidate === "string" ? text : input,
             undefined,
           );
           encoding = candidate;
@@ -122,7 +142,7 @@ export function createWebMcpClient(
       }
       return {
         ok: false,
-        reason: `neither encoding was accepted by ${probe.name}`,
+        reason: `neither encoding was accepted by ${probe.name}; the probe input may also be invalid for that tool`,
       };
     },
 
