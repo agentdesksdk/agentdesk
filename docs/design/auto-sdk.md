@@ -15,12 +15,8 @@ escape hatch.
 
 ## What already holds
 
-Three things make this smaller than it looks.
-
-The runtime takes an injectable `adapter`, and only four files in
-`packages/webmcp/src` reference it. The core is already separable from the
-WebMCP provider role by construction, so the proposed `@agentdesk/core`
-extraction is mostly a rename plus an entry point, not a rewrite.
+Two things make this smaller than it looks, and one thing that an earlier
+draft counted as free is not.
 
 `Capability.execute` is an arbitrary function. Nothing in the pipeline
 assumes the executor is application code, so a generated executor that
@@ -31,10 +27,59 @@ The catalog-to-surface reduction already exists. Auto only has to produce
 the catalog; routing, availability, policy, approval, and audit are
 untouched.
 
+## What does not already hold
+
+The `@agentdesk/core` extraction is real refactoring. The adapter is
+referenced in only four files under `packages/webmcp/src`, which is what
+an earlier draft read as a rename with an entry point attached. The count
+is right and the conclusion was wrong. `createAgentDeskRuntime`
+constructs the concrete WebMCP adapter as its own default and then
+constructs the tool surface around it, so the provider role is wired in
+by construction. A caller may override it, but nothing in the type system
+says the runtime is provider-agnostic, and nothing stops the next change
+from reaching for WebMCP specifics inside the core.
+
+Define the boundary before moving files.
+
+```ts
+type CapabilityProvider = {
+  readonly kind: "webmcp" | "extension";
+  readonly supported: boolean;
+  start(surface: ToolSurface): Promise<void>;
+  stop(): Promise<void>;
+};
+```
+
+Auto and the extension both depend on this landing first. Until the
+runtime takes a `CapabilityProvider` instead of building one, "the core
+is already separable" is a claim about intent rather than about the code.
+
+<!-- code-anchors
+packages/webmcp/src/runtime.ts createWebMcpAdapter ToolSurfaceManager
+packages/webmcp/src/policy.ts riskBasedPolicy decidePolicy
+packages/webmcp/src/capability.ts approvalEvidence previewChanges defineCapability
+-->
+
+
 ## The data shape: a capability manifest
 
-Everything upstream converges on one artifact, and the runtime is the only
-consumer.
+Everything upstream converges on one artifact. The manifest is not a
+`Capability`, and an earlier draft implied it could feed the runtime
+unchanged. It cannot. `defineCapability` rejects a CONSEQUENTIAL
+capability that has neither `previewChanges` nor an explicit
+`approvalEvidence: "summary"`, on the grounds that approving without a
+diff has to be a deliberate choice. A generated entry has no
+`previewChanges` function and no opinion about evidence, so handing the
+manifest straight to the runtime throws.
+
+So there are two shapes and a compiler between them.
+
+```text
+CapabilityManifestEntry
+  -> compileManifestEntry(entry, adapter, policy)
+  -> validated Capability
+  -> AgentDesk runtime
+```
 
 ```ts
 type CapabilitySource =
@@ -48,17 +93,21 @@ type CapabilitySource =
   | "form"
   | "dom";
 
-type ManifestEntry = {
+type CapabilityManifestEntry = {
   name: string;
   description: string;
   inputSchema: InputSchema;
-  risk: RiskLevel;
+  mutability: "read" | "write";
+  consequence: "routine" | "consequential" | "unknown";
   domain?: string;
   source: CapabilitySource;
+  provenance: CapabilityProvenance;
   /** Where it came from, for `agentdesk inspect` and for blame. */
   origin: { file?: string; symbol?: string; route?: string; method?: string };
   /** Set when the compiler could not determine something itself. */
-  inferred: Array<"name" | "description" | "risk" | "schema">;
+  inferred: Array<"name" | "description" | "consequence" | "schema">;
+  /** How a human approves this, since nothing generated can preview itself. */
+  approvalEvidence?: "diff" | "summary";
   executor:
     | { kind: "http"; method: string; path: string }
     | { kind: "graphql"; operation: string; field: string }
@@ -70,6 +119,28 @@ type ManifestEntry = {
 
 `inferred` is deliberately a list of what was guessed, not a confidence
 float. See the pushback below.
+
+### What the compiler adds, and what it refuses
+
+`compileManifestEntry` is the boundary between generated data and the
+runtime's typed model, so it is where validation lives and the only place
+that knows about both shapes.
+
+It supplies `execute` by closing over the executor and the adapter, and
+`readOnlyHint` from `mutability === "read"`. It sets
+`untrustedContentHint` unconditionally, because every field in a
+generated entry came from a specification or a page that AgentDesk does
+not control. It derives `RiskLevel` from the two axes below.
+
+It refuses an entry that would produce an unapprovable capability. A
+`consequential` entry with no `approvalEvidence` is a compile error naming
+the entry and the two ways to resolve it, rather than a runtime throw
+during `init` with a stack trace pointing into the SDK. The check exists
+in the runtime already; the compiler's job is to fail earlier and in the
+developer's own terms.
+
+Nothing in the compiler downgrades risk. Overrides do that, and they are
+config the developer wrote.
 
 ## Provenance tiers, not confidence scores
 
@@ -85,26 +156,86 @@ fixing the inference.
 Use ordered tiers, and let each tier carry a *policy default* rather than
 a score:
 
-| Tier | Sources | Default treatment |
+| `semanticProvenance` | Sources | Default treatment |
 | --- | --- | --- |
-| Declared | `explicit`, `webmcp` | Risk as declared |
-| Contract | `openapi`, `graphql`, `trpc` | Risk from the contract's own verb or operation type |
-| Structural | `server-action`, `route` | Risk from method mapping, writes require approval |
-| Observed | `form`, `dom` | Consequential by default, never auto-approved |
+| `declared` | `explicit`, `webmcp` | Risk as declared |
+| `contract` | `openapi`, `graphql`, `trpc` | Read-only when the contract says so, otherwise CONSEQUENTIAL |
+| `structural` | `server-action`, `route` | CONSEQUENTIAL unless the route is declared read-only |
+| `observed` | `form`, `dom` | CONSEQUENTIAL, never auto-approved |
 
 The tier is discrete, checkable, and explains itself in a review. A
 capability moves tiers by getting better metadata, not by someone editing
 a number.
 
+This tier is one dimension of four, and treating it as the whole of trust
+is what let an earlier draft call native WebMCP "highest trust" without
+qualification. A site's own declaration is authoritative about the site's
+mechanics and says nothing about whether its strings are safe to put in a
+model's context.
+
+```ts
+type CapabilityProvenance = {
+  sourceKind: "native" | "declarative" | "inferred" | "authored";
+  semanticProvenance: "declared" | "contract" | "structural" | "observed";
+  executionOwnership: "agentdesk" | "page" | "browser";
+  contentTrust: "untrusted";
+};
+```
+
+`contentTrust` has one value because descriptions and results are
+attacker-influenced on every source, including `explicit`, once a field
+in them is user-supplied. The runtime carries this as
+`untrustedContentHint`, and the compiler sets it on everything it
+generates. `docs/design/browser-extension.md` uses the same four
+dimensions, and they mean the same thing on both sides.
+
 ## Risk inference and its escape hatch
 
-Verb mapping is a reasonable default. `GET` reads, `POST`/`PUT`/`PATCH`
-write, `DELETE` is consequential. Contract sources refine it: a GraphQL
-query is READ, a mutation is WRITE.
+An earlier draft mapped `POST`, `PUT`, and `PATCH` to `WRITE`, and that is
+unsafe against this runtime. `WRITE` is not a gate here. `defineCapability`
+gives a non-CONSEQUENTIAL capability `{ kind: "allow" }`, and
+`riskBasedPolicy` requires approval only when the policy says
+`approval_required`. `WRITE` executes and audits. It does not stop for a
+human. So a refund reachable at `POST /orders/:id/refund` would be
+generated, classified `WRITE`, and run unapproved. That is the whole bug,
+and it comes from one enum carrying two different questions.
 
-Two rules keep the default honest. Anything the compiler could not
-classify is CONSEQUENTIAL, not READ, so an unknown fails toward the human.
-And name-pattern policy is config, evaluated after inference:
+Split them.
+
+| Axis | Values | Question |
+| --- | --- | --- |
+| `mutability` | `read`, `write` | Does this change state? |
+| `consequence` | `routine`, `consequential`, `unknown` | Does a human need to see it first? |
+
+An HTTP verb answers the first and is silent on the second. `POST
+/search` and `POST /orders/:id/refund` are the same verb.
+
+The defaults follow from that, and they are deliberately pessimistic.
+
+- A clearly declared read-only operation is `READ`. Clearly declared means
+  the source said so, such as an OpenAPI `get` or a GraphQL `query`, not
+  that a name looked harmless.
+- Any mutation is CONSEQUENTIAL. Not `WRITE`, because `WRITE` does not
+  stop.
+- `unknown` is CONSEQUENTIAL, so an unclassifiable operation fails toward
+  the human.
+
+Chrome's WebMCP security guidance takes the same position from the other
+direction, treating a tool as state-changing unless `readOnlyHint` says
+otherwise. The compiler sets `readOnlyHint` only on the first case above.
+
+Downgrading is a separate act with an author. A developer override, or
+authoritative metadata such as an explicit `readOnlyHint` in the source
+specification, can move an operation from CONSEQUENTIAL to WRITE or READ.
+Inference never downgrades on its own, so the diff that made a refund
+auto-executable is always attributable to a line someone wrote.
+
+This costs approval prompts on routine writes, and that cost is the point
+during onboarding. `agentdesk inspect` lists exactly which operations are
+CONSEQUENTIAL by inference rather than by declaration, which is the list
+a team walks once and downgrades deliberately.
+
+Name-pattern policy is config, evaluated after inference:
 
 ```ts
 export default defineAgentDesk({
@@ -138,17 +269,25 @@ outside the config file it owns.
 ```text
 npx agentdesk inspect
 
-CAPABILITY          SOURCE         TIER        RISK           INFERRED
-get_customer        openapi        contract    READ           -
-create_order        openapi        contract    WRITE          -
-refund_order        openapi        contract    CONSEQUENTIAL  risk
-export_report       route          structural  READ           name, risk
-pay_invoice         form           observed    CONSEQUENTIAL  name, risk, schema
+CAPABILITY          SOURCE         TIER        MUTABILITY  CONSEQUENCE    INFERRED
+get_customer        openapi        contract    read        routine        -
+create_order        openapi        contract    write       consequential  consequence
+refund_order        openapi        contract    write       consequential  consequence
+export_report       route          structural  write       unknown        name, consequence
+pay_invoice         form           observed    write       consequential  name, consequence, schema
 ```
 
 The `INFERRED` column is the point. It tells a reviewer exactly which
 fields were guessed, so the review is bounded to those rather than being
 an invitation to re-read everything.
+
+Read the table as a work list. Every row whose `CONSEQUENCE` was inferred
+rather than declared is a prompt a human will see until someone says what
+the operation actually does. `create_order` is the ordinary case, a
+routine write that will be downgraded on the first pass.
+`export_report` is the interesting one, a route the compiler could not
+classify at all, and `unknown` is the compiler admitting that rather than
+guessing `read` because the name starts with `export`.
 
 ## Scope I would cut
 
@@ -171,10 +310,17 @@ React app needs no adapter to consume it.
 A compiler cannot recover business meaning that never entered the
 metadata. `processThing(id)` that reverses a ledger entry, recalculates a
 balance, and releases a fraud hold will be classified from its route and
-its name, both of which are lies. Auto will produce a WRITE named
-`process_thing`.
+its name, both of which are lies. Auto will produce a capability named
+`process_thing`, marked `write` and `consequential`, with no idea what it
+consequentially does.
 
 That is the honest boundary, and it is why the explicit API survives.
 Auto's job is to get a team from zero to a governed surface in an
 afternoon and show them precisely which capabilities need a human to say
 what they actually mean.
+
+The defaults are chosen so that this limit is loud rather than silent.
+`process_thing` compiles to a CONSEQUENTIAL capability that stops for a
+human on every call, and it stays that way until someone who knows what
+it does writes an override. The failure mode is an annoying prompt, not a
+reversed ledger entry.

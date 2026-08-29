@@ -1,10 +1,12 @@
 # Design notes
 
-Design only. None of this is implemented, and none of it should be built
-before the hackathon submission ships.
+Design only. None of this is implemented. The direction is approved and
+the contracts below are what gate building it, in place of the earlier
+blanket instruction to defer everything until after a submission date. A
+date is not a safety property. The gates in "Milestone gates" are.
 
 `declarative-webmcp-findings.md` is measured behaviour of Chrome 152,
-gathered over CDP. Read it first; the other two documents depend on it and
+gathered over CDP. Read it first; the other documents depend on it and
 several of their decisions exist because of what it showed.
 
 `browser-extension.md` designs AgentDesk Universal, a WXT extension that
@@ -15,10 +17,29 @@ manifest from metadata an application already has (OpenAPI, GraphQL, tRPC,
 routes, forms) so `defineCapability` becomes the escape hatch rather than
 the onboarding path.
 
-The two share one spine. Both produce capabilities that feed the existing
-runtime unchanged, because `Capability.execute` is an arbitrary function
-and the runtime already takes an injectable adapter. Neither needs the
-routing, policy, approval, or audit layers to change.
+`adapter-contract.md` specifies the interface a third party implements to
+describe their own application: discovery, compilation, execution,
+authentication, request binding, validation, receipts, and drift
+detection.
+
+`operation-plan.md` specifies what happens to the shipped plan machinery
+when the capability was generated or inferred rather than authored, which
+is the case where every guarantee that depends on an author-supplied
+function degrades.
+
+The four share one spine, and one earlier claim about that spine was too
+strong. Both producers make capabilities that route, apply policy, and
+audit exactly like authored ones, because `Capability.execute` is an
+arbitrary function. What is not free is the boundary underneath.
+`createAgentDeskRuntime` constructs the WebMCP adapter and the tool
+surface itself, so a `CapabilityProvider` interface has to be extracted
+before the native SDK and the extension can share governance. And a
+generated manifest cannot feed the runtime unchanged, because
+`defineCapability` refuses a consequential capability that offers a human
+no evidence to approve. A compiler sits between them.
+
+Routing, availability, policy, approval, and audit are untouched. The
+provider boundary and the manifest compiler are not.
 
 Three positions in these documents are arguments, not neutral summaries,
 and are flagged here so a reader can disagree with them directly.
@@ -35,29 +56,44 @@ assumed. Chrome documents that extensions may query and execute WebMCP
 tools; an extension registering one is undocumented everywhere. One
 experiment settles it and belongs ahead of any product work.
 
-## What stays deferred
+## What already shipped
 
-A competitive review raised four capabilities that AgentDesk does not have.
-Three of them are already designed here and stay deferred. Building any of
-them now would trade a working submission for an unfinished one.
+One of the four capabilities a competitive review raised was not a design
+problem. Acting on behalf of a named actor with a reviewable plan and a
+provable record of what changed was a missing runtime surface, and it
+shipped. Versioned plans, drift detection, post-write verification,
+queryable receipt history, and rollback are in `packages/webmcp` and
+documented in `docs/architecture.md`.
 
-Making a non-agentic site agent-capable without touching its source is
-`browser-extension.md`. Discovering legacy forms and buttons and turning
-them into capabilities is the same document. Generating a capability
-manifest from metadata an application already has is `auto-sdk.md`. An
-adapter contract that lets third parties describe their own applications
-depends on that manifest surviving contact with a real specification, which
-has not happened.
+`operation-plan.md` exists because those guarantees were built for
+capabilities an application author wrote, and the other three items in
+this directory produce capabilities nobody wrote.
 
-The fourth, acting on behalf of a named actor with a reviewable plan and a
-provable record of what changed, was not a design problem. It was a missing
-runtime surface, and it shipped. Versioned plans, drift detection,
-post-write verification, queryable receipt history, and rollback are in
-`packages/webmcp` and documented in `docs/architecture.md`.
+## Milestone gates
 
-The line between the two groups is whether the work needs a browser
-extension or a code generator. Everything that does is deferred. Everything
-that is a property of the runtime itself was in scope and is done.
+Each gate is a fact someone can check, and the order is load-bearing.
+Later work assumes earlier answers, so skipping a gate means building on
+an assumption rather than a result.
+
+| # | Milestone | Gate |
+| --- | --- | --- |
+| 1 | Correct the design documents | `node scripts/check-design-docs.mjs` passes |
+| 2 | Prove extension registration and permissions in Chrome | The ISOLATED `registerTool` experiment has a written result in `declarative-webmcp-findings.md`, and a built `manifest.json` requests no host permission at install |
+| 3 | Extract the provider boundary | `createAgentDeskRuntime` takes a `CapabilityProvider` and constructs no WebMCP-specific object; the existing suite passes unchanged |
+| 4 | Build extension-owned bootstrap virtualization | On one opt-in origin, the four `agentdesk_*` tools are registered by the extension and a form-derived call produces `filled`, `submitted`, and `abandoned` records |
+| 5 | Add the OpenAPI compiler | `compileManifestEntry` rejects a consequential entry with no approval evidence, and a real public specification compiles with its skipped operations listed |
+| 6 | Add versioned operation plans and verified receipts | A generated capability produces a plan carrying `PlanAssurance`, and a receipt carrying `sourceDigest` with no credential in it |
+| 7 | Demonstrate one real third-party application adapter | Someone outside the project builds an adapter from `adapter-contract.md` alone |
+
+Gate 2 is the one that can change the architecture. If ISOLATED
+registration fails and MAIN world is excluded, milestone 4 ships
+declarative forms with completion accounting and does not promise
+bootstrap virtualization at all. That branch is specified in
+`browser-extension.md` and is a real product rather than a failure state.
+
+Gate 7 is the only one that cannot be checked from inside this repository,
+and that is deliberate. An adapter contract nobody outside the project has
+implemented is a plan for a contract.
 
 ## The accessibility contract constrains the extension
 

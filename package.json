@@ -9,6 +9,7 @@
     "test": "pnpm -r test",
     "test:pack": "pnpm --filter @agentdesk/webmcp pack:smoke",
     "typecheck": "pnpm -r typecheck",
+    "check:docs": "node scripts/check-design-docs.mjs",
     "build": "pnpm -r build && node scripts/assemble-dist.mjs",
     "preview": "pnpm --filter @agentdesk/demo preview"
   }
