@@ -15,6 +15,18 @@ export type Actor = {
   kind: "agent" | "human" | "system";
 };
 
+/**
+ * An actor the runtime has checked is a person. The events that exist to
+ * record a human decision carry this rather than an optional `Actor`, so a
+ * consumer reading `plan_approved` or `receipt_reviewed` gets the guarantee
+ * from the type instead of a cast.
+ */
+export type HumanActor = Actor & { kind: "human" };
+
+export function isHumanActor(actor: Actor): actor is HumanActor {
+  return actor.kind === "human";
+}
+
 export type PlannedOperation = {
   capability: CapabilityName;
   input: Record<string, unknown>;

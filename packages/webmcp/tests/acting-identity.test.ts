@@ -129,7 +129,7 @@ describe("a plan approval names a human authorizer", () => {
     const approved = runtime
       .getSnapshot()
       .audit.find((e) => e.kind === "plan_approved");
-    expect((approved as { actor?: { id: string } }).actor?.id).toBe("operator-1");
+    expect(approved?.actor.id).toBe("operator-1");
   });
 
   it("does not require mutating the ambient actor to approve", async () => {
@@ -152,7 +152,7 @@ describe("an exported audit stream can answer who reviewed", () => {
     const reviewed = runtime
       .getSnapshot()
       .audit.find((e) => e.kind === "receipt_reviewed");
-    expect((reviewed as { actor?: { id: string } }).actor?.id).toBe("operator-1");
-    expect((reviewed as { actor?: { kind: string } }).actor?.kind).toBe("human");
+    expect(reviewed?.actor.id).toBe("operator-1");
+    expect(reviewed?.actor.kind).toBe("human");
   });
 });

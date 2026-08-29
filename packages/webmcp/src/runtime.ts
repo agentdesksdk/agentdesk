@@ -28,7 +28,9 @@ import {
 import {
   PlanStore,
   highestRisk,
+  isHumanActor,
   type Actor,
+  type HumanActor,
   type OperationOutcome,
   type OperationPlan,
   type PlannedOperation,
@@ -215,10 +217,60 @@ export function createAgentDeskRuntime(options: {
   const plans = new PlanStore();
   const receipts = new ReceiptStore();
   // Detached and frozen on the way in, so a caller mutating the object it
-  // handed over cannot retroactively rewrite provenance already recorded.
-  const ownActor = (next: Actor | undefined): Actor | undefined =>
-    next === undefined ? undefined : deepFreeze(structuredClone(next));
-  let actor: Actor | undefined = ownActor(options.actor);
+  // handed over cannot retroactively rewrite provenance already recorded,
+  // and so a getter-backed property is read exactly once. The clone failure
+  // is returned rather than thrown because the paths that record a
+  // caller-supplied identity have to refuse before they change any state.
+  const ownActor = (
+    next: Actor,
+  ): { ok: true; actor: Actor } | { ok: false; reason: string } => {
+    try {
+      return { ok: true, actor: deepFreeze(structuredClone(next)) };
+    } catch {
+      return {
+        ok: false,
+        reason:
+          "the supplied identity could not be recorded because it carries a value that cannot be cloned, such as a function",
+      };
+    }
+  };
+
+  function adoptActor(next: Actor | undefined): Actor | undefined {
+    if (next === undefined) {
+      return undefined;
+    }
+    const owned = ownActor(next);
+    if (!owned.ok) {
+      throw new TypeError(owned.reason);
+    }
+    return owned.actor;
+  }
+
+  /**
+   * The single read of a caller-supplied identity on the two paths that
+   * record a human decision. Snapshotting before the `kind` check is what
+   * makes the check meaningful. A getter that answers `"human"` once and
+   * `"agent"` afterwards is caught here rather than approved on one read
+   * and recorded on another.
+   */
+  function resolveHumanActor(
+    supplied: Actor | undefined,
+    refusal: string,
+  ): { ok: true; actor: HumanActor } | { ok: false; reason: string } {
+    if (supplied === undefined) {
+      return { ok: false, reason: refusal };
+    }
+    const owned = ownActor(supplied);
+    if (!owned.ok) {
+      return owned;
+    }
+    if (!isHumanActor(owned.actor)) {
+      return { ok: false, reason: refusal };
+    }
+    return { ok: true, actor: owned.actor };
+  }
+
+  let actor: Actor | undefined = adoptActor(options.actor);
   const adapter =
     options.adapter ??
     createWebMcpAdapter(
@@ -403,6 +455,12 @@ export function createAgentDeskRuntime(options: {
     signal?: AbortSignal,
     idempotencyKey?: string,
   ): Promise<ToolResult> {
+    // Resolved at the invocation boundary, before anything can observe the
+    // invocation. Presentation listeners dispatch synchronously, so a
+    // listener reacting to `capability_started` can call `setActor` and
+    // would otherwise split one invocation across two actors.
+    const invocationActor = actor;
+
     if (capability.name === FIND_CAPABILITIES) {
       const raw = readString(input, "query") ?? readString(input, "task") ?? "";
       // Bound what enters routing, lastRouting, and the audit log.
@@ -471,7 +529,7 @@ export function createAgentDeskRuntime(options: {
       return policyDenied(capability.name, decision.reason);
     }
 
-    present(capability, "capability_started", input, actor);
+    present(capability, "capability_started", input, invocationActor);
     if (decision.kind === "require_approval") {
       const summary =
         capability.describeApproval?.(input, context) ??
@@ -504,7 +562,7 @@ export function createAgentDeskRuntime(options: {
         summary,
         at: now(),
       });
-      present(capability, "approval_requested", input, actor);
+      present(capability, "approval_requested", input, invocationActor);
       emit();
       return approvalRequired(
         capability.name,
@@ -516,6 +574,7 @@ export function createAgentDeskRuntime(options: {
       );
     }
     const outcome = await executeNow(capability, input, {
+      actor: invocationActor,
       signal,
       idempotencyKey,
     });
@@ -567,6 +626,14 @@ export function createAgentDeskRuntime(options: {
     | { ok: false; executionId?: string; result: ToolResult };
 
   type ExecutionOptions = {
+    /**
+     * The acting identity, resolved by the caller at the boundary that
+     * begins the invocation. Required rather than optional so every entry
+     * point is forced to resolve it once, at its earliest point, instead of
+     * reading the mutable binding after a listener or a suspended handler
+     * could have moved it.
+     */
+    actor: Actor | undefined;
     signal?: AbortSignal | undefined;
     idempotencyKey?: string | undefined;
     planId?: string | undefined;
@@ -604,7 +671,7 @@ export function createAgentDeskRuntime(options: {
   async function executeNow(
     capability: Capability,
     input: Record<string, unknown>,
-    opts: ExecutionOptions = {},
+    opts: ExecutionOptions,
   ): Promise<ExecutionOutcome> {
     const { idempotencyKey } = opts;
     if (idempotencyKey !== undefined) {
@@ -648,7 +715,13 @@ export function createAgentDeskRuntime(options: {
     input: Record<string, unknown>,
     opts: ExecutionOptions,
   ): Promise<ExecutionOutcome> {
-    const { signal, idempotencyKey, planId, humanInitiated = false } = opts;
+    const {
+      signal,
+      idempotencyKey,
+      planId,
+      humanInitiated = false,
+      actor: actingActor,
+    } = opts;
     const executionId = `EXE-${++executionCounter}`;
     const startedEpoch = epoch;
     const linked = linkSignals(signal, epochController.signal);
@@ -661,11 +734,6 @@ export function createAgentDeskRuntime(options: {
     if (idempotencyKey !== undefined) {
       execContext.idempotencyKey = idempotencyKey;
     }
-
-    // Read once, before the handler can suspend. A setActor while the
-    // handler is awaiting would otherwise split one execution across two
-    // actors, and nothing downstream could say which one ran it.
-    const actingActor = actor;
 
     audit.append({
       kind: "execution_started",
@@ -768,11 +836,14 @@ export function createAgentDeskRuntime(options: {
 
   /**
    * Runs one approved operation through the same gates a single approval
-   * uses, minus the approval itself, which the plan already carries.
+   * uses, minus the approval itself, which the plan already carries. The
+   * executor is handed down from the commit rather than resolved here, so
+   * every operation in one commit names the same one.
    */
   async function commitOperation(
     planId: string,
     operation: PlannedOperation,
+    executor: Actor | undefined,
   ): Promise<OperationOutcome> {
     const routed = routeCapability(catalog, operation.capability);
     if (isRouteError(routed)) {
@@ -815,7 +886,10 @@ export function createAgentDeskRuntime(options: {
         );
       }
 
-      const outcome = await executeNow(routed, operation.input, { planId });
+      const outcome = await executeNow(routed, operation.input, {
+        planId,
+        actor: executor,
+      });
       const correlation =
         outcome.executionId !== undefined
           ? { executionId: outcome.executionId }
@@ -1100,11 +1174,14 @@ export function createAgentDeskRuntime(options: {
     },
 
     setActor(next) {
-      actor = ownActor(next);
+      actor = adoptActor(next);
       emit();
     },
 
     async prepare(request) {
+      // `previewChanges` is application code called synchronously below, so
+      // the requester is resolved before it runs rather than after.
+      const requester = actor;
       const operations: PlannedOperation[] = [];
       for (const requested of request.operations) {
         const routed = routeCapability(catalog, requested.capability);
@@ -1137,7 +1214,7 @@ export function createAgentDeskRuntime(options: {
         risk,
         createdAt: now(),
         ...(revision !== undefined ? { expectedRevision: revision } : {}),
-        ...(actor !== undefined ? { requestedBy: actor } : {}),
+        ...(requester !== undefined ? { requestedBy: requester } : {}),
       });
       audit.append({
         kind: "plan_prepared",
@@ -1154,22 +1231,28 @@ export function createAgentDeskRuntime(options: {
       // An approval is the record that a person authorized this plan.
       // Falling back to the ambient actor would let the requesting agent
       // sign off on its own plan, which is the one claim it exists to make.
-      // Checked before the transition is claimed, so a refused approval
-      // cannot strand the plan in APPROVED.
-      const approver = by ?? actor;
-      if (approver === undefined || approver.kind !== "human") {
-        return {
-          ok: false,
-          reason:
-            "a plan approval must name a human authorizer; pass one to approvePlan rather than relying on the acting actor",
-        };
+      // Snapshotted and checked before the transition is claimed, so
+      // neither a refusal nor an unrecordable identity can strand the plan
+      // in APPROVED, and the plan and the audit event carry one value the
+      // caller can no longer influence.
+      const approver = resolveHumanActor(
+        by ?? actor,
+        "a plan approval must name a human authorizer; pass one to approvePlan rather than relying on the acting actor",
+      );
+      if (!approver.ok) {
+        return approver;
       }
       const claimed = plans.transition(planId, "DRAFT", "APPROVED");
       if (!claimed) {
         return { ok: false, reason: `plan ${planId} is not awaiting approval` };
       }
-      plans.resolve(planId, { approvedBy: approver });
-      audit.append({ kind: "plan_approved", planId, actor: approver, at: now() });
+      plans.resolve(planId, { approvedBy: approver.actor });
+      audit.append({
+        kind: "plan_approved",
+        planId,
+        actor: approver.actor,
+        at: now(),
+      });
       emit();
       return { ok: true, plan: plans.get(planId)! };
     },
@@ -1196,6 +1279,12 @@ export function createAgentDeskRuntime(options: {
             : `unknown plan: ${planId}`,
         };
       }
+
+      // One commit has one executor, resolved the moment the plan claims
+      // COMMITTING. Resolving per operation would let a setActor during a
+      // suspended earlier operation give one commit's receipts two
+      // different executors.
+      const executor = actor;
 
       // The human approved a plan describing a specific state. If the
       // application moved since, that approval no longer covers what would
@@ -1227,7 +1316,7 @@ export function createAgentDeskRuntime(options: {
 
       const outcomes: OperationOutcome[] = [];
       for (const operation of claimed.operations) {
-        outcomes.push(await commitOperation(planId, operation));
+        outcomes.push(await commitOperation(planId, operation, executor));
       }
 
       // COMMITTED is a claim that the work happened. An operation that
@@ -1326,21 +1415,22 @@ export function createAgentDeskRuntime(options: {
       }
       // A review is the record that a person looked. Falling back to the
       // ambient actor would let an agent silently sign off on its own work,
-      // which is the one claim this record exists to make.
-      const reviewer = by ?? actor;
-      if (reviewer === undefined || reviewer.kind !== "human") {
-        return {
-          ok: false,
-          reason:
-            "a review must name a human reviewer; pass one to markReviewed rather than relying on the acting actor",
-        };
+      // which is the one claim this record exists to make. Snapshotted
+      // before the check and before the receipt is touched, for the same
+      // reason `approvePlan` does it.
+      const reviewer = resolveHumanActor(
+        by ?? actor,
+        "a review must name a human reviewer; pass one to markReviewed rather than relying on the acting actor",
+      );
+      if (!reviewer.ok) {
+        return reviewer;
       }
-      receipts.markReviewed(receiptId, now(), reviewer);
+      receipts.markReviewed(receiptId, now(), reviewer.actor);
       audit.append({
         kind: "receipt_reviewed",
         capability: stored.capability,
         receiptId,
-        actor: reviewer,
+        actor: reviewer.actor,
         at: now(),
       });
       emit();
@@ -1425,6 +1515,10 @@ export function createAgentDeskRuntime(options: {
       return runCapability(routed, input, "invoke");
     },
     async approve(actionId) {
+      // Same boundary rule as `runCapability`. The execution this releases
+      // belongs to whoever was acting when the approval was claimed, not to
+      // whoever happens to be acting once the re-checks below finish.
+      const actingActor = actor;
       const action = approvals.claim(actionId);
       if (!action) {
         const record = approvals.get(actionId);
@@ -1506,6 +1600,7 @@ export function createAgentDeskRuntime(options: {
         at: now(),
       });
       const outcome = await executeNow(routed, action.input, {
+        actor: actingActor,
         humanInitiated: true,
       });
       if (outcome.ok) {

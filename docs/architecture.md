@@ -129,6 +129,25 @@ records all point at each other. Those three audit events also carry the
 acting `actor`. The handler receives an `ExecutionContext`: the app
 context plus `signal`, `executionId`, and any `idempotencyKey`.
 
+**One invocation resolves its actor exactly once, at its earliest point.**
+`runCapability` reads the ambient actor into a local const at its first
+statement, before any presentation event and before the first audit append,
+and threads that value through `capability_started`, `approval_requested`,
+and the execution. `runExecution` does not read the ambient actor at all. It
+takes the acting identity as a required `ExecutionOptions` field, so a new
+entry point that forgets to resolve one fails to compile rather than falling
+back to an ambient read.
+
+The boundary has to be the invocation, not the execution. Presentation
+listeners dispatch synchronously, so a listener reacting to
+`capability_started` runs to completion before the execution begins and can
+call `setActor` in between. Capturing at the execution would let a read-only
+observer change the provenance of the write it is observing. Every other
+entry point applies the same rule at its own earliest point. `approve()`
+resolves the acting identity before it claims the pending action, `prepare`
+resolves `requestedBy` before any `previewChanges` callback runs, and
+`rollback` resolves at the moment its claim succeeds.
+
 The signal is the client's WebMCP execution signal linked with a runtime
 lifecycle signal, so a handler aborts when either the client cancels or the
 operator calls `stop()`/`reset()`.
@@ -304,6 +323,22 @@ check runs before the DRAFT to APPROVED transition is claimed, so a refused
 approval leaves the plan in DRAFT and callers never mutate ambient actor
 state around an approval click.
 
+**A caller-supplied identity is normalized once, before it is validated and
+before any state changes.** Both paths go through one `resolveHumanActor`
+helper. It takes a single frozen snapshot of the caller's object, checks
+`kind` on the snapshot, and hands that same snapshot to the plan record and
+to the audit event. The caller's object is never read again.
+
+The ordering carries two guarantees that a later snapshot would not. A
+getter-backed actor that answers `"human"` to the check and `"agent"`
+afterwards cannot be approved as one and recorded as the other, because
+there is only one read. And an actor carrying a function, which
+`structuredClone` refuses, is turned into `{ ok: false, reason }` before the
+transition is claimed rather than a `DataCloneError` thrown out of a plan
+already sitting in APPROVED with no approver on it. `ownActor` returns that
+discriminated result rather than throwing, so the approval and review paths
+cannot drift apart on how they handle it.
+
 ```ts
 import { createAgentDeskRuntime } from "@agentdesk/webmcp";
 
@@ -354,6 +389,14 @@ validation, then the same `executeNow` that `approve()` calls. An operation
 blocked by one of those gates is recorded as `SKIPPED` with the reason and
 does not stop the rest. Outcomes land on `plan.outcomes`, each carrying the
 `executionId` of the execution it ran.
+
+**One commit has one executor.** `commitPlan` resolves the acting identity
+the moment the plan wins the APPROVED to COMMITTING transition, and hands
+that one value to every operation. Resolving it per operation would let a
+`setActor` during a suspended earlier operation give a single COMMITTED
+plan receipts naming different executors, which contradicts the thing a
+plan is for. The human approved one unit of work, so who performed it is
+one answer.
 
 The terminal status is resolved from those outcomes in one pass.
 
@@ -498,9 +541,15 @@ afterwards, named explicitly at `markReviewed` and also required to be
 human. The three actor-mutating paths stay independent: approving and
 reviewing take their identity as an argument and never touch the ambient
 actor. `setActor` clones and deep-freezes what it stores, so a caller
-mutating its own object afterwards cannot rewrite history already
-recorded, and an execution reads it once at the start, so a `setActor` while
-a handler is suspended cannot retroactively re-attribute work in flight.
+mutating its own object afterwards cannot rewrite history already recorded.
+
+Each of the four is pinned at the boundary that creates it. `requestedBy` is
+resolved before `prepare` calls any `previewChanges`. `executedBy` comes
+from the invocation boundary, so neither a synchronous presentation listener
+nor a suspended handler can re-attribute work in flight, and a plan commit
+pins one executor for all of its operations. `approvedBy` and `reviewedBy`
+are snapshotted from the caller's argument before the `kind` check and
+before anything is written.
 
 The input is kept for a specific reason. A rollback has to address the same
 entity the original call addressed, and reconstructing that from a change
@@ -567,21 +616,35 @@ Nine event kinds are added to the `AuditEvent` union, all carrying `at`:
 | Kind | Payload beyond `planId` |
 | --- | --- |
 | `plan_prepared` | `operations`, `risk` |
-| `plan_approved` | `actor`, the human approver |
+| `plan_approved` | `actor`, the human approver, required and typed `HumanActor` |
 | `plan_rejected` | none |
 | `plan_drifted` | `expectedRevision`, `observedRevision` |
 | `plan_committed` | `outcomes` (capability, status, verification) |
 | `plan_partial` | `outcomes` (capability, status, verification) |
 | `plan_failed` | `outcomes` (capability, status, verification) |
 | `rollback_performed` | `capability`, `receiptId`, `actor` (no `planId`) |
-| `receipt_reviewed` | `capability`, `receiptId`, `actor` (no `planId`) |
+| `receipt_reviewed` | `capability`, `receiptId`, `actor` typed `HumanActor` (no `planId`) |
 
 Six kinds carry an acting identity, and every one of them uses the same
-optional `actor` field so the stream stays queryable on one key.
+`actor` field so the stream stays queryable on one key.
 `execution_started`, `execution_completed`, and `execution_failed` name who
-ran the capability, captured once when the execution starts. `plan_approved`
-names the human who authorized the plan. `receipt_reviewed` names the human
-who reviewed the receipt. `rollback_performed` names who claimed the undo.
+ran the capability, resolved once at the invocation boundary.
+`plan_approved` names the human who authorized the plan. `receipt_reviewed`
+names the human who reviewed the receipt. `rollback_performed` names who
+claimed the undo.
+
+The two human-only events say so in their types. `plan_approved` and
+`receipt_reviewed` declare `actor` as required and typed `HumanActor`, which
+is `Actor & { kind: "human" }`, exported from the package alongside `Actor`.
+Both are only ever emitted with an identity the runtime has already
+validated, and the runtime narrows to that type through the `isHumanActor`
+predicate rather than asserting, so the compiler carries the guarantee
+instead of the reader. A consumer reads `event.actor.kind` after narrowing
+on `event.kind` with no cast and no check for a case that cannot occur. The
+other four keep `actor` optional and typed `Actor`, because an execution or
+a rollback legitimately names an agent, and because no actor is a valid
+state for a runtime nobody configured one on.
+
 The role-specific names live on the plan and the receipt (`requestedBy`,
 `approvedBy`, `executedBy`, `reviewedBy`); the audit stream deliberately
 does not mirror them, because an auditor asking "what did this person do"
