@@ -1297,9 +1297,6 @@ export function createAgentDeskRuntime(options: {
       return receipts.query(filter);
     },
 
-    // A review is a human act. The caller names who, because the runtime's
-    // ambient actor is the agent and recording a person as the agent would
-    // make the provenance record say the opposite of what happened.
     markReviewed(receiptId, by) {
       const stored = receipts.get(receiptId);
       if (!stored) {
@@ -1308,7 +1305,18 @@ export function createAgentDeskRuntime(options: {
       if (stored.reviewedAt !== undefined) {
         return { ok: false, reason: `${receiptId} was already reviewed` };
       }
-      receipts.markReviewed(receiptId, now(), by ?? actor);
+      // A review is the record that a person looked. Falling back to the
+      // ambient actor would let an agent silently sign off on its own work,
+      // which is the one claim this record exists to make.
+      const reviewer = by ?? actor;
+      if (reviewer === undefined || reviewer.kind !== "human") {
+        return {
+          ok: false,
+          reason:
+            "a review must name a human reviewer; pass one to markReviewed rather than relying on the acting actor",
+        };
+      }
+      receipts.markReviewed(receiptId, now(), reviewer);
       audit.append({
         kind: "receipt_reviewed",
         capability: stored.capability,

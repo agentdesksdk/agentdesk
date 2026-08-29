@@ -88,7 +88,7 @@ export function resolvePresentation(
   if (!spec) {
     return event;
   }
-  const route = spec.route?.(input, ctx);
+  const route = resolveField(capability, "route", () => spec.route?.(input, ctx));
   if (route !== undefined) {
     event.route = route;
   }
@@ -98,17 +98,38 @@ export function resolvePresentation(
   if (spec.focus !== undefined) {
     event.focus = spec.focus;
   }
-  const announce =
-    typeof spec.announce === "function"
-      ? spec.announce(input, ctx)
-      : spec.announce;
+  const announce = resolveField(capability, "announce", () =>
+    typeof spec.announce === "function" ? spec.announce(input, ctx) : spec.announce,
+  );
   if (announce !== undefined) {
     event.announce = announce;
   }
-  const message =
-    typeof spec.message === "function" ? spec.message(input, ctx) : spec.message;
+  const message = resolveField(capability, "message", () =>
+    typeof spec.message === "function" ? spec.message(input, ctx) : spec.message,
+  );
   if (message !== undefined) {
     event.message = message;
   }
   return event;
+}
+
+/**
+ * Presentation is optional choreography. An application resolver that throws
+ * loses its own field and nothing else, because a completed write must not
+ * become a failure because the narration for it could not be built.
+ */
+function resolveField(
+  capability: Capability,
+  field: string,
+  resolve: () => string | undefined,
+): string | undefined {
+  try {
+    return resolve();
+  } catch (err) {
+    console.error(
+      `agentdesk presentation ${field} for ${capability.name} threw`,
+      err,
+    );
+    return undefined;
+  }
 }
