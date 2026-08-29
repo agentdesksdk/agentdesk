@@ -18,8 +18,32 @@ import {
  * Per-method browser parity is not guaranteed, so every method reports
  * unsupported explicitly rather than throwing an opaque TypeError.
  */
+/**
+ * How `executeTool` input is encoded. The spec types it as `object` and
+ * serializes internally, but Chrome 152 rejects an object with "Failed to
+ * parse input arguments" and requires a pre-serialized JSON string
+ * (observed 2026-08-29), so `string` is the default.
+ */
+export type InputEncoding = "string" | "object";
+
+export type WebMcpClientOptions = {
+  encoding?: InputEncoding;
+};
+
 export type WebMcpClient = {
   features: WebMcpFeatures;
+  /** The encoding used for every call. Never changed by `callTool`. */
+  readonly encoding: InputEncoding;
+  /**
+   * Opt-in encoding discovery. Requires a tool the caller has declared
+   * `readOnlyHint`, because it may invoke that tool twice. `callTool`
+   * never negotiates, so a write is never used to probe the browser.
+   */
+  negotiateEncoding: (
+    probe: RegisteredTool,
+  ) => Promise<
+    { ok: true; encoding: InputEncoding } | { ok: false; reason: string }
+  >;
   listTools: (options?: {
     fromOrigins?: string[];
   }) => Promise<
@@ -33,26 +57,74 @@ export type WebMcpClient = {
   onToolChange: (listener: () => void) => () => void;
 };
 
-/**
- * The spec types `executeTool`'s input as `object` and serializes it
- * internally; Chrome 152 rejects an object with "Failed to parse input
- * arguments" and requires a pre-serialized JSON string (observed
- * 2026-08-29). This is the only failure that provably occurs before the
- * tool executes, so it is the only one safe to retry.
- */
-function isArgumentFormatRejection(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return /failed to parse input|invalid input argument/i.test(message);
-}
-
 export function createWebMcpClient(
   native: ModelContextLike | undefined = getModelContext(),
+  options: WebMcpClientOptions = {},
 ): WebMcpClient {
   const features = probeFeatures(native);
-  let encoding: "unknown" | "string" | "object" = "unknown";
+  let encoding: InputEncoding = options.encoding ?? "string";
+
+  const serialize = (
+    input: object | string,
+  ): { ok: true; value: object | string } | { ok: false; reason: string } => {
+    if (typeof input === "string" || encoding === "object") {
+      return { ok: true, value: input };
+    }
+    try {
+      const text = JSON.stringify(input ?? {});
+      if (text === undefined) {
+        return { ok: false, reason: "input did not serialize to JSON" };
+      }
+      return { ok: true, value: text };
+    } catch (err) {
+      return {
+        ok: false,
+        reason: `could not serialize input: ${describe(err)}`,
+      };
+    }
+  };
 
   return {
     features,
+
+    get encoding() {
+      return encoding;
+    },
+
+    async negotiateEncoding(probe) {
+      if (!native?.executeTool) {
+        return {
+          ok: false,
+          reason: "executeTool is not available in this browser",
+        };
+      }
+      // Negotiation calls a tool twice in the worst case, so it may only
+      // run against a tool the caller has declared read-only. The
+      // requested operation is never used to discover the encoding.
+      if (probe.annotations?.readOnlyHint !== true) {
+        return {
+          ok: false,
+          reason: `${probe.name} is not declared readOnlyHint; negotiation may invoke the probe twice, so it must be a read-only tool`,
+        };
+      }
+      for (const candidate of ["string", "object"] as const) {
+        try {
+          await native.executeTool(
+            probe,
+            candidate === "string" ? "{}" : {},
+            undefined,
+          );
+          encoding = candidate;
+          return { ok: true, encoding };
+        } catch {
+          continue;
+        }
+      }
+      return {
+        ok: false,
+        reason: `neither encoding was accepted by ${probe.name}`,
+      };
+    },
 
     async listTools(options) {
       if (!native?.getTools) {
@@ -77,58 +149,24 @@ export function createWebMcpClient(
           reason: "executeTool is not available in this browser",
         };
       }
-      const callOptions = options?.signal ? { signal: options.signal } : undefined;
-
-      let serialized: string;
+      const prepared = serialize(input);
+      if (!prepared.ok) {
+        return prepared;
+      }
+      // Exactly one invocation, always. Error text cannot prove a handler
+      // did not already commit, so the encoding is settled before the call
+      // rather than discovered by retrying the caller's operation.
       try {
-        serialized =
-          typeof input === "string" ? input : JSON.stringify(input ?? {});
+        return {
+          ok: true,
+          output: await native.executeTool(
+            tool,
+            prepared.value,
+            options?.signal ? { signal: options.signal } : undefined,
+          ),
+        };
       } catch (err) {
-        return { ok: false, reason: `could not serialize input: ${describe(err)}` };
-      }
-      if (serialized === undefined) {
-        return { ok: false, reason: "input did not serialize to JSON" };
-      }
-
-      if (encoding === "object" && typeof input !== "string") {
-        try {
-          return {
-            ok: true,
-            output: await native.executeTool(tool, input, callOptions),
-          };
-        } catch (err) {
-          return { ok: false, reason: describe(err) };
-        }
-      }
-
-      try {
-        const output = await native.executeTool(tool, serialized, callOptions);
-        encoding = "string";
-        return { ok: true, output };
-      } catch (err) {
-        // Retry only on a rejection that provably happened before the tool
-        // ran. Any other failure means parsing succeeded and the handler
-        // may already have committed, so calling again could duplicate a
-        // write. Learning the encoding from that fact also stops probing.
-        if (
-          typeof input === "string" ||
-          options?.signal?.aborted ||
-          !isArgumentFormatRejection(err)
-        ) {
-          if (!isArgumentFormatRejection(err) && !options?.signal?.aborted) {
-            encoding = "string";
-          }
-          return { ok: false, reason: describe(err) };
-        }
-        encoding = "object";
-        try {
-          return {
-            ok: true,
-            output: await native.executeTool(tool, input, callOptions),
-          };
-        } catch (objectErr) {
-          return { ok: false, reason: describe(objectErr) };
-        }
+        return { ok: false, reason: describe(err) };
       }
     },
 

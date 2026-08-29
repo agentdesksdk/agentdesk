@@ -54,7 +54,9 @@ export {
 } from "./webmcp-adapter.ts";
 export {
   createWebMcpClient,
+  type InputEncoding,
   type WebMcpClient,
+  type WebMcpClientOptions,
 } from "./client.ts";
 export {
   defaultValidator,

@@ -4,7 +4,7 @@
 
 ```bash
 pnpm install
-pnpm test        # SDK (142) + P0 startup (4) + demo (96)
+pnpm test        # SDK (147) + P0 startup (4) + demo (96)
 pnpm typecheck   # strict TS across all packages
 pnpm build       # SDK build + P0 + demo static build + site assembly
 pnpm test:pack   # packs the SDK and imports it under plain Node
@@ -130,21 +130,36 @@ executeTool(tool, "{}")                      → {"content":[{"type":"text","tex
 executeTool(tool, '{"name":"Native"}')       → {"content":[{"type":"text","text":"{\"greeting\":\"Hello, Native!\"…
 ```
 
-`createWebMcpClient` serializes input to a JSON string and learns the
-encoding from the first call. The fallback to the object form fires only
-on a rejection that provably happened before the tool ran, matched on the
-argument-format signature above. Any other failure means parsing
-succeeded and the handler may already have committed, so retrying could
-duplicate a write; the client returns the failure instead and remembers
-that the string form is correct. It never retries after an abort, and a
-caller who supplies their own string gets their error verbatim.
+`createWebMcpClient` defaults to the string encoding and **invokes the
+requested tool exactly once**. It never retries and never infers the
+encoding from a failed call.
+
+That restraint is deliberate. An earlier version retried when the error
+text looked like an argument-format rejection, which is unsound: a handler
+can commit a write and then throw any message, including one that matches.
+Error text is not evidence that dispatch never occurred, so it cannot
+gate a retry of a write.
+
+Two supported ways to reach the object encoding, both settled before the
+call:
+
+```ts
+createWebMcpClient(undefined, { encoding: "object" });   // explicit
+await client.negotiateEncoding(readOnlyTool);            // opt-in probe
+```
+
+`negotiateEncoding` may invoke its probe twice, so it refuses any tool not
+declared `readOnlyHint`. The caller's actual operation is never used to
+discover the encoding.
 
 Verified end to end in Chrome 152 through `window.agentdeskClient` on the
-P0 page: `getTools()` returned all seven registered tools, and
+P0 page. Default encoding `string`;
 `callTool(hello_dynamic_tool, {name: "Client"})` returned
-`{"greeting":"Hello, Client!","deterministic":true}` on both the first
-call and a repeat that used the learned encoding. Circular and BigInt
-input return `{ok: false, reason}` rather than rejecting the promise.
+`{"greeting":"Hello, Client!","deterministic":true}`;
+`negotiateEncoding(get_context)` returned `{ok: true, encoding: "string"}`;
+`negotiateEncoding(invoke_capability)` was refused because it is not
+read-only. Circular and BigInt input return `{ok: false, reason}` rather
+than rejecting the promise.
 
 Observed wording for the submission, matching the Codex column. AgentDesk
 dynamically updates the native WebMCP surface, with client rediscovery

@@ -469,16 +469,16 @@ describe("client cancellation, disposal, and origin filtering", () => {
     expect(result).toEqual({ ok: true, output: 'got {"name":"Native"}' });
   });
 
-  it("falls back to the object form for a spec-conformant implementation", async () => {
+  it("uses the object form for a spec-conformant implementation when configured", async () => {
     const executeTool = vi.fn(async (_t: unknown, input: unknown) => {
       if (typeof input === "string") {
-        // Only a pre-execution argument rejection may trigger the retry.
         throw new Error("Failed to parse input arguments");
       }
       return "object accepted";
     });
     const client = createWebMcpClient(
       fakeModelContext({ executeTool }) as never,
+      { encoding: "object" },
     );
     const tool: RegisteredTool = {
       name: "hello",
@@ -487,6 +487,7 @@ describe("client cancellation, disposal, and origin filtering", () => {
     };
     const result = await client.callTool(tool, { name: "Native" });
     expect(result).toEqual({ ok: true, output: "object accepted" });
+    expect(executeTool).toHaveBeenCalledTimes(1);
   });
 
   it("reports an aborted call as a structured failure", async () => {

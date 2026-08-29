@@ -19,6 +19,97 @@ const tool: RegisteredTool = {
   origin: "https://shop.example",
 };
 
+describe("a committed handler that throws is never re-invoked", () => {
+  for (const message of [
+    "invalid input argument: order id was rejected after the audit write",
+    "Failed to parse input arguments after commit",
+  ]) {
+    it(`records one invocation for: ${message.slice(0, 34)}…`, async () => {
+      let commits = 0;
+      const executeTool = vi.fn(async () => {
+        commits += 1;
+        throw new Error(message);
+      });
+      const client = createWebMcpClient(
+        fakeModelContext({ executeTool }) as never,
+      );
+
+      const result = await client.callTool(tool, { order_id: "10428" });
+      expect(commits).toBe(1);
+      expect(executeTool).toHaveBeenCalledTimes(1);
+      expect(result.ok).toBe(false);
+    });
+  }
+});
+
+describe("encoding is chosen before the call, not negotiated by retrying", () => {
+  it("defaults to the string form that shipped Chrome requires", async () => {
+    const seen: unknown[] = [];
+    const executeTool = vi.fn(async (_t: unknown, input: unknown) => {
+      seen.push(input);
+      return "ok";
+    });
+    const client = createWebMcpClient(
+      fakeModelContext({ executeTool }) as never,
+    );
+    await client.callTool(tool, { a: 1 });
+    expect(seen).toEqual([`{"a":1}`]);
+    expect(client.encoding).toBe("string");
+  });
+
+  it("honours an explicit object encoding", async () => {
+    const seen: unknown[] = [];
+    const executeTool = vi.fn(async (_t: unknown, input: unknown) => {
+      seen.push(input);
+      return "ok";
+    });
+    const client = createWebMcpClient(
+      fakeModelContext({ executeTool }) as never,
+      { encoding: "object" },
+    );
+    await client.callTool(tool, { a: 1 });
+    expect(seen).toEqual([{ a: 1 }]);
+  });
+
+  it("negotiates only against a caller-supplied read-only probe", async () => {
+    const calls: unknown[] = [];
+    const executeTool = vi.fn(async (_t: unknown, input: unknown) => {
+      calls.push(input);
+      if (typeof input === "string") {
+        throw new Error("Failed to parse input arguments");
+      }
+      return "object accepted";
+    });
+    const client = createWebMcpClient(
+      fakeModelContext({ executeTool }) as never,
+    );
+    const probe: RegisteredTool = {
+      name: "get_context",
+      description: "Reads context",
+      origin: "https://shop.example",
+      annotations: { readOnlyHint: true },
+    };
+
+    const negotiated = await client.negotiateEncoding(probe);
+    expect(negotiated).toEqual({ ok: true, encoding: "object" });
+    expect(client.encoding).toBe("object");
+
+    calls.length = 0;
+    await client.callTool(tool, { order_id: "10428" });
+    expect(calls).toEqual([{ order_id: "10428" }]);
+  });
+
+  it("refuses to negotiate against a tool that is not read-only", async () => {
+    const executeTool = vi.fn(async () => "ok");
+    const client = createWebMcpClient(
+      fakeModelContext({ executeTool }) as never,
+    );
+    const result = await client.negotiateEncoding(tool);
+    expect(result.ok).toBe(false);
+    expect(executeTool).not.toHaveBeenCalled();
+  });
+});
+
 describe("callTool never executes a write twice", () => {
   it("does not retry when the handler committed and then threw", async () => {
     let commits = 0;
@@ -54,43 +145,20 @@ describe("callTool never executes a write twice", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("retries only after a pre-execution argument-format rejection", async () => {
-    let handlerRuns = 0;
-    const executeTool = vi.fn(async (_t: unknown, input: unknown) => {
-      if (typeof input === "string") {
-        throw new Error("Failed to parse input arguments");
-      }
-      handlerRuns += 1;
-      return "object accepted";
+  it("surfaces an argument-format rejection instead of retrying it", async () => {
+    const executeTool = vi.fn(async () => {
+      throw new Error("Failed to parse input arguments");
     });
     const client = createWebMcpClient(
       fakeModelContext({ executeTool }) as never,
     );
 
     const result = await client.callTool(tool, { order_id: "10428" });
-    expect(result).toEqual({ ok: true, output: "object accepted" });
-    expect(handlerRuns).toBe(1);
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(false);
   });
 
-  it("learns the encoding once and stops probing", async () => {
-    const seen: unknown[] = [];
-    const executeTool = vi.fn(async (_t: unknown, input: unknown) => {
-      seen.push(input);
-      if (typeof input === "string") {
-        throw new Error("Failed to parse input arguments");
-      }
-      return "ok";
-    });
-    const client = createWebMcpClient(
-      fakeModelContext({ executeTool }) as never,
-    );
-
-    await client.callTool(tool, { a: 1 });
-    await client.callTool(tool, { b: 2 });
-    expect(seen).toEqual([`{"a":1}`, { a: 1 }, { b: 2 }]);
-  });
-
-  it("remembers that the string form works and never sends an object", async () => {
+  it("sends the configured encoding on every call", async () => {
     const seen: unknown[] = [];
     const executeTool = vi.fn(async (_t: unknown, input: unknown) => {
       seen.push(input);
