@@ -5,10 +5,19 @@ import type { Receipt } from "./results.ts";
 
 /**
  * READY is undoable, ROLLING_BACK is claimed by an in-flight rollback,
- * ROLLED_BACK is spent. A failed compensating action returns to READY,
- * because a rollback that could not run is a retry, not a dead end.
+ * ROLLED_BACK is spent.
+ *
+ * INDETERMINATE is what a thrown compensating action leaves behind. An
+ * exception proves the handler did not return, never that it did not write,
+ * so returning to READY would invite a second compensating write on top of
+ * one that may already have landed. Only evidence moves a receipt out of
+ * this state, never a caught error.
  */
-export type RollbackState = "READY" | "ROLLING_BACK" | "ROLLED_BACK";
+export type RollbackState =
+  | "READY"
+  | "ROLLING_BACK"
+  | "ROLLED_BACK"
+  | "INDETERMINATE";
 
 export type StoredReceipt = {
   id: string;
@@ -86,9 +95,18 @@ export class ReceiptStore {
     return this.moveRollback(id, "READY", "ROLLING_BACK");
   }
 
-  /** Returns a failed rollback to READY so the caller can retry it. */
+  /**
+   * Returns a rollback to READY. Only safe when the compensating action
+   * provably never ran, either because it was refused before dispatch or
+   * because a verifier established that state is untouched.
+   */
   releaseRollback(id: string): void {
     this.moveRollback(id, "ROLLING_BACK", "READY");
+  }
+
+  /** Parks a rollback whose compensating action may or may not have landed. */
+  markIndeterminate(id: string): void {
+    this.moveRollback(id, "ROLLING_BACK", "INDETERMINATE");
   }
 
   markRolledBack(id: string, at: number): void {

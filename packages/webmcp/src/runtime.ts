@@ -1593,12 +1593,15 @@ export function createAgentDeskRuntime(options: {
       // undos cannot both reach the compensating action.
       const session = claimSession();
       if (!receipts.claimRollback(receiptId)) {
+        const state = receipts.get(receiptId)?.rollbackState;
         return {
           ok: false,
           reason:
-            receipts.get(receiptId)?.rollbackState === "ROLLED_BACK"
+            state === "ROLLED_BACK"
               ? `${receiptId} was already rolled back`
-              : `${receiptId} is already being rolled back`,
+              : state === "INDETERMINATE"
+                ? `rollback of ${receiptId} is indeterminate and will not be retried automatically, because a compensating action that failed after dispatch may already have changed the application`
+                : `${receiptId} is already being rolled back`,
         };
       }
       // Same capture rule as an execution: the undo belongs to whoever
@@ -1651,16 +1654,31 @@ export function createAgentDeskRuntime(options: {
         emit();
         return { ok: true, result };
       } catch (err) {
-        receipts.releaseRollback(receiptId);
+        const detail = err instanceof Error ? err.message : String(err);
+        // The handler threw after it was dispatched, so it may have written.
+        // Only the capability own verifier can settle that, and finding
+        // the original write still intact is the one proof the compensation
+        // never landed.
+        const settled = routed.verify
+          ? await runVerification(routed, stored.input, stored.receipt.changes)
+          : undefined;
+        if (settled?.status === "VERIFIED") {
+          receipts.releaseRollback(receiptId);
+        } else {
+          receipts.markIndeterminate(receiptId);
+        }
         if (session.expired()) {
           return {
             ok: false,
             reason: `${receiptId} belongs to a session that ended while the undo was running`,
           };
         }
+        if (settled?.status === "VERIFIED") {
+          return { ok: false, reason: detail };
+        }
         return {
           ok: false,
-          reason: err instanceof Error ? err.message : String(err),
+          reason: `rollback of ${receiptId} is indeterminate: the compensating action failed after dispatch, so whether it changed anything is unknown until the application reconciles it. Original failure: ${detail}`,
         };
       }
     },
