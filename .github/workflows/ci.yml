@@ -29,3 +29,5 @@ jobs:
         if: ${{ !cancelled() }}
       - run: pnpm test:pack
         if: ${{ !cancelled() }}
+      - run: pnpm run check:docs
+        if: ${{ !cancelled() }}

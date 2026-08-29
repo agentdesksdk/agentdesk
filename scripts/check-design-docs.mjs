@@ -93,7 +93,11 @@ for (const file of readdirSync(designDir).filter((f) => f.endsWith(".md"))) {
       const source = readFileSync(target, "utf8");
       for (const symbol of symbols) {
         anchorCount += 1;
-        if (!source.includes(symbol)) {
+        // Whole identifier, not a substring. `includes` kept passing after
+        // `expectedRevision` became `expectedRevisionAt`, which is exactly
+        // the rename an anchor exists to catch.
+        const whole = new RegExp(String.raw`(?<![A-Za-z0-9_$])${symbol}(?![A-Za-z0-9_$])`);
+        if (!whole.test(source)) {
           failures.push(`${file} anchors ${relPath} \`${symbol}\`, which is gone`);
         }
       }
