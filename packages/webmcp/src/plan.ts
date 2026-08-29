@@ -3,10 +3,11 @@ import type { CapabilityName, Change, RiskLevel } from "./capability.ts";
 export type PlanId = string & { readonly __brand: "PlanId" };
 
 /**
- * Who is acting. Attached to every audit event, receipt, and presentation
- * event so "who changed this" is answerable after the fact. Deliberately
- * not an authentication claim: the application asserts it, the runtime
- * records it.
+ * Who is acting. Recorded on receipts, on presentation events, and on the
+ * execution audit events, so "who changed this" is answerable after the
+ * fact. It is not on every audit event. Deliberately not an
+ * authentication claim. The application asserts it, the runtime records
+ * it.
  */
 export type Actor = {
   id: string;
@@ -39,11 +40,18 @@ export type OperationOutcome = {
   verification: VerificationResult;
 };
 
+/**
+ * COMMITTED means every operation ran and nothing was disproved.
+ * PARTIAL means the plan reached the end without failing and without
+ * earning that claim, because an operation was skipped or a verifier
+ * returned MISMATCH.
+ */
 export type PlanStatus =
   | "DRAFT"
   | "APPROVED"
   | "COMMITTING"
   | "COMMITTED"
+  | "PARTIAL"
   | "REJECTED"
   | "DRIFTED"
   | "FAILED";
@@ -60,7 +68,10 @@ export type OperationPlan = {
    * describes reality.
    */
   expectedRevision?: string;
-  actor?: Actor;
+  /** Who asked for the plan, captured at `prepare`. */
+  requestedBy?: Actor;
+  /** Who authorized it, captured at `approvePlan`. */
+  approvedBy?: Actor;
   createdAt: number;
   status: PlanStatus;
   /** Present once the plan reaches a terminal state. */

@@ -1,4 +1,5 @@
 import type { RiskLevel } from "./capability.ts";
+import type { Actor } from "./plan.ts";
 import type { Receipt } from "./results.ts";
 
 export type AuditEvent =
@@ -46,6 +47,7 @@ export type AuditEvent =
       kind: "execution_started";
       capability: string;
       executionId: string;
+      actor?: Actor;
       at: number;
     }
   | {
@@ -53,6 +55,7 @@ export type AuditEvent =
       capability: string;
       executionId: string;
       receipt?: Receipt;
+      actor?: Actor;
       at: number;
     }
   | {
@@ -60,6 +63,7 @@ export type AuditEvent =
       capability: string;
       executionId: string;
       error: string;
+      actor?: Actor;
       at: number;
     }
   | {
@@ -80,6 +84,16 @@ export type AuditEvent =
     }
   | {
       kind: "plan_committed";
+      planId: string;
+      outcomes: Array<{
+        capability: string;
+        status: string;
+        verification: string;
+      }>;
+      at: number;
+    }
+  | {
+      kind: "plan_partial";
       planId: string;
       outcomes: Array<{
         capability: string;

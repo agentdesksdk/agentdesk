@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createAgentDeskRuntime } from "@agentdesk/webmcp";
 import { capabilities } from "../src/capabilities/index.ts";
-import { getState, resetStore } from "../src/data/store.ts";
+import { getState, mutate, resetStore } from "../src/data/store.ts";
 
 function revision(): string {
   const state = getState();
@@ -42,7 +42,7 @@ describe("demo verification and rollback", () => {
     const stored = runtime.queryReceipts({ capability: "refund_shipping" });
     expect(stored).toHaveLength(1);
     expect(stored[0]?.verification.status).toBe("VERIFIED");
-    expect(stored[0]?.actor?.id).toBe("agent");
+    expect(stored[0]?.executedBy?.id).toBe("agent");
   });
 
   it("rolling back restores the order, the invoice, and the credit ledger", async () => {
@@ -64,6 +64,27 @@ describe("demo verification and rollback", () => {
       invoiceBefore.status,
     );
     expect(getState().credits).toHaveLength(creditsBefore);
+  });
+
+  it("refuses to roll back once the credit the receipt named is gone", async () => {
+    const runtime = await startRuntime();
+    await refundHeroOrder(runtime);
+    const stored = runtime.queryReceipts({ capability: "refund_shipping" })[0]!;
+
+    // The order still reads as refunded, so the SDK verifier is satisfied.
+    // Only the demo's own guard can catch that the credit moved.
+    mutate((draft) => {
+      draft.credits = [];
+    });
+
+    const undone = await runtime.rollback(stored.id);
+    expect(undone.ok).toBe(false);
+    if (!undone.ok) {
+      expect(undone.reason).toMatch(/Credit CR-\d+ is already gone/);
+    }
+    expect(
+      getState().invoices.find((i) => i.orderId === "10428")!.status,
+    ).toBe("partially_refunded");
   });
 
   it("refuses to commit a plan prepared against stale application state", async () => {
