@@ -164,6 +164,11 @@ export type AgentDeskRuntime = {
 
   /** Queryable history of what actually changed, with verification. */
   queryReceipts: (filter?: ReceiptQuery) => StoredReceipt[];
+  /** Records that a human looked at a receipt. */
+  markReviewed: (
+    receiptId: string,
+    by?: Actor,
+  ) => { ok: true } | { ok: false; reason: string };
   /** Optional. Reports unsupported rather than pretending every app undoes. */
   rollback: (
     receiptId: string,
@@ -303,10 +308,21 @@ export function createAgentDeskRuntime(options: {
     capability: Capability,
     phase: PresentationPhase,
     input: Record<string, unknown>,
+    execution?: { executionId: string; humanInitiated: boolean },
   ): void {
-    presentation.emit(
-      resolvePresentation(capability, phase, input, context, now(), actor),
+    const event = resolvePresentation(
+      capability,
+      phase,
+      input,
+      context,
+      now(),
+      actor,
     );
+    if (execution) {
+      event.executionId = execution.executionId;
+      event.humanInitiated = execution.humanInitiated;
+    }
+    presentation.emit(event);
   }
 
   function snapshot(): RuntimeSnapshot {
@@ -481,12 +497,10 @@ export function createAgentDeskRuntime(options: {
         capability.approvalEvidence,
       );
     }
-    const outcome = await executeNow(
-      capability,
-      input,
+    const outcome = await executeNow(capability, input, {
       signal,
       idempotencyKey,
-    );
+    });
     return outcome.result;
   }
 
@@ -529,6 +543,18 @@ export function createAgentDeskRuntime(options: {
       }
     | { ok: false; result: ToolResult };
 
+  type ExecutionOptions = {
+    signal?: AbortSignal | undefined;
+    idempotencyKey?: string | undefined;
+    planId?: string | undefined;
+    /**
+     * Only `approve` sets this. A UI may hand keyboard focus to an
+     * execution a human authorized and to no other, so an agent working in
+     * the background must never be able to reach focus.
+     */
+    humanInitiated?: boolean | undefined;
+  };
+
   /**
    * A broken verifier must not turn a completed write into a failure, so a
    * throw is reported as an unverifiable outcome rather than propagated.
@@ -555,10 +581,9 @@ export function createAgentDeskRuntime(options: {
   async function executeNow(
     capability: Capability,
     input: Record<string, unknown>,
-    signal?: AbortSignal,
-    idempotencyKey?: string,
-    planId?: string,
+    opts: ExecutionOptions = {},
   ): Promise<ExecutionOutcome> {
+    const { idempotencyKey } = opts;
     if (idempotencyKey !== undefined) {
       const slot = `${capability.name}:${idempotencyKey}`;
       const fingerprint = fingerprintInput(input);
@@ -587,27 +612,20 @@ export function createAgentDeskRuntime(options: {
         settled: false,
       };
       idempotency.set(slot, entry);
-      const outcome = await runExecution(
-        capability,
-        input,
-        signal,
-        idempotencyKey,
-        planId,
-      );
+      const outcome = await runExecution(capability, input, opts);
       entry.settled = true;
       settle(outcome.result);
       return outcome;
     }
-    return runExecution(capability, input, signal, undefined, planId);
+    return runExecution(capability, input, opts);
   }
 
   async function runExecution(
     capability: Capability,
     input: Record<string, unknown>,
-    signal: AbortSignal | undefined,
-    idempotencyKey: string | undefined,
-    planId?: string,
+    opts: ExecutionOptions,
   ): Promise<ExecutionOutcome> {
+    const { signal, idempotencyKey, planId, humanInitiated = false } = opts;
     const executionId = `EXE-${++executionCounter}`;
     const startedEpoch = epoch;
     const linked = linkSignals(signal, epochController.signal);
@@ -663,7 +681,10 @@ export function createAgentDeskRuntime(options: {
           ...(actor !== undefined ? { actor } : {}),
         });
       }
-      present(capability, "capability_completed", input);
+      present(capability, "capability_completed", input, {
+        executionId,
+        humanInitiated,
+      });
       emit();
       return { ok: true, value, result: toToolResult(value), verification };
     } catch (err) {
@@ -691,7 +712,10 @@ export function createAgentDeskRuntime(options: {
         error: message,
         at: now(),
       });
-      present(capability, "capability_failed", input);
+      present(capability, "capability_failed", input, {
+        executionId,
+        humanInitiated,
+      });
       emit();
       return { ok: false, result: errorResult(message) };
     } finally {
@@ -748,13 +772,7 @@ export function createAgentDeskRuntime(options: {
         );
       }
 
-      const outcome = await executeNow(
-        routed,
-        operation.input,
-        undefined,
-        undefined,
-        planId,
-      );
+      const outcome = await executeNow(routed, operation.input, { planId });
       if (!outcome.ok) {
         return {
           capability: operation.capability,
@@ -1191,6 +1209,28 @@ export function createAgentDeskRuntime(options: {
       return receipts.query(filter);
     },
 
+    // A review is a human act. The caller names who, because the runtime's
+    // ambient actor is the agent and recording a person as the agent would
+    // make the provenance record say the opposite of what happened.
+    markReviewed(receiptId, by) {
+      const stored = receipts.get(receiptId);
+      if (!stored) {
+        return { ok: false, reason: `unknown receipt: ${receiptId}` };
+      }
+      if (stored.reviewedAt !== undefined) {
+        return { ok: false, reason: `${receiptId} was already reviewed` };
+      }
+      receipts.markReviewed(receiptId, now(), by ?? actor);
+      audit.append({
+        kind: "receipt_reviewed",
+        capability: stored.capability,
+        receiptId,
+        at: now(),
+      });
+      emit();
+      return { ok: true };
+    },
+
     async rollback(receiptId) {
       const stored = receipts.get(receiptId);
       if (!stored) {
@@ -1322,7 +1362,9 @@ export function createAgentDeskRuntime(options: {
         capability: action.capability,
         at: now(),
       });
-      const outcome = await executeNow(routed, action.input);
+      const outcome = await executeNow(routed, action.input, {
+        humanInitiated: true,
+      });
       if (outcome.ok) {
         approvals.resolve(actionId, {
           status: "APPROVED_EXECUTED",

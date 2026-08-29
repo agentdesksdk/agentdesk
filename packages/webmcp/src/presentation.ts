@@ -8,6 +8,14 @@ export type PresentationPhase =
   | "capability_completed"
   | "capability_failed";
 
+/**
+ * Whether a completed action may take the human's keyboard focus.
+ * "on_explicit_request" still requires the runtime to report the execution
+ * as human-authorized, so an agent working in the background cannot reach
+ * focus by declaring a policy.
+ */
+export type FocusPolicy = "never" | "on_explicit_request";
+
 export type PresentationEvent = {
   phase: PresentationPhase;
   capability: string;
@@ -20,6 +28,14 @@ export type PresentationEvent = {
   reveal?: string;
   /** Short narration for the human. */
   message?: string;
+  /** Application-authored focus policy for `reveal`. Absent means never. */
+  focus?: FocusPolicy;
+  /** Short screen-reader sentence for the completed action. */
+  announce?: string;
+  /** Correlates with the audit trail, and bounds focus to once per execution. */
+  executionId?: string;
+  /** True only when a human authorized this execution through `approve`. */
+  humanInitiated?: boolean;
   at: number;
 };
 
@@ -78,6 +94,16 @@ export function resolvePresentation(
   }
   if (spec.reveal !== undefined) {
     event.reveal = spec.reveal;
+  }
+  if (spec.focus !== undefined) {
+    event.focus = spec.focus;
+  }
+  const announce =
+    typeof spec.announce === "function"
+      ? spec.announce(input, ctx)
+      : spec.announce;
+  if (announce !== undefined) {
+    event.announce = announce;
   }
   const message =
     typeof spec.message === "function" ? spec.message(input, ctx) : spec.message;

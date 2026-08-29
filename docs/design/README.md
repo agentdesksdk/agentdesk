@@ -58,3 +58,24 @@ post-write verification, queryable receipt history, and rollback are in
 The line between the two groups is whether the work needs a browser
 extension or a code generator. Everything that does is deferred. Everything
 that is a property of the runtime itself was in scope and is done.
+
+## The accessibility contract constrains the extension
+
+A second review, against AccessLint's Prove It, raised focus handoff and
+navigable receipts. Those are runtime properties, so they were built rather
+than deferred. See `docs/accessibility.md`.
+
+One consequence lands squarely on the deferred work and is recorded here so
+it is not rediscovered later. AgentDesk moves keyboard focus only to an
+application-registered reveal target, and only when the human authorized
+that specific execution. There is deliberately no tool that accepts a CSS
+selector, because a selector-taking tool hands an agent the ability to move
+a person's focus anywhere on the page.
+
+`browser-extension.md` is where that guarantee is hardest to keep. An
+extension that adapts a site it does not own has no application author to
+register reveal targets, so it would have to infer them. Inferred targets
+are exactly the arbitrary-selector case the runtime refuses. The extension
+design therefore needs a registration step that a human confirms once per
+site, and it cannot silently promote an inferred anchor into a focus
+target. Whatever else changes in that design, this constraint holds.

@@ -1,6 +1,21 @@
-import type { AuditEvent, Receipt, VerificationResult } from "@agentdesk/webmcp";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import type {
+  AffectedObject,
+  AuditEvent,
+  Receipt,
+  VerificationResult,
+} from "@agentdesk/webmcp";
 import { render } from "./ApprovalCards.tsx";
 import { useRuntime } from "./hooks.ts";
+import {
+  describeAction,
+  reviewRefusedAnnouncement,
+  reviewedAnnouncement,
+  rollbackRefusedAnnouncement,
+  rolledBackAnnouncement,
+} from "./receipt-text.ts";
+import { revealTarget } from "./reveal.ts";
 import { agentdesk } from "../runtime/agentdesk.ts";
 
 type Rendered = {
@@ -170,6 +185,30 @@ function collapse(events: readonly AuditEvent[]): Rendered[] {
           meta: event.receiptId,
         });
         break;
+      case "receipt_reviewed":
+        out.push({
+          key,
+          at: event.at,
+          head: "Reviewed",
+          cap: event.capability,
+          meta: event.receiptId,
+        });
+        break;
+      case "policy_denied":
+        out.push({
+          key,
+          at: event.at,
+          head: "Policy denied",
+          cap: event.capability,
+          meta: event.reason,
+        });
+        break;
+      // A new audit kind has to get a case above; this stops it compiling
+      // rather than letting it vanish from the panel.
+      default: {
+        const unhandled: never = event;
+        void unhandled;
+      }
     }
   }
   flush();
@@ -178,6 +217,14 @@ function collapse(events: readonly AuditEvent[]): Rendered[] {
 
 function clock(at: number): string {
   return new Date(at).toLocaleTimeString([], { hour12: false });
+}
+
+const AFFECTED_ROUTE: Record<string, (id: string) => string> = {
+  order: (id) => `/orders/${id}`,
+};
+
+function receiptSectionId(receiptId: string): string {
+  return `receipt-${receiptId}`;
 }
 
 function verificationLabel(result: VerificationResult): string {
@@ -195,12 +242,43 @@ function verificationLabel(result: VerificationResult): string {
 
 export function ActivityPanel() {
   const snapshot = useRuntime();
+  const navigate = useNavigate();
+  const { mode } = useParams();
+  const revealTimer = useRef<number | undefined>(undefined);
+  const [announcement, setAnnouncement] = useState("");
+  const [pendingFocus, setPendingFocus] = useState<string | null>(null);
   const rows = collapse(snapshot.audit).slice(0, 80);
   const stored = new Map(
     agentdesk.queryReceipts().map((entry) => [entry.executionId, entry]),
   );
+
+  // Both actions replace the button that held focus with a static span, so
+  // focus has to be placed on the surviving receipt before the browser
+  // drops it to document.body.
+  useEffect(() => {
+    if (pendingFocus === null) {
+      return;
+    }
+    document.getElementById(receiptSectionId(pendingFocus))?.focus();
+    setPendingFocus(null);
+  }, [pendingFocus]);
+
+  function goToAffected(object: AffectedObject) {
+    const route = AFFECTED_ROUTE[object.kind]?.(object.id);
+    if (!route) {
+      return;
+    }
+    navigate(`/${mode ?? "agentdesk"}${route}`);
+    if (object.reveal) {
+      revealTarget(object.reveal, revealTimer, { highlight: true, focus: true });
+    }
+  }
+
   return (
     <div className="activity">
+      <p className="visually-hidden" role="status" aria-live="polite">
+        {announcement}
+      </p>
       <div className="rail-section" style={{ borderBottom: "none", padding: "14px 0 4px" }}>
         <h3>AgentDesk activity</h3>
       </div>
@@ -209,66 +287,119 @@ export function ActivityPanel() {
           No activity yet. Connect a WebMCP client or route a task to begin.
         </div>
       ) : (
-        rows.map((row) => (
-          <div key={row.key} className="event">
-            <time>{clock(row.at)}</time>
-            <div className="what">
-              <div>
-                {row.cap ? <span className="cap">{row.cap} </span> : null}
-                {row.risk ? <span className={`risk ${row.risk}`}>{row.risk}</span> : null}
-                {row.cap || row.risk ? " " : null}
-                {row.head}
-              </div>
-              {row.meta ? <div className="meta">{row.meta}</div> : null}
-              {row.receipt ? (
-                <div className="receipt">
-                  <div className="receipt-head">
-                    Receipt · {row.receipt.entity}
-                  </div>
-                  {row.receipt.changes.map((change) => (
-                    <div key={change.field} className="change-row">
-                      <span className="field">{change.field}</span>
-                      <span className="before">{render(change.before)}</span>
-                      <span className="arrow">→</span>
-                      <span className="after">{render(change.after)}</span>
-                    </div>
-                  ))}
-                  {(() => {
-                    const entry = row.executionId
-                      ? stored.get(row.executionId)
-                      : undefined;
-                    if (!entry) {
-                      return null;
-                    }
-                    return (
-                      <div className="receipt-foot">
-                        <span
-                          className={`verify ${entry.verification.status}`}
-                          title={verificationLabel(entry.verification)}
-                        >
-                          {verificationLabel(entry.verification)}
-                        </span>
-                        {entry.rolledBackAt !== undefined ? (
-                          <span className="undone">Rolled back</span>
-                        ) : entry.receipt.undoable !== true ? null : (
-                          <button
-                            type="button"
-                            className="undo"
-                            onClick={() => {
-                              void agentdesk.rollback(entry.id);
-                            }}
-                          >
-                            Undo
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })()}
+        rows.map((row) => {
+          const entry = row.executionId ? stored.get(row.executionId) : undefined;
+          return (
+            <div key={row.key} className="event">
+              <time>{clock(row.at)}</time>
+              <div className="what">
+                <div>
+                  {row.cap ? <span className="cap">{row.cap} </span> : null}
+                  {row.risk ? <span className={`risk ${row.risk}`}>{row.risk}</span> : null}
+                  {row.cap || row.risk ? " " : null}
+                  {row.head}
                 </div>
-              ) : null}
+                {row.meta ? <div className="meta">{row.meta}</div> : null}
+                {row.receipt ? (
+                  <section
+                    className="receipt"
+                    id={entry ? receiptSectionId(entry.id) : undefined}
+                    tabIndex={-1}
+                    aria-label={`Receipt for ${row.receipt.entity}`}
+                  >
+                    <div className="receipt-head">
+                      Receipt · {row.receipt.entity}
+                    </div>
+                    {row.receipt.changes.map((change) => (
+                      <div key={change.field} className="change-row">
+                        <span className="field">{change.field}</span>
+                        <span className="before">{render(change.before)}</span>
+                        <span className="arrow">→</span>
+                        <span className="after">{render(change.after)}</span>
+                      </div>
+                    ))}
+                    {(() => {
+                      if (!entry) {
+                        return null;
+                      }
+                      const action = describeAction(entry);
+                      return (
+                        <div className="receipt-foot">
+                          <span
+                            className={`verify ${entry.verification.status}`}
+                            title={verificationLabel(entry.verification)}
+                          >
+                            {verificationLabel(entry.verification)}
+                          </span>
+                          <div className="receipt-actions">
+                            {(entry.receipt.affected ?? []).map((object) => (
+                              <button
+                                key={`${object.kind}-${object.id}`}
+                                type="button"
+                                className="undo"
+                                aria-label={`Go to ${object.label}, changed by ${entry.capability.replace(/_/g, " ")}`}
+                                onClick={() => goToAffected(object)}
+                              >
+                                {object.label}
+                              </button>
+                            ))}
+                            {entry.reviewedAt !== undefined ? (
+                              <span className="undone">Reviewed</span>
+                            ) : (
+                              <button
+                                type="button"
+                                className="undo"
+                                aria-label={`Mark ${action} reviewed`}
+                                onClick={() => {
+                                  const outcome = agentdesk.markReviewed(entry.id);
+                                  setAnnouncement(
+                                    outcome.ok
+                                      ? reviewedAnnouncement(entry)
+                                      : reviewRefusedAnnouncement(
+                                          entry,
+                                          outcome.reason,
+                                        ),
+                                  );
+                                  setPendingFocus(entry.id);
+                                }}
+                              >
+                                Mark reviewed
+                              </button>
+                            )}
+                            {entry.rolledBackAt !== undefined ? (
+                              <span className="undone">Rolled back</span>
+                            ) : entry.receipt.undoable !== true ? null : (
+                              <button
+                                type="button"
+                                className="undo"
+                                aria-label={`Undo ${action}`}
+                                onClick={() => {
+                                  void agentdesk.rollback(entry.id).then((outcome) => {
+                                    setAnnouncement(
+                                      outcome.ok
+                                        ? rolledBackAnnouncement(entry)
+                                        : rollbackRefusedAnnouncement(
+                                            entry,
+                                            outcome.reason,
+                                          ),
+                                    );
+                                    setPendingFocus(entry.id);
+                                  });
+                                }}
+                              >
+                                Undo
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </section>
+                ) : null}
+              </div>
             </div>
-          </div>
-        ))
+          );
+        })
       )}
     </div>
   );

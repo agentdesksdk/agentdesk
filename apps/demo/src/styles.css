@@ -41,6 +41,25 @@ body {
   height: 100vh;
 }
 
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -48px;
+  z-index: 10;
+  background: var(--accent);
+  color: #fff;
+  padding: 8px 14px;
+  border-radius: 0 0 8px 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: top 120ms ease;
+}
+
+.skip-link:focus {
+  top: 0;
+}
+
 .topbar {
   grid-area: topbar;
   display: flex;
@@ -147,15 +166,26 @@ body {
   flex-direction: column;
 }
 
+/*
+ * The rail stacks below the content rather than disappearing. Hiding it
+ * would take receipts, review, and undo away from anyone at high browser
+ * zoom, which reduces the effective viewport exactly like a narrow window.
+ */
 @media (max-width: 1100px) {
   .shell {
     grid-template-columns: 190px minmax(0, 1fr);
+    grid-template-rows: 56px minmax(0, 1fr) auto;
     grid-template-areas:
       "topbar topbar"
-      "sidebar main";
+      "sidebar main"
+      "rail rail";
+    height: auto;
+    min-height: 100vh;
   }
   .rail {
-    display: none;
+    border-left: none;
+    border-top: 1px solid var(--line);
+    max-height: 70vh;
   }
 }
 
@@ -757,6 +787,14 @@ input[type="text"]:focus {
   color: var(--accent);
 }
 
+.receipt-actions {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
 .undone {
   flex: none;
   font-size: 11px;
@@ -839,8 +877,29 @@ input[type="text"]:focus {
   }
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .agent-reveal {
   animation: reveal-flash 2.4s ease;
+}
+
+/* Programmatic focus lands on a panel or a receipt, neither of which has a
+   ring of its own. */
+[data-reveal]:focus-visible,
+.receipt:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 @keyframes reveal-flash {

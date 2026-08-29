@@ -103,6 +103,12 @@ export type AuditEvent =
       capability: string;
       receiptId: string;
       at: number;
+    }
+  | {
+      kind: "receipt_reviewed";
+      capability: string;
+      receiptId: string;
+      at: number;
     };
 
 const MAX_EVENTS = 1000;

@@ -24,7 +24,12 @@ export function Shipping() {
           hint={`${refunded.length} order${refunded.length === 1 ? "" : "s"}`}
         />
       </div>
-      <div className="panel" data-reveal="pending-shipments">
+      <div
+        className="panel"
+        data-reveal="pending-shipments"
+        role="region"
+        aria-label="Orders awaiting shipment"
+      >
         <h2>Awaiting shipment</h2>
         <table className="data">
           <thead>

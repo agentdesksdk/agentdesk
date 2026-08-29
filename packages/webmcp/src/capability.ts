@@ -29,6 +29,7 @@ export type ExecutionContext = AppContext & {
   idempotencyKey?: string;
 };
 
+import type { FocusPolicy } from "./presentation.ts";
 import type { VerificationResult } from "./plan.ts";
 
 export type RiskLevel = "READ" | "WRITE" | "CONSEQUENTIAL";
@@ -52,6 +53,16 @@ export type Presentation = {
   reveal?: string;
   /** Short narration, e.g. "Checking whether shipping was paid". */
   message?:
+    | string
+    | ((input: Record<string, unknown>, ctx: AppContext) => string);
+  /** Whether a completed action may move keyboard focus to `reveal`. */
+  focus?: FocusPolicy;
+  /**
+   * Short screen-reader sentence for the completed action. Takes input so
+   * the announcement can name the entity; "refund applied" without saying
+   * to what is not usable by someone who cannot see the screen.
+   */
+  announce?:
     | string
     | ((input: Record<string, unknown>, ctx: AppContext) => string);
 };

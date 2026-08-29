@@ -57,6 +57,9 @@ export function AppShell() {
 
   return (
     <div className="shell">
+      <a className="skip-link" href="#main-content">
+        Skip to main content
+      </a>
       <header className="topbar">
         <div className="brand">
           Meridian Ops
@@ -99,7 +102,7 @@ export function AppShell() {
           Reset Demo
         </button>
       </header>
-      <aside className="sidebar">
+      <aside className="sidebar" aria-label="Sections">
         <nav>
           {NAV.map(([path, label]) => (
             <NavLink
@@ -120,7 +123,7 @@ export function AppShell() {
           </NavLink>
         </nav>
       </aside>
-      <main className="main">
+      <main className="main" id="main-content" tabIndex={-1}>
         <AgentPresence mode={presence} />
         {mode === "baseline" ? (
           <div className="banner-baseline">
@@ -134,7 +137,7 @@ export function AppShell() {
         ) : null}
         <Outlet />
       </main>
-      <aside className="rail">
+      <aside className="rail" aria-label="AgentDesk activity and receipts">
         <Inspector />
         <ActivityPanel />
       </aside>

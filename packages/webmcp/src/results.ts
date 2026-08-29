@@ -96,6 +96,17 @@ export function approvalRequired(
 }
 
 /**
+ * An object the write touched, named so a human can navigate to it. The
+ * `reveal` anchor is an application-registered opaque id, never a selector.
+ */
+export type AffectedObject = {
+  kind: string;
+  id: string;
+  label: string;
+  reveal?: string;
+};
+
+/**
  * Application-authored evidence of a completed write: which entity
  * changed, field-level before/after, and whether it can be undone. The
  * runtime carries receipts verbatim into the tool result, the audit
@@ -106,6 +117,7 @@ export type Receipt = {
   changes: Change[];
   undoable?: boolean;
   note?: string;
+  affected?: AffectedObject[];
 };
 
 const RECEIPT = Symbol.for("agentdesk.receipt");

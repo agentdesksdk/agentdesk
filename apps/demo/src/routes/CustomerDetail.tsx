@@ -37,7 +37,12 @@ export function CustomerDetail() {
         {customer.email} · {customer.phone} · {customer.city}, {customer.country}
       </p>
       <div className="grid-2">
-        <div className="panel" data-reveal="customer-orders">
+        <div
+          className="panel"
+          data-reveal="customer-orders"
+          role="region"
+          aria-label={`Orders for ${customer.name}`}
+        >
           <h2>Orders</h2>
           <table className="data">
             <thead>
@@ -84,7 +89,12 @@ export function CustomerDetail() {
               </table>
             )}
           </div>
-          <div className="panel" data-reveal="customer-credits">
+          <div
+            className="panel"
+            data-reveal="customer-credits"
+            role="region"
+            aria-label={`Credits for ${customer.name}`}
+          >
             <h2>Credits</h2>
             {credits.length === 0 ? (
               <div className="empty">No credits issued.</div>

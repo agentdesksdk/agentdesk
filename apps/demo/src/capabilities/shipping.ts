@@ -132,6 +132,13 @@ export const shippingCapabilities: Capability[] = [
     presentation: {
       route: orderRoute,
       reveal: "shipping-summary",
+      focus: "on_explicit_request",
+      announce: (input) => {
+        const order = orderFromInput(input);
+        return order
+          ? `Shipping refund of ${money(order.shippingFee)} applied to order ${order.id}. The shipping summary now shows the refunded fee.`
+          : "Shipping refund applied. The shipping summary now shows the refunded fee.";
+      },
       message: (input) =>
         `Preparing a shipping refund for order #${String(input.order_id ?? "")}`,
     },
@@ -266,6 +273,14 @@ export const shippingCapabilities: Capability[] = [
         entity: `Order #${order.id}`,
         changes,
         undoable: true,
+        affected: [
+          {
+            kind: "order",
+            id: order.id,
+            label: `Order #${order.id}`,
+            reveal: "shipping-summary",
+          },
+        ],
         note: "Reversible: rolling back clears the credit and restores the invoice.",
         result: {
           order_id: order.id,

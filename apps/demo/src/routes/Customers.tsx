@@ -29,7 +29,12 @@ export function Customers() {
           onChange={(event) => setFilter(event.target.value)}
         />
       </div>
-      <div className="panel" data-reveal="customers-table">
+      <div
+        className="panel"
+        data-reveal="customers-table"
+        role="region"
+        aria-label="Customers"
+      >
         <table className="data">
           <thead>
             <tr>

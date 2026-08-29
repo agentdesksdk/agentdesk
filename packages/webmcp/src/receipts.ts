@@ -16,6 +16,12 @@ export type StoredReceipt = {
   at: number;
   /** Set once a rollback has been performed against this receipt. */
   rolledBackAt?: number;
+  /**
+   * Review state sits beside the receipt, never inside it. Marking
+   * something reviewed does not change what occurred.
+   */
+  reviewedAt?: number;
+  reviewedBy?: Actor;
 };
 
 export type ReceiptQuery = {
@@ -24,6 +30,7 @@ export type ReceiptQuery = {
   actorId?: string;
   since?: number;
   limit?: number;
+  reviewed?: boolean;
 };
 
 /**
@@ -67,6 +74,18 @@ export class ReceiptStore {
     }
   }
 
+  markReviewed(id: string, at: number, by?: Actor): void {
+    const index = this.receipts.findIndex((entry) => entry.id === id);
+    const existing = this.receipts[index];
+    if (existing) {
+      this.receipts[index] = deepFreeze({
+        ...existing,
+        reviewedAt: at,
+        ...(by !== undefined ? { reviewedBy: structuredClone(by) } : {}),
+      });
+    }
+  }
+
   query(filter: ReceiptQuery = {}): StoredReceipt[] {
     const matched = this.receipts.filter(
       (entry) =>
@@ -74,7 +93,9 @@ export class ReceiptStore {
           entry.capability === filter.capability) &&
         (filter.planId === undefined || entry.planId === filter.planId) &&
         (filter.actorId === undefined || entry.actor?.id === filter.actorId) &&
-        (filter.since === undefined || entry.at >= filter.since),
+        (filter.since === undefined || entry.at >= filter.since) &&
+        (filter.reviewed === undefined ||
+          (entry.reviewedAt !== undefined) === filter.reviewed),
     );
     const newestFirst = matched.reverse();
     return filter.limit === undefined

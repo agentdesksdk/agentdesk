@@ -41,7 +41,12 @@ export function OrderDetail() {
         </Link>
       </p>
       <div className="grid-2">
-        <div className="panel" data-reveal="order-items">
+        <div
+          className="panel"
+          data-reveal="order-items"
+          role="region"
+          aria-label={`Items on order #${order.id}`}
+        >
           <h2>Items</h2>
           <table className="data">
             <thead>
@@ -86,7 +91,12 @@ export function OrderDetail() {
           </table>
         </div>
         <div>
-          <div className="panel" data-reveal="shipping-summary">
+          <div
+            className="panel"
+            data-reveal="shipping-summary"
+            role="region"
+            aria-label={`Shipping summary for order #${order.id}`}
+          >
             <h2>Shipping</h2>
             <div className="stat-row">
               <span>Address</span>
@@ -121,7 +131,12 @@ export function OrderDetail() {
               </div>
             ) : null}
           </div>
-          <div className="panel" data-reveal="order-billing">
+          <div
+            className="panel"
+            data-reveal="order-billing"
+            role="region"
+            aria-label={`Billing for order #${order.id}`}
+          >
             <h2>Billing</h2>
             {invoice ? (
               <>

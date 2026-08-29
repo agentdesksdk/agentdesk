@@ -34,6 +34,7 @@ export {
   type StoredReceipt,
 } from "./receipts.ts";
 export {
+  type FocusPolicy,
   type PresentationEvent,
   type PresentationListener,
   type PresentationPhase,
@@ -111,5 +112,6 @@ export {
   receipt,
   toolRetired,
   validationFailed,
+  type AffectedObject,
   type Receipt,
 } from "./results.ts";

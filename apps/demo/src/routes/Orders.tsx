@@ -29,7 +29,12 @@ export function Orders() {
           </button>
         ))}
       </div>
-      <div className="panel" data-reveal="orders-table">
+      <div
+        className="panel"
+        data-reveal="orders-table"
+        role="region"
+        aria-label="Orders"
+      >
         <table className="data">
           <thead>
             <tr>
