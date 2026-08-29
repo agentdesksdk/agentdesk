@@ -1,5 +1,5 @@
 ﻿import { ApprovalManager, type PendingAction } from "./approval.ts";
-import { AuditBus, now, type AuditEvent } from "./audit.ts";
+import { AuditBus, deepFreeze, now, type AuditEvent } from "./audit.ts";
 import {
   availableCapabilities,
   evaluateAvailability,
@@ -169,7 +169,18 @@ export type AgentDeskRuntime = {
     receiptId: string,
     by?: Actor,
   ) => { ok: true } | { ok: false; reason: string };
-  /** Optional. Reports unsupported rather than pretending every app undoes. */
+  /**
+   * Optional. Reports unsupported rather than pretending every app undoes.
+   *
+   * The receipt is claimed synchronously, so concurrent calls run the
+   * compensating action once. A capability that declares `verify` is
+   * re-verified first, and anything other than VERIFIED refuses as a
+   * conflict rather than overwriting a later change.
+   *
+   * A capability with no verifier gets no such protection. The runtime
+   * cannot detect drift it has no way to read, so the rollback proceeds
+   * and may overwrite state that moved after the receipt.
+   */
   rollback: (
     receiptId: string,
   ) => Promise<{ ok: true; result: unknown } | { ok: false; reason: string }>;
@@ -201,7 +212,11 @@ export function createAgentDeskRuntime(options: {
   const presentation = new PresentationBus();
   const plans = new PlanStore();
   const receipts = new ReceiptStore();
-  let actor: Actor | undefined = options.actor;
+  // Detached and frozen on the way in, so a caller mutating the object it
+  // handed over cannot retroactively rewrite provenance already recorded.
+  const ownActor = (next: Actor | undefined): Actor | undefined =>
+    next === undefined ? undefined : deepFreeze(structuredClone(next));
+  let actor: Actor | undefined = ownActor(options.actor);
   const adapter =
     options.adapter ??
     createWebMcpAdapter(
@@ -534,14 +549,19 @@ export function createAgentDeskRuntime(options: {
     }
   }
 
+  /**
+   * `executionId` is absent only where no execution was attempted, which
+   * is the idempotency short-circuits in `executeNow`.
+   */
   type ExecutionOutcome =
     | {
         ok: true;
+        executionId?: string;
         value: unknown;
         result: ToolResult;
         verification?: VerificationResult;
       }
-    | { ok: false; result: ToolResult };
+    | { ok: false; executionId?: string; result: ToolResult };
 
   type ExecutionOptions = {
     signal?: AbortSignal | undefined;
@@ -643,6 +663,7 @@ export function createAgentDeskRuntime(options: {
       kind: "execution_started",
       capability: capability.name,
       executionId,
+      ...(actor !== undefined ? { actor } : {}),
       at: now(),
     });
     try {
@@ -650,6 +671,7 @@ export function createAgentDeskRuntime(options: {
       if (startedEpoch !== epoch) {
         return {
           ok: false,
+          executionId,
           result: executionCancelled(capability.name),
         };
       }
@@ -657,6 +679,7 @@ export function createAgentDeskRuntime(options: {
         kind: "execution_completed",
         capability: capability.name,
         executionId,
+        ...(actor !== undefined ? { actor } : {}),
         at: now(),
       };
       let verification: VerificationResult = { status: "UNSUPPORTED" };
@@ -678,7 +701,7 @@ export function createAgentDeskRuntime(options: {
           verification,
           at: now(),
           ...(planId !== undefined ? { planId } : {}),
-          ...(actor !== undefined ? { actor } : {}),
+          ...(actor !== undefined ? { executedBy: actor } : {}),
         });
       }
       present(capability, "capability_completed", input, {
@@ -686,10 +709,20 @@ export function createAgentDeskRuntime(options: {
         humanInitiated,
       });
       emit();
-      return { ok: true, value, result: toToolResult(value), verification };
+      return {
+        ok: true,
+        executionId,
+        value,
+        result: toToolResult(value),
+        verification,
+      };
     } catch (err) {
       if (startedEpoch !== epoch) {
-        return { ok: false, result: executionCancelled(capability.name) };
+        return {
+          ok: false,
+          executionId,
+          result: executionCancelled(capability.name),
+        };
       }
       if (err instanceof CapabilityUnavailableError) {
         audit.append({
@@ -701,6 +734,7 @@ export function createAgentDeskRuntime(options: {
         emit();
         return {
           ok: false,
+          executionId,
           result: capabilityUnavailable(capability.name, err.unavailability),
         };
       }
@@ -710,6 +744,7 @@ export function createAgentDeskRuntime(options: {
         capability: capability.name,
         executionId,
         error: message,
+        ...(actor !== undefined ? { actor } : {}),
         at: now(),
       });
       present(capability, "capability_failed", input, {
@@ -717,7 +752,7 @@ export function createAgentDeskRuntime(options: {
         humanInitiated,
       });
       emit();
-      return { ok: false, result: errorResult(message) };
+      return { ok: false, executionId, result: errorResult(message) };
     } finally {
       linked.dispose();
     }
@@ -773,9 +808,14 @@ export function createAgentDeskRuntime(options: {
       }
 
       const outcome = await executeNow(routed, operation.input, { planId });
+      const correlation =
+        outcome.executionId !== undefined
+          ? { executionId: outcome.executionId }
+          : {};
       if (!outcome.ok) {
         return {
           capability: operation.capability,
+          ...correlation,
           status: "FAILED",
           detail: firstText(outcome.result),
           verification: { status: "UNSUPPORTED" },
@@ -783,6 +823,7 @@ export function createAgentDeskRuntime(options: {
       }
       return {
         capability: operation.capability,
+        ...correlation,
         status: "COMPLETED",
         verification: outcome.verification ?? { status: "UNSUPPORTED" },
       };
@@ -1020,6 +1061,8 @@ export function createAgentDeskRuntime(options: {
       endEpoch();
       approvals.clear();
       idempotency.clear();
+      plans.clear();
+      receipts.clear();
       routedNames = new Set();
       lastRouting = null;
       if (started) {
@@ -1049,7 +1092,7 @@ export function createAgentDeskRuntime(options: {
     },
 
     setActor(next) {
-      actor = next;
+      actor = ownActor(next);
       emit();
     },
 
@@ -1086,7 +1129,7 @@ export function createAgentDeskRuntime(options: {
         risk,
         createdAt: now(),
         ...(revision !== undefined ? { expectedRevision: revision } : {}),
-        ...(actor !== undefined ? { actor } : {}),
+        ...(actor !== undefined ? { requestedBy: actor } : {}),
       });
       audit.append({
         kind: "plan_prepared",
@@ -1100,13 +1143,16 @@ export function createAgentDeskRuntime(options: {
     },
 
     approvePlan(planId) {
-      const plan = plans.transition(planId, "DRAFT", "APPROVED");
-      if (!plan) {
+      const claimed = plans.transition(planId, "DRAFT", "APPROVED");
+      if (!claimed) {
         return { ok: false, reason: `plan ${planId} is not awaiting approval` };
+      }
+      if (actor !== undefined) {
+        plans.resolve(planId, { approvedBy: actor });
       }
       audit.append({ kind: "plan_approved", planId, at: now() });
       emit();
-      return { ok: true, plan };
+      return { ok: true, plan: plans.get(planId)! };
     },
 
     rejectPlan(planId) {
@@ -1165,15 +1211,33 @@ export function createAgentDeskRuntime(options: {
         outcomes.push(await commitOperation(planId, operation));
       }
 
-      const failed = outcomes.some((outcome) => outcome.status === "FAILED");
+      // COMMITTED is a claim that the work happened. An operation that
+      // never ran, or one a verifier disproved, does not earn it.
+      const broken = outcomes.filter((outcome) => outcome.status === "FAILED");
+      const skipped = outcomes.filter((outcome) => outcome.status === "SKIPPED");
+      const mismatched = outcomes.filter(
+        (outcome) => outcome.verification.status === "MISMATCH",
+      );
+      const status =
+        broken.length > 0
+          ? "FAILED"
+          : skipped.length === 0 && mismatched.length === 0
+            ? "COMMITTED"
+            : "PARTIAL";
+
       plans.resolve(planId, {
-        status: failed ? "FAILED" : "COMMITTED",
+        status,
         outcomes,
         resolvedAt: now(),
         ...(observedRevision !== undefined ? { observedRevision } : {}),
       });
       audit.append({
-        kind: failed ? "plan_failed" : "plan_committed",
+        kind:
+          status === "FAILED"
+            ? "plan_failed"
+            : status === "PARTIAL"
+              ? "plan_partial"
+              : "plan_committed",
         planId,
         outcomes: outcomes.map((outcome) => ({
           capability: outcome.capability,
@@ -1184,13 +1248,37 @@ export function createAgentDeskRuntime(options: {
       });
       emit();
       const settled = plans.get(planId)!;
-      if (failed) {
-        const broken = outcomes.filter((outcome) => outcome.status === "FAILED");
+      if (status === "FAILED") {
         return {
           ok: false,
           reason: `${broken.length} of ${outcomes.length} operations failed: ${broken
             .map((outcome) => `${outcome.capability} (${outcome.detail ?? "no detail"})`)
             .join("; ")}`,
+          plan: settled,
+        };
+      }
+      if (status === "PARTIAL") {
+        const parts: string[] = [];
+        if (skipped.length > 0) {
+          parts.push(
+            `skipped ${skipped
+              .map(
+                (outcome) =>
+                  `${outcome.capability} (${outcome.detail ?? "no detail"})`,
+              )
+              .join("; ")}`,
+          );
+        }
+        if (mismatched.length > 0) {
+          parts.push(
+            `verification disproved ${mismatched
+              .map((outcome) => outcome.capability)
+              .join(", ")}`,
+          );
+        }
+        return {
+          ok: false,
+          reason: `${outcomes.length} operations did not fully commit. The runtime ${parts.join(", and ")}.`,
           plan: settled,
         };
       }
@@ -1236,15 +1324,37 @@ export function createAgentDeskRuntime(options: {
       if (!stored) {
         return { ok: false, reason: `unknown receipt: ${receiptId}` };
       }
-      if (stored.rolledBackAt !== undefined) {
-        return { ok: false, reason: `${receiptId} was already rolled back` };
-      }
       const routed = routeCapability(catalog, stored.capability);
       if (isRouteError(routed) || !routed.rollback) {
         return {
           ok: false,
           reason: `${stored.capability} does not support rollback`,
         };
+      }
+      // Claimed synchronously, before the first await, so two concurrent
+      // undos cannot both reach the compensating action.
+      if (!receipts.claimRollback(receiptId)) {
+        return {
+          ok: false,
+          reason:
+            receipts.get(receiptId)?.rollbackState === "ROLLED_BACK"
+              ? `${receiptId} was already rolled back`
+              : `${receiptId} is already being rolled back`,
+        };
+      }
+      if (routed.verify) {
+        const drift = await runVerification(
+          routed,
+          stored.input,
+          stored.receipt.changes,
+        );
+        if (drift.status !== "VERIFIED") {
+          receipts.releaseRollback(receiptId);
+          return {
+            ok: false,
+            reason: `rollback conflict on ${receiptId}: the application state no longer matches what the receipt described, so undoing it would overwrite a later change`,
+          };
+        }
       }
       try {
         const result = await routed.rollback(
@@ -1262,6 +1372,7 @@ export function createAgentDeskRuntime(options: {
         emit();
         return { ok: true, result };
       } catch (err) {
+        receipts.releaseRollback(receiptId);
         return {
           ok: false,
           reason: err instanceof Error ? err.message : String(err),

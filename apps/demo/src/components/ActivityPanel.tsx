@@ -165,6 +165,23 @@ function collapse(events: readonly AuditEvent[]): Rendered[] {
       case "plan_committed":
         out.push({ key, at: event.at, head: "Plan committed", meta: event.planId });
         break;
+      case "plan_partial":
+        out.push({
+          key,
+          at: event.at,
+          head: "Plan partly committed",
+          meta: event.outcomes
+            .filter(
+              (o) => o.status === "SKIPPED" || o.verification === "MISMATCH",
+            )
+            .map((o) =>
+              o.status === "SKIPPED"
+                ? `${o.capability} skipped`
+                : `${o.capability} not verified`,
+            )
+            .join(", "),
+        });
+        break;
       case "plan_failed":
         out.push({
           key,
