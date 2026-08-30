@@ -323,11 +323,29 @@ check runs before the DRAFT to APPROVED transition is claimed, so a refused
 approval leaves the plan in DRAFT and callers never mutate ambient actor
 state around an approval click.
 
+**A caller-supplied identity is parsed at the boundary, not merely
+narrowed.** `parseActor(value: unknown)` is the only way a value from
+outside the runtime becomes an `Actor`. It requires a non-null object, a
+string `id` that is neither empty nor only whitespace, a `kind` that is
+exactly `"agent"`, `"human"`, or `"system"`, and a `name` that is a string
+when present. It returns `{ ok: false, reason }` naming what was wrong, and
+on success it rebuilds the actor from the fields it checked, so no extra
+property rides along into a plan, a receipt, or the audit stream. The
+published SDK is callable from JavaScript, where an `Actor` annotation on a
+parameter proves nothing about what arrives, and `{ kind: "human" }` with no
+`id` used to approve a plan on behalf of nobody. A malformed identity
+refuses with a reason that says the identity was malformed, so a caller can
+tell a broken approver from a missing one.
+
+`isHumanActor` runs on the parsed value. A `kind` check against an object
+whose shape nothing established is a narrowing, not a guarantee.
+
 **A caller-supplied identity is normalized once, before it is validated and
 before any state changes.** Both paths go through one `resolveHumanActor`
-helper. It takes a single frozen snapshot of the caller's object, checks
-`kind` on the snapshot, and hands that same snapshot to the plan record and
-to the audit event. The caller's object is never read again.
+helper. It takes a single frozen snapshot of the caller's object, parses
+that snapshot, checks `kind` on the parsed result, and hands that one value
+to the plan record and to the audit event. The caller's object is never read
+again.
 
 The ordering carries two guarantees that a later snapshot would not. A
 getter-backed actor that answers `"human"` to the check and `"agent"`
@@ -538,7 +556,14 @@ an auditor most needs to see. `plan.requestedBy` is who asked, captured at
 `approvePlan` and required to be human. `receipt.executedBy` is who acted,
 captured once when the execution starts. `receipt.reviewedBy` is who looked
 afterwards, named explicitly at `markReviewed` and also required to be
-human. The three actor-mutating paths stay independent: approving and
+human. The two human-only fields say so in their types: `plan.approvedBy`
+and `receipt.reviewedBy` are `HumanActor`, not `Actor`, as is the `by`
+parameter of `ReceiptStore.markReviewed`. `PlanStore.resolve` takes
+`Partial<OperationPlan>`, so the guarantee binds every internal caller
+rather than only the runtime entry point. `requestedBy` and `executedBy`
+stay `Actor`, because an agent legitimately asks and legitimately acts. No
+`as HumanActor` assertion exists in the package; the type is earned by
+`parseActor` and the `isHumanActor` predicate. The three actor-mutating paths stay independent: approving and
 reviewing take their identity as an argument and never touch the ambient
 actor. `setActor` clones and deep-freezes what it stores, so a caller
 mutating its own object afterwards cannot rewrite history already recorded.
@@ -548,8 +573,8 @@ resolved before `prepare` calls any `previewChanges`. `executedBy` comes
 from the invocation boundary, so neither a synchronous presentation listener
 nor a suspended handler can re-attribute work in flight, and a plan commit
 pins one executor for all of its operations. `approvedBy` and `reviewedBy`
-are snapshotted from the caller's argument before the `kind` check and
-before anything is written.
+are snapshotted from the caller's argument, parsed, and checked for `kind`,
+all before anything is written.
 
 The input is kept for a specific reason. A rollback has to address the same
 entity the original call addressed, and reconstructing that from a change
@@ -645,8 +670,9 @@ other four keep `actor` optional and typed `Actor`, because an execution or
 a rollback legitimately names an agent, and because no actor is a valid
 state for a runtime nobody configured one on.
 
-The role-specific names live on the plan and the receipt (`requestedBy`,
-`approvedBy`, `executedBy`, `reviewedBy`); the audit stream deliberately
+The role-specific names live on the plan and the receipt (`requestedBy` and
+`executedBy` typed `Actor`, `approvedBy` and `reviewedBy` typed
+`HumanActor`); the audit stream deliberately
 does not mirror them, because an auditor asking "what did this person do"
 should not have to union four differently named fields. The remaining kinds
 record what the runtime did rather than who asked for it.

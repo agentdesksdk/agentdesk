@@ -1,6 +1,6 @@
 import { deepFreeze } from "./audit.ts";
 import type { CapabilityName } from "./capability.ts";
-import type { Actor, VerificationResult } from "./plan.ts";
+import type { Actor, HumanActor, VerificationResult } from "./plan.ts";
 import type { Receipt } from "./results.ts";
 
 /**
@@ -30,7 +30,7 @@ export type StoredReceipt = {
    * something reviewed does not change what occurred.
    */
   reviewedAt?: number;
-  reviewedBy?: Actor;
+  reviewedBy?: HumanActor;
 };
 
 export type ReceiptQuery = {
@@ -114,7 +114,7 @@ export class ReceiptStore {
     return true;
   }
 
-  markReviewed(id: string, at: number, by?: Actor): void {
+  markReviewed(id: string, at: number, by?: HumanActor): void {
     const index = this.receipts.findIndex((entry) => entry.id === id);
     const existing = this.receipts[index];
     if (existing) {

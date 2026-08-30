@@ -22,6 +22,7 @@ export { CapabilityCatalog } from "./catalog.ts";
 export {
   highestRisk,
   isHumanActor,
+  parseActor,
   type Actor,
   type HumanActor,
   type OperationOutcome,

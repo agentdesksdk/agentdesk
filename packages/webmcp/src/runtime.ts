@@ -29,6 +29,7 @@ import {
   PlanStore,
   highestRisk,
   isHumanActor,
+  parseActor,
   type Actor,
   type HumanActor,
   type OperationOutcome,
@@ -252,6 +253,10 @@ export function createAgentDeskRuntime(options: {
    * makes the check meaningful. A getter that answers `"human"` once and
    * `"agent"` afterwards is caught here rather than approved on one read
    * and recorded on another.
+   *
+   * Parsing sits between the snapshot and the `kind` check. The parameter
+   * says `Actor`, but a JavaScript caller can hand over anything, and an
+   * approval recorded against an identity carrying no `id` names nobody.
    */
   function resolveHumanActor(
     supplied: Actor | undefined,
@@ -264,10 +269,17 @@ export function createAgentDeskRuntime(options: {
     if (!owned.ok) {
       return owned;
     }
-    if (!isHumanActor(owned.actor)) {
+    const parsed = parseActor(owned.actor);
+    if (!parsed.ok) {
+      return {
+        ok: false,
+        reason: `the supplied identity is malformed: ${parsed.reason}`,
+      };
+    }
+    if (!isHumanActor(parsed.actor)) {
       return { ok: false, reason: refusal };
     }
-    return { ok: true, actor: owned.actor };
+    return { ok: true, actor: deepFreeze(parsed.actor) };
   }
 
   let actor: Actor | undefined = adoptActor(options.actor);

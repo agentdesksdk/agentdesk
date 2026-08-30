@@ -23,6 +23,66 @@ export type Actor = {
  */
 export type HumanActor = Actor & { kind: "human" };
 
+const ACTOR_KINDS = ["agent", "human", "system"] as const;
+
+function isActorKind(value: string): value is Actor["kind"] {
+  return ACTOR_KINDS.some((kind) => kind === value);
+}
+
+/**
+ * The published SDK is callable from JavaScript, so an `Actor` annotation on
+ * a public parameter proves nothing about what actually arrives. Every
+ * identity the runtime records passes through here first.
+ *
+ * The returned actor is rebuilt from the fields that were checked, so an
+ * extra property on the caller's object cannot ride along into a plan, a
+ * receipt, or the audit stream.
+ */
+export function parseActor(
+  value: unknown,
+): { ok: true; actor: Actor } | { ok: false; reason: string } {
+  if (typeof value !== "object" || value === null) {
+    return {
+      ok: false,
+      reason: `an identity must be an object, received ${value === null ? "null" : typeof value}`,
+    };
+  }
+  const id: unknown = "id" in value ? value.id : undefined;
+  const kind: unknown = "kind" in value ? value.kind : undefined;
+  const name: unknown = "name" in value ? value.name : undefined;
+
+  if (typeof id !== "string") {
+    return {
+      ok: false,
+      reason: `an identity must carry a string id, received ${id === null ? "null" : typeof id}`,
+    };
+  }
+  if (id.trim() === "") {
+    return { ok: false, reason: "an identity id must not be empty or blank" };
+  }
+  if (typeof kind !== "string" || !isActorKind(kind)) {
+    return {
+      ok: false,
+      reason: `an identity kind must be one of ${ACTOR_KINDS.join(", ")}, received ${JSON.stringify(kind)}`,
+    };
+  }
+  if (name !== undefined && typeof name !== "string") {
+    return {
+      ok: false,
+      reason: `an identity name must be a string when present, received ${typeof name}`,
+    };
+  }
+  return {
+    ok: true,
+    actor: { id, kind, ...(name !== undefined ? { name } : {}) },
+  };
+}
+
+/**
+ * Give this the actor from `parseActor`, never a caller's object. The
+ * `kind` check is only a guarantee about a value whose shape has already
+ * been established.
+ */
 export function isHumanActor(actor: Actor): actor is HumanActor {
   return actor.kind === "human";
 }
@@ -83,7 +143,7 @@ export type OperationPlan = {
   /** Who asked for the plan, captured at `prepare`. */
   requestedBy?: Actor;
   /** Who authorized it, captured at `approvePlan`. */
-  approvedBy?: Actor;
+  approvedBy?: HumanActor;
   createdAt: number;
   status: PlanStatus;
   /** Present once the plan reaches a terminal state. */
