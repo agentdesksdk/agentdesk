@@ -1,8 +1,20 @@
 # P1: Plan approval is attributed to the requesting agent
 
-Status: OPEN
+Status: RESOLVED on `fix/acting-identity`
 
 Reviewed commit: `812e5b9`
+
+Validated: `packages/webmcp/tests/acting-identity.test.ts` passed on
+`fix/acting-identity`, 7 of 7, alongside the full 333-test suite.
+`approvePlan(planId, by?)` resolves its approver as `by ?? actor` and
+refuses anything that is not a human, mirroring `markReviewed`. The check
+runs before the DRAFT to APPROVED transition is claimed, so a refused
+approval leaves the plan in DRAFT rather than stranding it in APPROVED. The
+approver lands on `plan.approvedBy` and on the `plan_approved` audit event.
+Approving does not touch ambient actor state, so a plan requested by
+`agent-a`, approved by `operator-1`, and committed by `agent-a` keeps all
+three identities distinct. The plan tests that previously preserved the
+incorrect provenance now pass an explicit human approver.
 
 ## Finding
 

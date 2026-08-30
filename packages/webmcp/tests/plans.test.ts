@@ -75,6 +75,8 @@ async function start(ledger: Ledger) {
   return runtime;
 }
 
+const APPROVER = { id: "operator-1", name: "Amein", kind: "human" as const };
+
 const freshLedger = (): Ledger => ({
   refunded: false,
   noted: false,
@@ -122,7 +124,7 @@ describe("versioned operation plans", () => {
         { capability: "add_order_note" },
       ],
     });
-    expect(runtime.approvePlan(plan.id).ok).toBe(true);
+    expect(runtime.approvePlan(plan.id, APPROVER).ok).toBe(true);
 
     const committed = await runtime.commitPlan(plan.id);
     expect(committed.ok).toBe(true);
@@ -144,7 +146,7 @@ describe("versioned operation plans", () => {
     const plan = await runtime.prepare({
       operations: [{ capability: "refund_shipping" }],
     });
-    runtime.approvePlan(plan.id);
+    runtime.approvePlan(plan.id, APPROVER);
 
     ledger.revision += 1;
 
@@ -163,7 +165,7 @@ describe("versioned operation plans", () => {
     const plan = await runtime.prepare({
       operations: [{ capability: "refund_shipping" }],
     });
-    runtime.approvePlan(plan.id);
+    runtime.approvePlan(plan.id, APPROVER);
 
     const [a, b] = await Promise.all([
       runtime.commitPlan(plan.id),
@@ -232,7 +234,7 @@ describe("versioned operation plans", () => {
         { capability: "add_order_note" },
       ],
     });
-    runtime.approvePlan(plan.id);
+    runtime.approvePlan(plan.id, APPROVER);
     ledger.refunded = true;
 
     const committed = await runtime.commitPlan(plan.id);
@@ -328,7 +330,7 @@ describe("receipt history and provenance", () => {
         { capability: "add_order_note" },
       ],
     });
-    runtime.approvePlan(plan.id);
+    runtime.approvePlan(plan.id, APPROVER);
     await runtime.commitPlan(plan.id);
 
     const all = runtime.queryReceipts();

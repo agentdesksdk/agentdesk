@@ -129,6 +129,25 @@ records all point at each other. Those three audit events also carry the
 acting `actor`. The handler receives an `ExecutionContext`: the app
 context plus `signal`, `executionId`, and any `idempotencyKey`.
 
+**One invocation resolves its actor exactly once, at its earliest point.**
+`runCapability` reads the ambient actor into a local const at its first
+statement, before any presentation event and before the first audit append,
+and threads that value through `capability_started`, `approval_requested`,
+and the execution. `runExecution` does not read the ambient actor at all. It
+takes the acting identity as a required `ExecutionOptions` field, so a new
+entry point that forgets to resolve one fails to compile rather than falling
+back to an ambient read.
+
+The boundary has to be the invocation, not the execution. Presentation
+listeners dispatch synchronously, so a listener reacting to
+`capability_started` runs to completion before the execution begins and can
+call `setActor` in between. Capturing at the execution would let a read-only
+observer change the provenance of the write it is observing. Every other
+entry point applies the same rule at its own earliest point. `approve()`
+resolves the acting identity before it claims the pending action, `prepare`
+resolves `requestedBy` before any `previewChanges` callback runs, and
+`rollback` resolves at the moment its claim succeeds.
+
 The signal is the client's WebMCP execution signal linked with a runtime
 lifecycle signal, so a handler aborts when either the client cancels or the
 operator calls `stop()`/`reset()`.
@@ -295,6 +314,59 @@ the highest risk across them (`highestRisk`), the `requestedBy` actor, the
 `expectedRevision` the plan was built against, and a `status`.
 `approvePlan` adds `approvedBy`.
 
+`approvePlan(planId, by?)` resolves its approver as `by ?? actor` and
+refuses when that resolves to nothing or to an actor whose `kind` is not
+`"human"`, the same contract `markReviewed(receiptId, by?)` uses. In the
+normal configuration the ambient actor is the agent, so an approval that
+did not name a human would record the requester as its own authorizer. The
+check runs before the DRAFT to APPROVED transition is claimed, so a refused
+approval leaves the plan in DRAFT and callers never mutate ambient actor
+state around an approval click.
+
+**A caller-supplied identity is parsed at the boundary, not merely
+narrowed.** `parseActor(value: unknown)` is the only way a value from
+outside the runtime becomes an `Actor`. It requires a non-null object, a
+string `id` that is neither empty nor only whitespace, a `kind` that is
+exactly `"agent"`, `"human"`, or `"system"`, and a `name` that is a string
+when present. It returns `{ ok: false, reason }` naming what was wrong, and
+on success it rebuilds the actor from the fields it checked, so no extra
+property rides along into a plan, a receipt, or the audit stream. The
+published SDK is callable from JavaScript, where an `Actor` annotation on a
+parameter proves nothing about what arrives, and `{ kind: "human" }` with no
+`id` used to approve a plan on behalf of nobody. A malformed identity
+refuses with a reason that says the identity was malformed, so a caller can
+tell a broken approver from a missing one.
+
+Every identity goes through it, including the ambient one. `adoptActor`
+parses what `createAgentDeskRuntime` is configured with and what `setActor`
+is handed, and throws `TypeError` on a malformed shape rather than returning
+a reason. That asymmetry is deliberate. An approver arrives from a caller
+who can be told why it was refused, while an ambient actor is application
+configuration with no caller to answer, and a runtime that kept going would
+attribute every later write to an identity nobody can resolve. Throwing is
+also what `adoptActor` already did for an identity that could not be cloned,
+so parsing added no new failure mode.
+
+`isHumanActor` runs on the parsed value. A `kind` check against an object
+whose shape nothing established is a narrowing, not a guarantee.
+
+**A caller-supplied identity is normalized once, before it is validated and
+before any state changes.** Both paths go through one `resolveHumanActor`
+helper. It takes a single frozen snapshot of the caller's object, parses
+that snapshot, checks `kind` on the parsed result, and hands that one value
+to the plan record and to the audit event. The caller's object is never read
+again.
+
+The ordering carries two guarantees that a later snapshot would not. A
+getter-backed actor that answers `"human"` to the check and `"agent"`
+afterwards cannot be approved as one and recorded as the other, because
+there is only one read. And an actor carrying a function, which
+`structuredClone` refuses, is turned into `{ ok: false, reason }` before the
+transition is claimed rather than a `DataCloneError` thrown out of a plan
+already sitting in APPROVED with no approver on it. `ownActor` returns that
+discriminated result rather than throwing, so the approval and review paths
+cannot drift apart on how they handle it.
+
 ```ts
 import { createAgentDeskRuntime } from "@agentdesk/webmcp";
 
@@ -316,7 +388,7 @@ const plan = await runtime.prepare({
 });
 // plan.status === "DRAFT", plan.risk === "CONSEQUENTIAL"
 
-runtime.approvePlan(plan.id);
+runtime.approvePlan(plan.id, { id: "operator-1", name: "Amein", kind: "human" });
 const committed = await runtime.commitPlan(plan.id);
 if (!committed.ok) {
   console.warn(committed.reason);
@@ -345,6 +417,14 @@ validation, then the same `executeNow` that `approve()` calls. An operation
 blocked by one of those gates is recorded as `SKIPPED` with the reason and
 does not stop the rest. Outcomes land on `plan.outcomes`, each carrying the
 `executionId` of the execution it ran.
+
+**One commit has one executor.** `commitPlan` resolves the acting identity
+the moment the plan wins the APPROVED to COMMITTING transition, and hands
+that one value to every operation. Resolving it per operation would let a
+`setActor` during a suspended earlier operation give a single COMMITTED
+plan receipts naming different executors, which contradicts the thing a
+plan is for. The human approved one unit of work, so who performed it is
+one answer.
 
 The terminal status is resolved from those outcomes in one pass.
 
@@ -482,12 +562,29 @@ are frozen.
 
 Provenance is split three ways, because one blended actor hides the thing
 an auditor most needs to see. `plan.requestedBy` is who asked, captured at
-`prepare`. `plan.approvedBy` is who authorized, captured at `approvePlan`.
-`receipt.executedBy` is who acted, captured at execution. They differ
-whenever `setActor` is called between those points, and that difference is
-the record. `setActor` clones and deep-freezes what it stores, so a caller
-mutating its own object afterwards cannot rewrite history already
-recorded.
+`prepare`. `plan.approvedBy` is who authorized, named explicitly at
+`approvePlan` and required to be human. `receipt.executedBy` is who acted,
+captured once when the execution starts. `receipt.reviewedBy` is who looked
+afterwards, named explicitly at `markReviewed` and also required to be
+human. The two human-only fields say so in their types: `plan.approvedBy`
+and `receipt.reviewedBy` are `HumanActor`, not `Actor`, as is the `by`
+parameter of `ReceiptStore.markReviewed`. `PlanStore.resolve` takes
+`Partial<OperationPlan>`, so the guarantee binds every internal caller
+rather than only the runtime entry point. `requestedBy` and `executedBy`
+stay `Actor`, because an agent legitimately asks and legitimately acts. No
+`as HumanActor` assertion exists in the package; the type is earned by
+`parseActor` and the `isHumanActor` predicate. The three actor-mutating paths stay independent: approving and
+reviewing take their identity as an argument and never touch the ambient
+actor. `setActor` clones and deep-freezes what it stores, so a caller
+mutating its own object afterwards cannot rewrite history already recorded.
+
+Each of the four is pinned at the boundary that creates it. `requestedBy` is
+resolved before `prepare` calls any `previewChanges`. `executedBy` comes
+from the invocation boundary, so neither a synchronous presentation listener
+nor a suspended handler can re-attribute work in flight, and a plan commit
+pins one executor for all of its operations. `approvedBy` and `reviewedBy`
+are snapshotted from the caller's argument, parsed, and checked for `kind`,
+all before anything is written.
 
 The input is kept for a specific reason. A rollback has to address the same
 entity the original call addressed, and reconstructing that from a change
@@ -502,7 +599,9 @@ concern. Use `subscribeAudit` or export these entries to persist them.
 `rollback(receiptId)` calls the capability's optional
 `rollback(input, ctx, changes)` with the original input and the changes the
 receipt recorded, marks the receipt as rolled back, and appends a
-`rollback_performed` event.
+`rollback_performed` event naming the actor that won the claim. That actor
+is captured at the claim, before the first `await`, for the same reason an
+execution captures its own.
 
 Every receipt carries a `rollbackState` of READY, ROLLING_BACK, or
 ROLLED_BACK. `ReceiptStore.claimRollback` moves READY to ROLLING_BACK and
@@ -547,21 +646,45 @@ rollback returns `{ ok: false, reason }` and the receipt returns to READY.
 
 ### Audit events
 
-Eight event kinds are added to the `AuditEvent` union, all carrying `at`:
+Nine event kinds are added to the `AuditEvent` union, all carrying `at`:
 
 | Kind | Payload beyond `planId` |
 | --- | --- |
 | `plan_prepared` | `operations`, `risk` |
-| `plan_approved` | none |
+| `plan_approved` | `actor`, the human approver, required and typed `HumanActor` |
 | `plan_rejected` | none |
 | `plan_drifted` | `expectedRevision`, `observedRevision` |
 | `plan_committed` | `outcomes` (capability, status, verification) |
 | `plan_partial` | `outcomes` (capability, status, verification) |
 | `plan_failed` | `outcomes` (capability, status, verification) |
-| `rollback_performed` | `capability`, `receiptId` (no `planId`) |
+| `rollback_performed` | `capability`, `receiptId`, `actor` (no `planId`) |
+| `receipt_reviewed` | `capability`, `receiptId`, `actor` typed `HumanActor` (no `planId`) |
 
-The actor appears on `execution_started`, `execution_completed`, and
-`execution_failed`, and nowhere else in the audit log. The other kinds
+Six kinds carry an acting identity, and every one of them uses the same
+`actor` field so the stream stays queryable on one key.
+`execution_started`, `execution_completed`, and `execution_failed` name who
+ran the capability, resolved once at the invocation boundary.
+`plan_approved` names the human who authorized the plan. `receipt_reviewed`
+names the human who reviewed the receipt. `rollback_performed` names who
+claimed the undo.
+
+The two human-only events say so in their types. `plan_approved` and
+`receipt_reviewed` declare `actor` as required and typed `HumanActor`, which
+is `Actor & { kind: "human" }`, exported from the package alongside `Actor`.
+Both are only ever emitted with an identity the runtime has already
+validated, and the runtime narrows to that type through the `isHumanActor`
+predicate rather than asserting, so the compiler carries the guarantee
+instead of the reader. A consumer reads `event.actor.kind` after narrowing
+on `event.kind` with no cast and no check for a case that cannot occur. The
+other four keep `actor` optional and typed `Actor`, because an execution or
+a rollback legitimately names an agent, and because no actor is a valid
+state for a runtime nobody configured one on.
+
+The role-specific names live on the plan and the receipt (`requestedBy` and
+`executedBy` typed `Actor`, `approvedBy` and `reviewedBy` typed
+`HumanActor`); the audit stream deliberately
+does not mirror them, because an auditor asking "what did this person do"
+should not have to union four differently named fields. The remaining kinds
 record what the runtime did rather than who asked for it.
 
 They flow through the same `AuditBus` as everything else, so

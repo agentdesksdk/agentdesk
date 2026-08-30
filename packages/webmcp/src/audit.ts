@@ -1,5 +1,5 @@
 import type { RiskLevel } from "./capability.ts";
-import type { Actor } from "./plan.ts";
+import type { Actor, HumanActor } from "./plan.ts";
 import type { Receipt } from "./results.ts";
 
 export type AuditEvent =
@@ -73,7 +73,7 @@ export type AuditEvent =
       risk: RiskLevel;
       at: number;
     }
-  | { kind: "plan_approved"; planId: string; at: number }
+  | { kind: "plan_approved"; planId: string; actor: HumanActor; at: number }
   | { kind: "plan_rejected"; planId: string; at: number }
   | {
       kind: "plan_drifted";
@@ -116,12 +116,14 @@ export type AuditEvent =
       kind: "rollback_performed";
       capability: string;
       receiptId: string;
+      actor?: Actor;
       at: number;
     }
   | {
       kind: "receipt_reviewed";
       capability: string;
       receiptId: string;
+      actor: HumanActor;
       at: number;
     };
 

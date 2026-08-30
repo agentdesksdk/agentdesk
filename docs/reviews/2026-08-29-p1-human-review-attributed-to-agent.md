@@ -1,14 +1,21 @@
 # P1: Human review is attributed to the agent
 
-Status: PARTIALLY FIXED in `2f1f332`
+Status: RESOLVED on `fix/acting-identity`
 
 Reviewed commit: `6a1745e`
+
+Validated: `packages/webmcp/tests/acting-identity.test.ts` passed on
+`fix/acting-identity`, 7 of 7, alongside the full 333-test suite. The
+remaining condition is closed: `receipt_reviewed` now carries the resolved
+reviewer on an `actor` field, so an exported audit stream answers who
+reviewed without joining back to the receipt store. The event records
+`operator-1` with `kind: "human"` where it previously recorded nothing.
 
 ## Post-fix validation
 
 `2f1f332` rejects an omitted or non-human reviewer and makes the demo pass an explicit human operator. The focused regression tests pass.
 
-One acceptance condition remains open. The `receipt_reviewed` audit event still carries only `capability` and `receiptId`. It does not record the human reviewer. The receipt store has `reviewedBy`, but an exported audit stream still cannot answer who performed the review.
+One acceptance condition remained open after `2f1f332`. The `receipt_reviewed` audit event carried only `capability` and `receiptId`. It did not record the human reviewer. The receipt store had `reviewedBy`, but an exported audit stream still could not answer who performed the review. That condition is closed above.
 
 ## Finding
 
