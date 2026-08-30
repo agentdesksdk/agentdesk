@@ -204,6 +204,27 @@ function collapse(events: readonly AuditEvent[]): Rendered[] {
           meta: event.receiptId,
         });
         break;
+      case "rollback_indeterminate":
+        out.push({
+          key,
+          at: event.at,
+          head: "Undo outcome unknown",
+          cap: event.capability,
+          meta: event.receiptId,
+        });
+        break;
+      case "rollback_reconciled":
+        out.push({
+          key,
+          at: event.at,
+          head:
+            event.outcome === "compensated"
+              ? "Reconciled as undone"
+              : "Reconciled as untouched",
+          cap: event.capability,
+          meta: event.receiptId,
+        });
+        break;
       case "receipt_reviewed":
         out.push({
           key,
