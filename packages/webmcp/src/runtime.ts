@@ -236,6 +236,12 @@ export function createAgentDeskRuntime(options: {
     }
   };
 
+  /**
+   * Throws rather than refusing, because an ambient identity is set by the
+   * application at configuration time. There is no caller to hand a reason
+   * to, and a runtime that kept running would attribute every later write
+   * to an identity nobody can resolve.
+   */
   function adoptActor(next: Actor | undefined): Actor | undefined {
     if (next === undefined) {
       return undefined;
@@ -244,7 +250,11 @@ export function createAgentDeskRuntime(options: {
     if (!owned.ok) {
       throw new TypeError(owned.reason);
     }
-    return owned.actor;
+    const parsed = parseActor(owned.actor);
+    if (!parsed.ok) {
+      throw new TypeError(parsed.reason);
+    }
+    return parsed.actor;
   }
 
   /**

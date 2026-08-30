@@ -1,6 +1,6 @@
 # P1: human identity shape is not validated at the JavaScript boundary
 
-Status: RESOLVED on `fix/acting-identity`
+Status: **PARTIALLY FIXED on `fix/acting-identity`**
 
 Reviewed branch: `fix/acting-identity` at `d7a4911`
 
@@ -18,6 +18,38 @@ snapshots with `ownActor`, parses that snapshot, and only then applies
 malformed approvers refuses, leaves the plan in DRAFT with no `approvedBy`,
 and appends no `plan_approved` event; the eight malformed reviewers refuse
 the same way with no `reviewedAt` and no `receipt_reviewed` event.
+
+
+Follow-up, the ambient path. The first fix parsed only the identities that
+record a human decision. `adoptActor` still cloned and froze without
+parsing, so constructor configuration and `setActor` both accepted
+`{ kind: "agent" }` with no id and the execution audit recorded it.
+`packages/webmcp/tests/ambient-actor-parsing.test.ts` reproduces it on
+`8050009`, where an anonymous identity reaches a completed execution as
+`expected undefined to be 'agent-a'`. `adoptActor` now parses the snapshot
+and throws `TypeError` on a malformed shape, which is the behavior it
+already had for an identity that could not be cloned, so no API changed.
+All 347 tests pass.
+
+## Re-review at `748b4c5`
+
+The human-decision paths are fixed, but the required constructor and
+`setActor` paths still bypass `parseActor`. Both accepted `{ kind: "agent" }`
+with no `id`, and `execution_started` recorded that anonymous actor:
+
+```json
+{
+  "constructorActor": { "kind": "agent" },
+  "constructorAuditActor": { "kind": "agent" },
+  "setterThrew": false,
+  "setterActor": { "kind": "agent" },
+  "setterAuditActor": { "kind": "agent" }
+}
+```
+
+This needs no setter signature change. `setActor` already throws `TypeError`
+through `adoptActor` when cloning fails. Parse the owned value in
+`adoptActor` and use the same existing failure behavior for malformed shape.
 
 ## Finding
 
@@ -45,4 +77,3 @@ Parse the complete actor shape at the public boundary before narrowing it. Requi
 - `approvePlan(planId, { kind: "human" })` returns a structured refusal and leaves the plan `DRAFT`.
 - Missing, empty, and non-string ids cannot enter approval, review, execution, receipt, presentation, or audit records.
 - A malformed optional name is refused rather than recorded.
-

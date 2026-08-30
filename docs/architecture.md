@@ -337,6 +337,16 @@ parameter proves nothing about what arrives, and `{ kind: "human" }` with no
 refuses with a reason that says the identity was malformed, so a caller can
 tell a broken approver from a missing one.
 
+Every identity goes through it, including the ambient one. `adoptActor`
+parses what `createAgentDeskRuntime` is configured with and what `setActor`
+is handed, and throws `TypeError` on a malformed shape rather than returning
+a reason. That asymmetry is deliberate. An approver arrives from a caller
+who can be told why it was refused, while an ambient actor is application
+configuration with no caller to answer, and a runtime that kept going would
+attribute every later write to an identity nobody can resolve. Throwing is
+also what `adoptActor` already did for an identity that could not be cloned,
+so parsing added no new failure mode.
+
 `isHumanActor` runs on the parsed value. A `kind` check against an object
 whose shape nothing established is a narrowing, not a guarantee.
 
