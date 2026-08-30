@@ -34,8 +34,8 @@ describe("approval atomicity", () => {
     const actionId = runtime.getSnapshot().pending[0]!.id;
 
     const [first, second] = await Promise.all([
-      runtime.approve(actionId),
-      runtime.approve(actionId),
+      runtime.approve(actionId, { id: "operator", name: "Operator", kind: "human" }),
+      runtime.approve(actionId, { id: "operator", name: "Operator", kind: "human" }),
     ]);
     expect(count()).toBe(1);
     const texts = [first.content[0]!.text, second.content[0]!.text];
@@ -68,7 +68,7 @@ describe("approval atomicity", () => {
     await runtime.invoke("issue_credit", { details });
     details.amount = 9999;
     const actionId = runtime.getSnapshot().pending[0]!.id;
-    await runtime.approve(actionId);
+    await runtime.approve(actionId, { id: "operator", name: "Operator", kind: "human" });
     expect(seen).toEqual([{ amount: 10 }]);
   });
 

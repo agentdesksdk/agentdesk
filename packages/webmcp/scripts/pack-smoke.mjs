@@ -90,7 +90,11 @@ const rejected = await runtime.invoke("refund_shipping", { order_id: 10428 });
 assert.equal(rejected.code, "VALIDATION_FAILED");
 
 const id = runtime.getSnapshot().pending[0].id;
-const done = await runtime.approve(id);
+const done = await runtime.approve(id, {
+  id: "operator",
+  name: "Operator",
+  kind: "human",
+});
 const payload = JSON.parse(done.content[0].text);
 assert.equal(payload.status, "COMPLETED");
 assert.equal(payload.receipt.entity, "Order #10428");

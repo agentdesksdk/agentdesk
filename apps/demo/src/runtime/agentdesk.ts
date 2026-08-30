@@ -1,5 +1,6 @@
 import {
   createAgentDeskRuntime,
+  type Actor,
   type AppContext,
   type Exposure,
   type RuntimeSnapshot,
@@ -8,6 +9,14 @@ import { capabilities } from "../capabilities/index.ts";
 import { getState } from "../data/store.ts";
 
 type ModelContextHost = { modelContext?: { registerTool?: unknown } };
+
+/**
+ * The person at the keyboard. A real deployment reads this from the session.
+ * Approving, rejecting, and reviewing all have to be signed by a human rather
+ * than by the agent whose work is being authorized, so every surface uses
+ * this one identity instead of keeping its own copy.
+ */
+export const OPERATOR: Actor = { id: "operator", name: "Operator", kind: "human" };
 
 /** True when the browser exposes real WebMCP. */
 export const webmcpNative =

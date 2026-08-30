@@ -179,7 +179,7 @@ describe("AgentDesk runtime", () => {
     if (actionId === undefined) {
       throw new Error("expected pending action");
     }
-    const approved = await runtime.approve(actionId);
+    const approved = await runtime.approve(actionId, { id: "operator", name: "Operator", kind: "human" });
     expect(applied).toBe(true);
     expect(approved).toEqual({
       content: [{ type: "text", text: "applied" }],

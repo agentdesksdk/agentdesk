@@ -79,7 +79,7 @@ describe("reset is a session boundary that in-flight work cannot cross", () => {
     const plan = await runtime.prepare({
       operations: [{ capability: "slow_plan_write" }],
     });
-    runtime.approvePlan(plan.id);
+    runtime.approvePlan(plan.id, { id: "op", name: "Op", kind: "human" });
     const committing = runtime.commitPlan(plan.id);
     await held.reached;
     await runtime.reset();

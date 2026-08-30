@@ -29,7 +29,7 @@ async function refundHeroOrder(
   runtime: Awaited<ReturnType<typeof startRuntime>>,
 ) {
   await runtime.invoke("refund_shipping", { order_id: "10428" });
-  await runtime.approve(runtime.getSnapshot().pending[0]!.id);
+  await runtime.approve(runtime.getSnapshot().pending[0]!.id, { id: "operator", name: "Operator", kind: "human" });
 }
 
 describe("demo verification and rollback", () => {

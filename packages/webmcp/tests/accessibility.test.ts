@@ -102,7 +102,7 @@ describe("focus policy and announcement reach the presentation event", () => {
   it("copies focus and announce from the capability presentation spec", async () => {
     const { runtime, events } = await startWithRecorder();
     await runtime.invoke("refund_shipping", { order_id: "10428" });
-    await runtime.approve(runtime.getSnapshot().pending[0]!.id);
+    await runtime.approve(runtime.getSnapshot().pending[0]!.id, { id: "operator", name: "Operator", kind: "human" });
 
     expect(completed(events)).toMatchObject({
       focus: "on_explicit_request",
@@ -115,7 +115,7 @@ describe("focus policy and announcement reach the presentation event", () => {
   it("leaves focus and announce undefined when the app declares neither", async () => {
     const { runtime, events } = await startWithRecorder();
     await runtime.invoke("refund_shipping", { order_id: "10428" });
-    await runtime.approve(runtime.getSnapshot().pending[0]!.id);
+    await runtime.approve(runtime.getSnapshot().pending[0]!.id, { id: "operator", name: "Operator", kind: "human" });
     await runtime.invoke("quiet_capability", { order_id: "10428" });
 
     const declaring = events.find(
@@ -138,7 +138,7 @@ describe("humanInitiated distinguishes an approval from background work", () => 
   it("is true on the execution an approve() authorized", async () => {
     const { runtime, events } = await startWithRecorder();
     await runtime.invoke("refund_shipping", { order_id: "10428" });
-    await runtime.approve(runtime.getSnapshot().pending[0]!.id);
+    await runtime.approve(runtime.getSnapshot().pending[0]!.id, { id: "operator", name: "Operator", kind: "human" });
 
     expect(completed(events).humanInitiated).toBe(true);
   });
@@ -207,7 +207,7 @@ describe("executionId correlates a presentation event with its execution", () =>
       expect(event.executionId).toBeUndefined();
     }
 
-    await runtime.approve(runtime.getSnapshot().pending[0]!.id);
+    await runtime.approve(runtime.getSnapshot().pending[0]!.id, { id: "operator", name: "Operator", kind: "human" });
     expect(completed(events).executionId).toMatch(/^EXE-/);
   });
 });
@@ -216,7 +216,7 @@ describe("affected objects survive verbatim wherever the receipt travels", () =>
   it("reaches the tool result, the audit event, and the stored receipt", async () => {
     const { runtime } = await startWithRecorder();
     await runtime.invoke("refund_shipping", { order_id: "10428" });
-    const result = await runtime.approve(runtime.getSnapshot().pending[0]!.id);
+    const result = await runtime.approve(runtime.getSnapshot().pending[0]!.id, { id: "operator", name: "Operator", kind: "human" });
 
     const payload = JSON.parse(result.content[0]!.text) as {
       receipt: { affected?: AffectedObject[] };
@@ -238,7 +238,7 @@ describe("affected objects survive verbatim wherever the receipt travels", () =>
   it("is absent, not empty, when the application declares none", async () => {
     const { runtime } = await startWithRecorder();
     await runtime.invoke("refund_shipping", { order_id: "10428" });
-    await runtime.approve(runtime.getSnapshot().pending[0]!.id);
+    await runtime.approve(runtime.getSnapshot().pending[0]!.id, { id: "operator", name: "Operator", kind: "human" });
     await runtime.invoke("add_order_note", { order_id: "10428" });
 
     const [note, refund] = runtime.queryReceipts();

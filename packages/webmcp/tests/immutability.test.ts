@@ -37,7 +37,7 @@ describe("approved input is protected from snapshot mutation", () => {
     (pending.preview as Array<{ after: unknown }>)[0]!.after = 999;
     pending.preview.push({ field: "injected", before: null, after: "evil" });
 
-    await runtime.approve(pending.id);
+    await runtime.approve(pending.id, { id: "operator", name: "Operator", kind: "human" });
     expect(seen).toEqual([10]);
   });
 
@@ -199,7 +199,7 @@ describe("approval recovers when a check throws", () => {
     const id = runtime.getSnapshot().pending[0]!.id;
 
     throwNow = true;
-    const outcome = await runtime.approve(id);
+    const outcome = await runtime.approve(id, { id: "operator", name: "Operator", kind: "human" });
     expect(outcome.isError).toBe(true);
     expect(outcome.content[0]!.text).toContain("policy backend unreachable");
 
@@ -236,7 +236,7 @@ describe("approval recovers when a check throws", () => {
     const id = runtime.getSnapshot().pending[0]!.id;
 
     throwNow = true;
-    const outcome = await runtime.approve(id);
+    const outcome = await runtime.approve(id, { id: "operator", name: "Operator", kind: "human" });
     expect(outcome.isError).toBe(true);
 
     const status = await runtime.invoke("get_action_status", {

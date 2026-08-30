@@ -384,7 +384,7 @@ describe("rollback is optional and honest about it", () => {
     const runtime = await start(ledger);
     await runtime.invoke("refund_shipping", {});
     const id = runtime.getSnapshot().pending[0]!.id;
-    await runtime.approve(id);
+    await runtime.approve(id, { id: "operator", name: "Operator", kind: "human" });
     expect(ledger.refunded).toBe(true);
 
     const stored = runtime.queryReceipts({ capability: "refund_shipping" })[0]!;
@@ -431,7 +431,7 @@ describe("rollback is optional and honest about it", () => {
     const ledger = freshLedger();
     const runtime = await start(ledger);
     await runtime.invoke("refund_shipping", {});
-    await runtime.approve(runtime.getSnapshot().pending[0]!.id);
+    await runtime.approve(runtime.getSnapshot().pending[0]!.id, { id: "operator", name: "Operator", kind: "human" });
     const stored = runtime.queryReceipts({ capability: "refund_shipping" })[0]!;
 
     await runtime.rollback(stored.id);

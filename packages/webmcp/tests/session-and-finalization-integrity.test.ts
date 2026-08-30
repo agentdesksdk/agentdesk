@@ -166,7 +166,7 @@ describe("one session claim covers a whole operation", () => {
     const plan = await runtime.prepare({
       operations: [{ capability: "one" }, { capability: "two" }],
     });
-    runtime.approvePlan(plan.id);
+    runtime.approvePlan(plan.id, HUMAN);
     const committing = runtime.commitPlan(plan.id);
     await held.reached;
     await runtime.reset();
@@ -216,7 +216,7 @@ describe("interrupted work is representable", () => {
     ]);
     await runtime.start();
     const plan = await runtime.prepare({ operations: [{ capability: "one" }] });
-    runtime.approvePlan(plan.id);
+    runtime.approvePlan(plan.id, HUMAN);
     const committing = runtime.commitPlan(plan.id);
     await held.reached;
     await runtime.stop();

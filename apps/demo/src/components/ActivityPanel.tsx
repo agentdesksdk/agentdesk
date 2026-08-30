@@ -17,7 +17,7 @@ import {
   rolledBackAnnouncement,
 } from "./receipt-text.ts";
 import { revealTarget } from "./reveal.ts";
-import { agentdesk } from "../runtime/agentdesk.ts";
+import { agentdesk, OPERATOR as SHARED_OPERATOR } from "../runtime/agentdesk.ts";
 
 type Rendered = {
   key: string;
@@ -242,7 +242,7 @@ function clock(at: number): string {
  * the demo has one operator, but the review still has to be signed by a human
  * rather than by the agent whose work is being reviewed.
  */
-const OPERATOR: Actor = { id: "operator", name: "Operator", kind: "human" };
+const OPERATOR = SHARED_OPERATOR;
 
 const AFFECTED_ROUTE: Record<string, (id: string) => string> = {
   order: (id) => `/orders/${id}`,

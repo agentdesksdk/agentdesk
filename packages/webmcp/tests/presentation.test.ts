@@ -76,7 +76,7 @@ describe("presentation trace", () => {
     ]);
 
     const actionId = runtime.getSnapshot().pending[0]!.id;
-    await runtime.approve(actionId);
+    await runtime.approve(actionId, { id: "operator", name: "Operator", kind: "human" });
     expect(events.at(-1)).toMatchObject({
       phase: "capability_completed",
       capability: "refund_shipping",

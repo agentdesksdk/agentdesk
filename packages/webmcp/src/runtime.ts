@@ -135,8 +135,12 @@ export type AgentDeskRuntime = {
    */
   subscribeAudit: (listener: (event: AuditEvent) => void) => () => void;
   invoke: (name: string, input?: Record<string, unknown>) => Promise<ToolResult>;
-  approve: (actionId: string) => Promise<ToolResult>;
-  reject: (actionId: string) => ToolResult;
+  /**
+   * `by` must be a human. A consequential action's approval record exists to
+   * say which person authorized it, and the ambient actor is the agent.
+   */
+  approve: (actionId: string, by?: Actor) => Promise<ToolResult>;
+  reject: (actionId: string, by?: Actor) => ToolResult;
 
   /** Records who is acting on subsequent operations. */
   setActor: (actor: Actor | undefined) => void;
@@ -380,6 +384,44 @@ export function createAgentDeskRuntime(options: {
     epoch += 1;
     epochController.abort();
     epochController = new AbortController();
+  }
+
+  /**
+   * An operation's right to write into the current session. stop() and
+   * reset() end the epoch, so work still in flight loses that right rather
+   * than repopulating a runtime the operator just cleared. Every async path
+   * that mutates runtime state claims one and rechecks it after each await,
+   * including after application callbacks like verify and previewChanges.
+   */
+  function claimSession(): { expired: () => boolean } {
+    const claimed = epoch;
+    return { expired: () => claimed !== epoch };
+  }
+
+  /**
+   * A plan whose session ended mid-commit. Leaving it COMMITTING made it
+   * unretryable after a restart, because the transition out of that state
+   * only ever happened on the path the interruption cut short. If reset
+   * removed the plan there is nothing to settle, and writing it back would
+   * resurrect it in a session the operator cleared.
+   */
+  function settleInterrupted(
+    planId: string,
+    claimed: OperationPlan,
+    outcomes: OperationOutcome[],
+  ): { ok: false; reason: string; plan: OperationPlan } {
+    if (plans.get(planId) !== undefined) {
+      plans.resolve(planId, {
+        status: "INTERRUPTED",
+        outcomes,
+        resolvedAt: now(),
+      });
+    }
+    return {
+      ok: false,
+      reason: `plan ${planId} was interrupted by a reset or stop and did not finish`,
+      plan: plans.get(planId) ?? claimed,
+    };
   }
 
   const surface = new ToolSurfaceManager(
@@ -734,7 +776,7 @@ export function createAgentDeskRuntime(options: {
 
   async function runExecution(
     capability: Capability,
-    input: Record<string, unknown>,
+    caller: Record<string, unknown>,
     opts: ExecutionOptions,
   ): Promise<ExecutionOutcome> {
     const {
@@ -745,7 +787,26 @@ export function createAgentDeskRuntime(options: {
       actor: actingActor,
     } = opts;
     const executionId = `EXE-${++executionCounter}`;
-    const startedEpoch = epoch;
+    const session = claimSession();
+    // The execution owns its input from here. Cloning only to prove the input
+    // was recordable and then continuing with the caller's object left the
+    // handler, the verifier, and the receipt each reading it again, so a
+    // value that changed between reads was executed under one shape and
+    // recorded under another, or refused after the write had landed.
+    let input: Record<string, unknown>;
+    try {
+      input = structuredClone(caller);
+    } catch (err) {
+      return {
+        ok: false,
+        executionId,
+        result: errorResult(
+          `${capability.name} was called with input the runtime cannot record: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        ),
+      };
+    }
     const linked = linkSignals(signal, epochController.signal);
     const execContext: ExecutionContext = {
       route: context.route,
@@ -766,7 +827,7 @@ export function createAgentDeskRuntime(options: {
     });
     try {
       const value = await capability.execute(input, execContext);
-      if (startedEpoch !== epoch) {
+      if (session.expired()) {
         return {
           ok: false,
           executionId,
@@ -789,33 +850,70 @@ export function createAgentDeskRuntime(options: {
           value.receipt.changes,
         );
       }
-      audit.append(event);
-      if (isReceiptEnvelope(value)) {
-        receipts.record({
-          capability: capability.name,
+      // Verification is an application callback and can outlive the session
+      // it started in, so the claim is rechecked here as well as after the
+      // handler. Nothing has been written yet at this point.
+      if (session.expired()) {
+        return {
+          ok: false,
           executionId,
-          input,
-          receipt: value.receipt,
-          verification,
-          at: now(),
-          ...(planId !== undefined ? { planId } : {}),
-          ...(actingActor !== undefined ? { executedBy: actingActor } : {}),
-        });
+          result: executionCancelled(capability.name),
+        };
       }
-      present(capability, "capability_completed", input, actingActor, {
-        executionId,
-        humanInitiated,
-      });
+      // Everything that can fail is built before anything is committed. A
+      // receipt the store cannot hold and a result that will not serialize
+      // are both failures of this execution, not of the bookkeeping after
+      // it, so they belong on the failure path while it is still reachable.
+      let toolResult: ToolResult;
+      let pending: Parameters<typeof receipts.record>[0] | undefined;
+      try {
+        toolResult = toToolResult(value);
+        if (isReceiptEnvelope(value)) {
+          pending = structuredClone({
+            capability: capability.name,
+            executionId,
+            input,
+            receipt: value.receipt,
+            verification,
+            at: now(),
+            ...(planId !== undefined ? { planId } : {}),
+            ...(actingActor !== undefined ? { executedBy: actingActor } : {}),
+          });
+        }
+      } catch (err) {
+        throw new Error(
+          `${capability.name} produced a result the runtime cannot record: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+      // One terminal outcome, committed together. Presentation runs after the
+      // governance evidence is durable and cannot change it.
+      audit.append(event);
+      if (pending) {
+        receipts.record(pending);
+      }
+      try {
+        present(capability, "capability_completed", input, actingActor, {
+          executionId,
+          humanInitiated,
+        });
+      } catch (err) {
+        console.error(
+          `agentdesk presentation after ${executionId} completed threw`,
+          err,
+        );
+      }
       emit();
       return {
         ok: true,
         executionId,
         value,
-        result: toToolResult(value),
+        result: toolResult,
         verification,
       };
     } catch (err) {
-      if (startedEpoch !== epoch) {
+      if (session.expired()) {
         return {
           ok: false,
           executionId,
@@ -1201,6 +1299,11 @@ export function createAgentDeskRuntime(options: {
     },
 
     async prepare(request) {
+      // previewChanges and revision are application callbacks and can end the
+      // session before the plan is created. Without a claim the plan landed
+      // in the cleared runtime and reset's audit clear then removed its
+      // plan_prepared event, leaving a plan with no record of its own origin.
+      const session = claimSession();
       // `previewChanges` is application code called synchronously below, so
       // the requester is resolved before it runs rather than after.
       const requester = actor;
@@ -1230,6 +1333,11 @@ export function createAgentDeskRuntime(options: {
         ),
       );
       const revision = options.revision?.(context);
+      if (session.expired()) {
+        throw new Error(
+          "the runtime was reset while this plan was being prepared, so it was not created",
+        );
+      }
       const plan = plans.create({
         operations,
         summary: request.summary ?? describePlan(operations),
@@ -1291,6 +1399,7 @@ export function createAgentDeskRuntime(options: {
     },
 
     async commitPlan(planId) {
+      const session = claimSession();
       const claimed = plans.transition(planId, "APPROVED", "COMMITTING");
       if (!claimed) {
         const existing = plans.get(planId);
@@ -1338,7 +1447,16 @@ export function createAgentDeskRuntime(options: {
 
       const outcomes: OperationOutcome[] = [];
       for (const operation of claimed.operations) {
+        // Before each operation, not after all of them. Checking only at the
+        // end let the operation after an interrupted one start, and it then
+        // claimed the new session and committed into it.
+        if (session.expired()) {
+          return settleInterrupted(planId, claimed, outcomes);
+        }
         outcomes.push(await commitOperation(planId, operation, executor));
+      }
+      if (session.expired()) {
+        return settleInterrupted(planId, claimed, outcomes);
       }
 
       // COMMITTED is a claim that the work happened. An operation that
@@ -1473,6 +1591,7 @@ export function createAgentDeskRuntime(options: {
       }
       // Claimed synchronously, before the first await, so two concurrent
       // undos cannot both reach the compensating action.
+      const session = claimSession();
       if (!receipts.claimRollback(receiptId)) {
         return {
           ok: false,
@@ -1491,6 +1610,13 @@ export function createAgentDeskRuntime(options: {
           stored.input,
           stored.receipt.changes,
         );
+        if (session.expired()) {
+          receipts.releaseRollback(receiptId);
+          return {
+            ok: false,
+            reason: `${receiptId} belongs to a session that ended before the undo was dispatched`,
+          };
+        }
         if (drift.status !== "VERIFIED") {
           receipts.releaseRollback(receiptId);
           return {
@@ -1505,7 +1631,16 @@ export function createAgentDeskRuntime(options: {
           context,
           stored.receipt.changes,
         );
+        // The compensating action completed. Returning without settling the
+        // receipt left it ROLLING_BACK, and stop() keeps receipts, so every
+        // later undo of it was refused as already running.
         receipts.markRolledBack(receiptId, now());
+        if (session.expired()) {
+          return {
+            ok: false,
+            reason: `${receiptId} belongs to a session that ended while the undo was running`,
+          };
+        }
         audit.append({
           kind: "rollback_performed",
           capability: stored.capability,
@@ -1517,6 +1652,12 @@ export function createAgentDeskRuntime(options: {
         return { ok: true, result };
       } catch (err) {
         receipts.releaseRollback(receiptId);
+        if (session.expired()) {
+          return {
+            ok: false,
+            reason: `${receiptId} belongs to a session that ended while the undo was running`,
+          };
+        }
         return {
           ok: false,
           reason: err instanceof Error ? err.message : String(err),
@@ -1536,7 +1677,15 @@ export function createAgentDeskRuntime(options: {
       }
       return runCapability(routed, input, "invoke");
     },
-    async approve(actionId) {
+    async approve(actionId, by) {
+      const session = claimSession();
+      const authorizer = resolveHumanActor(
+        by ?? actor,
+        "an approval must name a human; pass one explicitly rather than relying on the acting actor",
+      );
+      if (!authorizer.ok) {
+        return errorResult(authorizer.reason);
+      }
       // Same boundary rule as `runCapability`. The execution this releases
       // belongs to whoever was acting when the approval was claimed, not to
       // whoever happens to be acting once the re-checks below finish.
@@ -1619,12 +1768,18 @@ export function createAgentDeskRuntime(options: {
         kind: "approval_approved",
         actionId,
         capability: action.capability,
+        approvedBy: authorizer.actor,
         at: now(),
       });
       const outcome = await executeNow(routed, action.input, {
         actor: actingActor,
         humanInitiated: true,
       });
+      // approvals.resolve inserts, so resolving after a reset put the cleared
+      // action back into the fresh session. Nothing here belongs to it.
+      if (session.expired()) {
+        return executionCancelled(action.capability);
+      }
       if (outcome.ok) {
         approvals.resolve(actionId, {
           status: "APPROVED_EXECUTED",
@@ -1663,7 +1818,14 @@ export function createAgentDeskRuntime(options: {
         return errorResult(message);
       }
     },
-    reject(actionId) {
+    reject(actionId, by) {
+      const authorizer = resolveHumanActor(
+        by ?? actor,
+        "a rejection must name a human; pass one explicitly rather than relying on the acting actor",
+      );
+      if (!authorizer.ok) {
+        return errorResult(authorizer.reason);
+      }
       const action = approvals.pendingAction(actionId);
       if (!action) {
         return errorResult(`unknown pending action: ${actionId}`);
@@ -1677,6 +1839,7 @@ export function createAgentDeskRuntime(options: {
         kind: "approval_rejected",
         actionId,
         capability: action.capability,
+        rejectedBy: authorizer.actor,
         at: now(),
       });
       emit();
