@@ -41,7 +41,7 @@ Render `AgentPresence`, emit the same completed announcement twice, and observe 
 
 ## Resolved
 
-Fixed on `cdb2f8b`, and the finding understated the blast radius.
+Fixed on `0c4694d`, and the finding understated the blast radius.
 `ActivityPanel.tsx` held a second `aria-live` region with the same defect and
 no clear timer at all, so two identical refusals announced once. That path
 gets busier now that an indeterminate rollback is a repeatable outcome.

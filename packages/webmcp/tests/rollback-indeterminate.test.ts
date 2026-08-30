@@ -107,14 +107,154 @@ describe("a rollback that commits and then throws", () => {
     expect(runtime.queryReceipts()[0]!.rollbackState).toBe("INDETERMINATE");
   });
 
-  it("returns to ready when the verifier proves the compensation never landed", async () => {
+  it("is indeterminate even with a verifier, because it answers a different question", async () => {
     const store: Store = { value: 0, compensations: 0 };
     const runtime = await ledgerRuntime(store, { commits: false, verify: true });
+
+    await runtime.rollback(runtime.queryReceipts()[0]!.id);
+
+    expect(runtime.queryReceipts()[0]!.rollbackState).toBe("INDETERMINATE");
+  });
+
+  it("keeps the attempt time and the failure so an operator can reconcile it", async () => {
+    const store: Store = { value: 0, compensations: 0 };
+    const runtime = await ledgerRuntime(store, { commits: true, verify: false });
+
+    await runtime.rollback(runtime.queryReceipts()[0]!.id);
+    const stored = runtime.queryReceipts()[0]!;
+
+    expect(stored.rollbackAttemptedAt).toBeGreaterThan(0);
+    expect(stored.rollbackFailure).toContain("serialization");
+    expect(runtime.getSnapshot().audit.map((e) => e.kind)).toContain(
+      "rollback_indeterminate",
+    );
+  });
+});
+
+describe("reconciling an indeterminate rollback", () => {
+  it("spends the receipt when someone confirms the compensation landed", async () => {
+    const store: Store = { value: 0, compensations: 0 };
+    const runtime = await ledgerRuntime(store, { commits: true, verify: false });
+    const id = runtime.queryReceipts()[0]!.id;
+    await runtime.rollback(id);
+
+    const settled = runtime.reconcileRollback(id, "compensated", {
+      id: "human-1",
+      kind: "human",
+    });
+
+    expect(settled.ok).toBe(true);
+    const stored = runtime.queryReceipts()[0]!;
+    expect(stored.rollbackState).toBe("ROLLED_BACK");
+    expect(stored.reconciledBy?.id).toBe("human-1");
+    expect(runtime.getSnapshot().audit.map((e) => e.kind)).toContain(
+      "rollback_reconciled",
+    );
+  });
+
+  it("makes undo available again when someone confirms nothing landed", async () => {
+    const store: Store = { value: 0, compensations: 0 };
+    const runtime = await ledgerRuntime(store, { commits: true, verify: false });
+    const id = runtime.queryReceipts()[0]!.id;
+    await runtime.rollback(id);
+
+    runtime.reconcileRollback(id, "untouched");
+
+    expect(runtime.queryReceipts()[0]!.rollbackState).toBe("READY");
+  });
+
+  it("refuses to reconcile a receipt that is not indeterminate", async () => {
+    const store: Store = { value: 0, compensations: 0 };
+    const runtime = await ledgerRuntime(store, { commits: true, verify: false });
     const id = runtime.queryReceipts()[0]!.id;
 
-    const first = await runtime.rollback(id);
+    const settled = runtime.reconcileRollback(id, "compensated");
 
-    expect(first.ok).toBe(false);
-    expect(runtime.queryReceipts()[0]!.rollbackState).toBe("READY");
+    expect(settled.ok).toBe(false);
+  });
+});
+
+describe("a rollback that reports success without undoing anything", () => {
+  it("is not recorded as rolled back", async () => {
+    const store: Store = { value: 0, compensations: 0 };
+    const runtime = createAgentDeskRuntime({
+      registerTool: createMockModelContext().registerTool,
+      capabilities: [
+        defineCapability({
+          name: "set_value",
+          description: "Sets the value to 1",
+          risk: "WRITE",
+          verify: (_i, _c, changes) =>
+            store.value === changes[0]?.after
+              ? { status: "VERIFIED" }
+              : {
+                  status: "MISMATCH",
+                  field: "value",
+                  expected: changes[0]?.after,
+                  observed: store.value,
+                },
+          rollback: () => ({ restored: true }),
+          execute: () => {
+            const before = store.value;
+            store.value = 1;
+            return receipt({
+              entity: "Ledger",
+              changes: [{ field: "value", before, after: 1 }],
+              undoable: true,
+              result: { value: 1 },
+            });
+          },
+        }),
+      ],
+    });
+    await runtime.start();
+    await runtime.invoke("set_value", {});
+    const id = runtime.queryReceipts()[0]!.id;
+
+    const outcome = await runtime.rollback(id);
+
+    expect(outcome.ok).toBe(false);
+    expect(runtime.queryReceipts()[0]!.rollbackState).toBe("INDETERMINATE");
+    expect(runtime.getSnapshot().audit.map((e) => e.kind)).not.toContain(
+      "rollback_performed",
+    );
+  });
+
+  it("records that an unverifiable rollback rests on the handler's word", async () => {
+    const store: Store = { value: 0, compensations: 0 };
+    const runtime = createAgentDeskRuntime({
+      registerTool: createMockModelContext().registerTool,
+      capabilities: [
+        defineCapability({
+          name: "set_value",
+          description: "Sets the value to 1",
+          risk: "WRITE",
+          rollback: (_i, _c, changes) => {
+            store.value = changes[0]?.before as number;
+            return { restored: store.value };
+          },
+          execute: () => {
+            const before = store.value;
+            store.value = 1;
+            return receipt({
+              entity: "Ledger",
+              changes: [{ field: "value", before, after: 1 }],
+              undoable: true,
+              result: { value: 1 },
+            });
+          },
+        }),
+      ],
+    });
+    await runtime.start();
+    await runtime.invoke("set_value", {});
+
+    const outcome = await runtime.rollback(runtime.queryReceipts()[0]!.id);
+    const stored = runtime.queryReceipts()[0]!;
+
+    expect(outcome.ok).toBe(true);
+    expect(stored.rollbackState).toBe("ROLLED_BACK");
+    expect(stored.rollbackVerification?.status).toBe("UNSUPPORTED");
+    expect(store.value).toBe(0);
   });
 });

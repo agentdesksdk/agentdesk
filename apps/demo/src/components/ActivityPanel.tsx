@@ -397,6 +397,10 @@ export function ActivityPanel() {
                             )}
                             {entry.rolledBackAt !== undefined ? (
                               <span className="undone">Rolled back</span>
+                            ) : entry.rollbackState === "INDETERMINATE" ? (
+                              <span className="unreconciled">
+                                Undo outcome unknown
+                              </span>
                             ) : entry.receipt.undoable !== true ? null : (
                               <button
                                 type="button"

@@ -23,9 +23,15 @@ export function step(state: AnnouncerState): AnnouncerState | null {
   if (head === undefined) {
     return null;
   }
-  return head === state.text
-    ? { text: "", queue: state.queue }
-    : { text: head, queue: rest };
+  if (head !== state.text) {
+    return { text: head, queue: rest };
+  }
+  // Clearing is what turns a repeat into a second mutation, so the entry is
+  // left queued to be rendered next. An empty repeat has nothing to clear to,
+  // so it must be consumed here or the queue never drains.
+  return head === ""
+    ? { text: "", queue: rest }
+    : { text: "", queue: state.queue };
 }
 
 export function useAnnouncer(clearAfterMs?: number): {

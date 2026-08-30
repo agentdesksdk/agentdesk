@@ -603,16 +603,43 @@ receipt recorded, marks the receipt as rolled back, and appends a
 is captured at the claim, before the first `await`, for the same reason an
 execution captures its own.
 
-Every receipt carries a `rollbackState` of READY, ROLLING_BACK, or
-ROLLED_BACK. `ReceiptStore.claimRollback` moves READY to ROLLING_BACK and
-returns false otherwise. It is the receipt-side twin of
+Every receipt carries a `rollbackState` of READY, ROLLING_BACK,
+ROLLED_BACK, or INDETERMINATE. `ReceiptStore.claimRollback` moves READY to
+ROLLING_BACK and returns false otherwise. It is the receipt-side twin of
 `PlanStore.transition`, and the runtime wins it synchronously before its
 first `await`. That is what makes it atomic on a single-threaded event
 loop. Two concurrent undos of one receipt therefore reach the compensating
 action once, and the loser is told the rollback is already in flight.
 
-A rollback that fails releases its claim back to READY. A compensating
-action that could not run is a retry, not a dead end.
+Only a refusal that happens before the handler is dispatched releases the
+claim back to READY, because only then can nothing have run. A dispatched
+compensating action that throws goes to INDETERMINATE instead, carrying
+`rollbackAttemptedAt` and `rollbackFailure`, and appends a
+`rollback_indeterminate` event.
+
+An exception proves the handler did not return. It never proves the handler
+did not write, and nothing the runtime can observe closes that gap. An
+execution verifier answers whether the original write is still visible,
+which is a different question from whether the compensation ran; the two
+coincide only when the compensation is the exact inverse of the write. A
+compensation that is itself a forward transaction leaves the original state
+visible, so inferring "safe to retry" from a verifier is how a second
+refund happens.
+
+`reconcileRollback(receiptId, outcome, by?)` is the only exit. A caller who
+read the application says `compensated`, which spends the receipt, or
+`untouched`, which makes undo available again. It records `reconciledAt`,
+`reconciledBy`, and a `rollback_reconciled` event. The runtime never
+reconciles on its own.
+
+Success is not the handler's to declare either. Where the capability
+declares `verify`, the runtime runs it again after the handler returns.
+Finding the original change still in place means nothing was undone, so the
+receipt goes to INDETERMINATE rather than ROLLED_BACK, and no
+`rollback_performed` event is written. The outcome is stored on the receipt
+as `rollbackVerification`, which is `UNSUPPORTED` when the capability
+declares no verifier, so a reader can tell a proven undo from one that rests
+on the handler's word.
 
 Before calling the handler, the runtime re-runs the capability's `verify`
 against the receipt's stored input and changes. Anything other than
@@ -642,11 +669,12 @@ A conflict throws and names what moved.
 
 Rollback is a capability-authored compensating action, not a transaction.
 It runs through the capability, not around it, and it can fail. A throwing
-rollback returns `{ ok: false, reason }` and the receipt returns to READY.
+rollback returns `{ ok: false, reason }` and the receipt becomes
+INDETERMINATE until someone reconciles it.
 
 ### Audit events
 
-Nine event kinds are added to the `AuditEvent` union, all carrying `at`:
+Eleven event kinds are added to the `AuditEvent` union, all carrying `at`:
 
 | Kind | Payload beyond `planId` |
 | --- | --- |
@@ -658,6 +686,8 @@ Nine event kinds are added to the `AuditEvent` union, all carrying `at`:
 | `plan_partial` | `outcomes` (capability, status, verification) |
 | `plan_failed` | `outcomes` (capability, status, verification) |
 | `rollback_performed` | `capability`, `receiptId`, `actor` (no `planId`) |
+| `rollback_indeterminate` | `capability`, `receiptId` (no `planId`) |
+| `rollback_reconciled` | `capability`, `receiptId`, `outcome`, `actor` typed `HumanActor` (no `planId`) |
 | `receipt_reviewed` | `capability`, `receiptId`, `actor` typed `HumanActor` (no `planId`) |
 
 Six kinds carry an acting identity, and every one of them uses the same
@@ -773,3 +803,9 @@ The same runtime serves both experiment arms:
 
 Same catalog, same handlers, same pipeline; only the exposure strategy
 differs, which is what makes the `/baseline` vs `/agentdesk` comparison fair.
+
+<!-- code-anchors
+packages/webmcp/src/receipts.ts RollbackState ReconciliationOutcome reconcile markIndeterminate rollbackVerification rollbackAttemptedAt rollbackFailure
+packages/webmcp/src/runtime.ts reconcileRollback markRolledBack
+packages/webmcp/src/audit.ts rollback_indeterminate rollback_reconciled rollback_performed
+-->

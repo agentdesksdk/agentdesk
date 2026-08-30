@@ -75,7 +75,8 @@ protection here is the same case that has no protection there.
 
 ## Resolved
 
-Fixed on `cdb2f8b`. `RollbackState` gains `INDETERMINATE`, and a compensating
+Fixed on `f8ae521`, corrected on this branch after review. `RollbackState`
+gains `INDETERMINATE`, and a compensating
 action that throws after dispatch parks the receipt there instead of
 returning it to `READY`.
 

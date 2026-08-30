@@ -57,4 +57,11 @@ describe("live region announcements", () => {
     expect(step(EMPTY)).toBeNull();
     expect(step({ text: "A", queue: [] })).toBeNull();
   });
+
+  it("consumes an empty announcement instead of returning an equal state", () => {
+    // A non-empty repeat clears without consuming, because the clear is the
+    // first of its two mutations. An empty one has nothing to clear to, so
+    // leaving it queued spins the effect forever.
+    expect(step({ text: "", queue: [""] })?.queue).toEqual([]);
+  });
 });
