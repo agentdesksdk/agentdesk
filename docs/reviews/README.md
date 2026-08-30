@@ -46,7 +46,7 @@ and executed under plain Node, and the design doc check passed.
 | P2 | RESOLVED | [Audit types do not encode the human-only events](2026-08-30-p2-audit-types-do-not-encode-human-events.md) |
 | P1 | RESOLVED | [Human identity shape is not validated at the JavaScript boundary](2026-08-30-p1-human-identity-shape-is-not-validated.md) |
 | P2 | RESOLVED | [Human-only record fields remain typed as generic actors](2026-08-30-p2-human-only-record-fields-remain-generic.md) |
-| P1 | PARTIALLY FIXED | [Stop strands an interrupted rollback in progress](2026-08-30-p1-stop-strands-rollback-in-progress.md) |
+| P1 | RESOLVED | [Stop strands an interrupted rollback in progress](2026-08-30-p1-stop-strands-rollback-in-progress.md) |
 | P1 | RESOLVED | [Recordability preflight discards the input snapshot](2026-08-31-p1-recordability-preflight-discards-input-snapshot.md) |
 | P1 | RESOLVED | [Approval rejects a valid actor without an optional name](2026-08-31-p1-approval-requires-optional-actor-name.md) |
 

@@ -1813,6 +1813,9 @@ export function createAgentDeskRuntime(options: {
           kind: "rollback_indeterminate",
           capability: stored.capability,
           receiptId,
+          at: now(),
+        });
+        emit();
         return {
           ok: false,
           reason: `rollback of ${receiptId} is indeterminate: the compensating action failed after dispatch, so whether it changed anything is unknown until someone reconciles it with reconcileRollback. Original failure: ${detail}`,
