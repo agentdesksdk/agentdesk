@@ -65,7 +65,7 @@ describe("P0 harness startup", () => {
     expect(approval.data?.approvalEvidence).toBe("summary");
 
     const id = runtime.getSnapshot().pending[0]!.id;
-    const executed = await runtime.approve(id);
+    const executed = await runtime.approve(id, { id: "operator", name: "Operator", kind: "human" });
     expect(JSON.parse(executed.content[0]!.text)).toEqual({
       demo_action: "executed after human approval",
     });

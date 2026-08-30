@@ -1,10 +1,14 @@
 ﻿import {
   createAgentDeskRuntime,
   createWebMcpClient,
+  type Actor,
   type AppContext,
   type ToolResult,
 } from "@agentdesk/webmcp";
 import { p0Capabilities } from "./capabilities.ts";
+
+/** The person driving the harness. Approving is a human act, not the agent's. */
+const OPERATOR: Actor = { id: "operator", name: "Operator", kind: "human" };
 
 const runtime = createAgentDeskRuntime({ capabilities: p0Capabilities });
 
@@ -78,12 +82,14 @@ function paint(): void {
     const approve = document.createElement("button");
     approve.textContent = "Approve";
     approve.addEventListener("click", () => {
-      void runtime.approve(action.id).then((result) => logInvocation(`approve ${action.id}`, result));
+      void runtime
+        .approve(action.id, OPERATOR)
+        .then((result) => logInvocation(`approve ${action.id}`, result));
     });
     const reject = document.createElement("button");
     reject.textContent = "Reject";
     reject.addEventListener("click", () => {
-      logInvocation(`reject ${action.id}`, runtime.reject(action.id));
+      logInvocation(`reject ${action.id}`, runtime.reject(action.id, OPERATOR));
     });
     row.append(label, approve, reject);
     el("pending").append(row);

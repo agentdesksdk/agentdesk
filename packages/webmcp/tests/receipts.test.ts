@@ -81,7 +81,7 @@ describe("change receipts", () => {
     const { runtime } = await start(refundFixture(store));
     await runtime.invoke("refund_shipping", { order_id: "10428" });
     const actionId = runtime.getSnapshot().pending[0]!.id;
-    const approved = await runtime.approve(actionId);
+    const approved = await runtime.approve(actionId, { id: "operator", name: "Operator", kind: "human" });
 
     const payload = JSON.parse(approved.content[0]!.text) as {
       status: string;
@@ -103,7 +103,7 @@ describe("change receipts", () => {
     const store = { refunded: false };
     const { runtime } = await start(refundFixture(store));
     await runtime.invoke("refund_shipping", { order_id: "10428" });
-    await runtime.approve(runtime.getSnapshot().pending[0]!.id);
+    await runtime.approve(runtime.getSnapshot().pending[0]!.id, { id: "operator", name: "Operator", kind: "human" });
 
     const completed = runtime
       .getSnapshot()
@@ -124,7 +124,7 @@ describe("change receipts", () => {
     const { model, runtime } = await start(refundFixture(store));
     await runtime.invoke("refund_shipping", { order_id: "10428" });
     const actionId = runtime.getSnapshot().pending[0]!.id;
-    await runtime.approve(actionId);
+    await runtime.approve(actionId, { id: "operator", name: "Operator", kind: "human" });
 
     const status = (await model.execute("get_action_status", {
       approval_id: actionId,

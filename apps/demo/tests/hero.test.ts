@@ -120,7 +120,7 @@ describe("hero scenario", () => {
     );
 
     const actionId = runtime.getSnapshot().pending[0]!.id;
-    const approved = await runtime.approve(actionId);
+    const approved = await runtime.approve(actionId, { id: "operator", name: "Operator", kind: "human" });
     const payload = JSON.parse(approved.content[0]!.text) as {
       status: string;
       result: Record<string, unknown>;
@@ -156,7 +156,7 @@ describe("hero scenario", () => {
     await runtime.start();
     await runtime.invoke("refund_shipping", { order_id: "10428" });
     const actionId = runtime.getSnapshot().pending[0]!.id;
-    await runtime.approve(actionId);
+    await runtime.approve(actionId, { id: "operator", name: "Operator", kind: "human" });
     expect(getState().orders.find((o) => o.id === "10428")?.shippingRefunded).toBe(
       true,
     );

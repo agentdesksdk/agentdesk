@@ -1,6 +1,6 @@
 # P1: Single-action approval has no approver identity
 
-Status: OPEN
+Status: RESOLVED in `f7c6d1f`
 
 Reviewed commit: `2f1f332`
 
@@ -48,3 +48,24 @@ The UI labels this event **Human approved**, but the governance record cannot es
 
 Request a consequential action as an agent. Assert that approval without a human identity is rejected. Approve with a human actor, execute as the agent, and assert that the approval audit names the human while the execution audit and receipt name the agent.
 
+
+## Resolution
+
+`approve(actionId, by)` and `reject(actionId, by)` take an authorizer, refuse
+anything that is not a human, and record it as `approvedBy` and `rejectedBy`
+on the approval audit events. `markReviewed` moved onto the same rule, so one
+function decides what counts as a human authorization rather than three
+copies drifting apart.
+
+Verified in the built demo rather than only in unit tests. Clicking the real
+Approve button records `approvedBy` as the operator while
+`execution_completed` and the receipt still name the agent, which is the
+separation this finding asked for. Calling the shipped SDK directly with the
+demo's ambient agent actor, the exact reported case, is refused:
+
+```
+an approval must name a human; pass one explicitly rather than relying on the acting actor
+```
+
+Plan approval is a separate finding and is not addressed here. `approvePlan`
+still takes the ambient actor.

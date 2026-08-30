@@ -88,7 +88,7 @@ describe("the refund receipt names the object a human can navigate to", () => {
   it("records the order as an affected object pointing at a registered reveal", async () => {
     const { runtime } = await startRuntime();
     await runtime.invoke("refund_shipping", { order_id: "10428" });
-    await runtime.approve(runtime.getSnapshot().pending[0]!.id);
+    await runtime.approve(runtime.getSnapshot().pending[0]!.id, { id: "operator", name: "Operator", kind: "human" });
 
     const stored = runtime.queryReceipts({ capability: "refund_shipping" })[0]!;
     expect(stored.receipt.affected).toEqual([
@@ -104,7 +104,7 @@ describe("the refund receipt names the object a human can navigate to", () => {
   it("hands the completed event a human initiated flag the UI can act on", async () => {
     const { runtime, events } = await startRuntime();
     await runtime.invoke("refund_shipping", { order_id: "10428" });
-    await runtime.approve(runtime.getSnapshot().pending[0]!.id);
+    await runtime.approve(runtime.getSnapshot().pending[0]!.id, { id: "operator", name: "Operator", kind: "human" });
 
     const done = events.find((e) => e.phase === "capability_completed")!;
     expect(shouldHandOffFocus(done, undefined)).toBe(true);
@@ -113,7 +113,7 @@ describe("the refund receipt names the object a human can navigate to", () => {
   it("refuses focus for the same refund run without an approval", async () => {
     const { runtime, events } = await startRuntime();
     await runtime.invoke("refund_shipping", { order_id: "10428" });
-    await runtime.approve(runtime.getSnapshot().pending[0]!.id);
+    await runtime.approve(runtime.getSnapshot().pending[0]!.id, { id: "operator", name: "Operator", kind: "human" });
     const approved = events.find((e) => e.phase === "capability_completed")!;
 
     expect(approved.focus).toBe("on_explicit_request");
@@ -126,7 +126,7 @@ describe("the refund receipt names the object a human can navigate to", () => {
   it("narrows the event so the caller can trust the id and the target", async () => {
     const { runtime, events } = await startRuntime();
     await runtime.invoke("refund_shipping", { order_id: "10428" });
-    await runtime.approve(runtime.getSnapshot().pending[0]!.id);
+    await runtime.approve(runtime.getSnapshot().pending[0]!.id, { id: "operator", name: "Operator", kind: "human" });
     const done = events.find((e) => e.phase === "capability_completed")!;
 
     expect(shouldHandOffFocus(done, undefined)).toBe(true);
@@ -264,7 +264,7 @@ describe("review and rollback say what they did", () => {
   async function refundReceipt() {
     const { runtime } = await startRuntime();
     await runtime.invoke("refund_shipping", { order_id: "10428" });
-    await runtime.approve(runtime.getSnapshot().pending[0]!.id);
+    await runtime.approve(runtime.getSnapshot().pending[0]!.id, { id: "operator", name: "Operator", kind: "human" });
     return {
       runtime,
       entry: runtime.queryReceipts({ capability: "refund_shipping" })[0]!,

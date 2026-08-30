@@ -14,7 +14,7 @@ async function startRuntime() {
 
 async function approveFirst(runtime: Awaited<ReturnType<typeof startRuntime>>) {
   const actionId = runtime.getSnapshot().pending[0]!.id;
-  return runtime.approve(actionId);
+  return runtime.approve(actionId, { id: "operator", name: "Operator", kind: "human" });
 }
 
 describe("financial invariants", () => {

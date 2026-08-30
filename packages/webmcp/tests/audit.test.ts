@@ -229,7 +229,7 @@ describe("policy is re-evaluated at approval", () => {
     const id = runtime.getSnapshot().pending[0]!.id;
 
     denyNow = true;
-    const outcome = await runtime.approve(id);
+    const outcome = await runtime.approve(id, { id: "operator", name: "Operator", kind: "human" });
     expect(ran).toBe(false);
     expect(outcome.code).toBe("POLICY_DENIED");
   });

@@ -171,7 +171,7 @@ async function exercise(
     return "APPROVAL_REQUIRED carried no approval_id";
   }
   try {
-    return classify(await runtime.approve(approvalId));
+    return classify(await runtime.approve(approvalId, { id: "operator", name: "Operator", kind: "human" }));
   } catch (err) {
     return `approve threw ${err instanceof Error ? err.message : String(err)}`;
   }

@@ -41,8 +41,22 @@ export type AuditEvent =
       summary: string;
       at: number;
     }
-  | { kind: "approval_approved"; actionId: string; capability: string; at: number }
-  | { kind: "approval_rejected"; actionId: string; capability: string; at: number }
+  | {
+      kind: "approval_approved";
+      actionId: string;
+      capability: string;
+      /** The human who authorized it. An agent cannot stand in for one. */
+      approvedBy?: Actor;
+      at: number;
+    }
+  | {
+      kind: "approval_rejected";
+      actionId: string;
+      capability: string;
+      /** The human who refused it. */
+      rejectedBy?: Actor;
+      at: number;
+    }
   | {
       kind: "execution_started";
       capability: string;

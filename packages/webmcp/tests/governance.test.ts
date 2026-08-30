@@ -69,7 +69,7 @@ describe("two-phase approval", () => {
     await model.execute("invoke_capability", { name: "refund_shipping" });
     const actionId = runtime.getSnapshot().pending[0]!.id;
 
-    const approved = await runtime.approve(actionId);
+    const approved = await runtime.approve(actionId, { id: "operator", name: "Operator", kind: "human" });
     expect(store.refunded).toBe(true);
     expect(JSON.parse(approved.content[0]!.text)).toEqual({
       shipping_refunded: true,
@@ -99,7 +99,7 @@ describe("two-phase approval", () => {
     const actionId = runtime.getSnapshot().pending[0]!.id;
 
     store.refunded = true;
-    const outcome = await runtime.approve(actionId);
+    const outcome = await runtime.approve(actionId, { id: "operator", name: "Operator", kind: "human" });
     expect(store.log).toEqual([]);
     expect(outcome).toMatchObject({
       code: "CAPABILITY_UNAVAILABLE",
@@ -128,7 +128,7 @@ describe("two-phase approval", () => {
     await model.execute("invoke_capability", { name: "refund_shipping" });
     const actionId = runtime.getSnapshot().pending[0]!.id;
 
-    runtime.reject(actionId);
+    runtime.reject(actionId, { id: "operator", name: "Operator", kind: "human" });
     expect(store.refunded).toBe(false);
     expect(store.log).toEqual([]);
     expect(runtime.getSnapshot().pending).toHaveLength(0);
@@ -205,7 +205,7 @@ describe("audit trail", () => {
     await model.execute("find_capabilities", { query: "refund shipping" });
     await model.execute("refund_shipping", { order_id: "10428" });
     const actionId = runtime.getSnapshot().pending[0]!.id;
-    await runtime.approve(actionId);
+    await runtime.approve(actionId, { id: "operator", name: "Operator", kind: "human" });
 
     const kinds = runtime
       .getSnapshot()

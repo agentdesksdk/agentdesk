@@ -113,6 +113,11 @@ export type OperationOutcome = {
 };
 
 /**
+ * INTERRUPTED means stop() or reset() ended the session while the plan was
+ * committing. It is terminal for that session and says the plan neither
+ * finished nor failed, which is the only honest thing to record about work
+ * the runtime stopped watching.
+ *
  * COMMITTED means every operation ran and nothing was disproved.
  * PARTIAL means the plan reached the end without failing and without
  * earning that claim, because an operation was skipped or a verifier
@@ -124,6 +129,7 @@ export type PlanStatus =
   | "COMMITTING"
   | "COMMITTED"
   | "PARTIAL"
+  | "INTERRUPTED"
   | "REJECTED"
   | "DRIFTED"
   | "FAILED";

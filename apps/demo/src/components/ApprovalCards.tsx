@@ -1,5 +1,5 @@
 import { getState } from "../data/store.ts";
-import { agentdesk } from "../runtime/agentdesk.ts";
+import { agentdesk, OPERATOR } from "../runtime/agentdesk.ts";
 import { money } from "../capabilities/helpers.ts";
 import { useRuntime } from "./hooks.ts";
 import type { PendingAction } from "@agentdesk/webmcp";
@@ -80,7 +80,7 @@ export function ApprovalCards() {
           <div className="actions">
             <button
               onClick={() => {
-                agentdesk.reject(action.id);
+                agentdesk.reject(action.id, OPERATOR);
               }}
             >
               Reject
@@ -88,7 +88,7 @@ export function ApprovalCards() {
             <button
               className="primary"
               onClick={() => {
-                void agentdesk.approve(action.id);
+                void agentdesk.approve(action.id, OPERATOR);
               }}
             >
               Approve
