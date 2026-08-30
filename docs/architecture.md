@@ -632,14 +632,24 @@ read the application says `compensated`, which spends the receipt, or
 `reconciledBy`, and a `rollback_reconciled` event. The runtime never
 reconciles on its own.
 
-Success is not the handler's to declare either. Where the capability
-declares `verify`, the runtime runs it again after the handler returns.
-Finding the original change still in place means nothing was undone, so the
-receipt goes to INDETERMINATE rather than ROLLED_BACK, and no
-`rollback_performed` event is written. The outcome is stored on the receipt
-as `rollbackVerification`, which is `UNSUPPORTED` when the capability
-declares no verifier, so a reader can tell a proven undo from one that rests
-on the handler's word.
+Success is not the handler's to declare either, and `verify` cannot settle
+it. `verify` asks whether the original change is still visible, so it
+detects an undo that did nothing and stops there. Its MISMATCH says state
+moved without saying where to, and an undo that lands on a third value is
+not a rollback.
+
+`verifyRollback(input, ctx, changes)` asks the question that matters after
+an undo, whether the receipt's recorded `before` values are back. A
+capability declares it, or declares `rollbackEvidence: "handler"` to accept
+the handler's word deliberately, exactly as `approvalEvidence: "summary"`
+works for approvals. Declaring neither leaves the receipt INDETERMINATE, no
+`rollback_performed` is written, and a human reconciles it. The outcome is
+stored as `rollbackVerification`, so a reader can tell a proven undo from an
+accepted one.
+
+One disproof outranks the opt-out. If `verify` reports the original change
+still in place, the undo demonstrably did nothing, and the receipt is
+unreconciled whatever `rollbackEvidence` says.
 
 Before calling the handler, the runtime re-runs the capability's `verify`
 against the receipt's stored input and changes. Anything other than
@@ -806,6 +816,7 @@ differs, which is what makes the `/baseline` vs `/agentdesk` comparison fair.
 
 <!-- code-anchors
 packages/webmcp/src/receipts.ts RollbackState ReconciliationOutcome reconcile markIndeterminate rollbackVerification rollbackAttemptedAt rollbackFailure
-packages/webmcp/src/runtime.ts reconcileRollback markRolledBack
+packages/webmcp/src/capability.ts verifyRollback rollbackEvidence
+packages/webmcp/src/runtime.ts reconcileRollback markRolledBack proveRollback ownActor
 packages/webmcp/src/audit.ts rollback_indeterminate rollback_reconciled rollback_performed
 -->

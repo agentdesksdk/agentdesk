@@ -22,6 +22,7 @@ function ledgerCapability(store: Store) {
             expected: changes[0]?.after,
             observed: store.value,
           },
+    rollbackEvidence: "handler",
     rollback: async (_input, _ctx, changes) => {
       store.rollbackCalls += 1;
       await new Promise((resolve) => setTimeout(resolve, 20));

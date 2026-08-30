@@ -158,7 +158,7 @@ describe("reconciling an indeterminate rollback", () => {
     const id = runtime.queryReceipts()[0]!.id;
     await runtime.rollback(id);
 
-    runtime.reconcileRollback(id, "untouched");
+    runtime.reconcileRollback(id, "untouched", { id: "human-1", kind: "human" });
 
     expect(runtime.queryReceipts()[0]!.rollbackState).toBe("READY");
   });
@@ -168,7 +168,7 @@ describe("reconciling an indeterminate rollback", () => {
     const runtime = await ledgerRuntime(store, { commits: true, verify: false });
     const id = runtime.queryReceipts()[0]!.id;
 
-    const settled = runtime.reconcileRollback(id, "compensated");
+    const settled = runtime.reconcileRollback(id, "compensated", { id: "human-1", kind: "human" });
 
     expect(settled.ok).toBe(false);
   });
@@ -229,6 +229,7 @@ describe("a rollback that reports success without undoing anything", () => {
           name: "set_value",
           description: "Sets the value to 1",
           risk: "WRITE",
+          rollbackEvidence: "handler",
           rollback: (_i, _c, changes) => {
             store.value = changes[0]?.before as number;
             return { restored: store.value };

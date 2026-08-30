@@ -70,6 +70,8 @@ const CLAIMS = [
   ["docs/architecture.md", /INDETERMINATE/, "present", "architecture names the fourth rollback state"],
   ["docs/architecture.md", /reconcileRollback/, "present", "architecture names the only exit from it"],
   ["docs/architecture.md", /rollbackVerification/, "present", "architecture says how a rollback was proven"],
+  ["docs/architecture.md", /verifyRollback/, "present", "architecture names the rollback-specific verifier"],
+  ["docs/architecture.md", /rollbackEvidence/, "present", "architecture names the deliberate opt-out"],
   ["docs/architecture.md", /the receipt returns to READY/, "absent", "a thrown rollback no longer returns to READY"],
   ["docs/architecture.md", /rollbackState` of READY, ROLLING_BACK, or\s+ROLLED_BACK/, "absent", "the three-state enumeration is stale"],
 ];

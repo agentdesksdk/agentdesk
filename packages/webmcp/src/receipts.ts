@@ -164,7 +164,7 @@ export class ReceiptStore {
       outcome === "compensated" ? "ROLLED_BACK" : "READY",
       {
         reconciledAt: at,
-        ...(by ? { reconciledBy: by } : {}),
+        ...(by ? { reconciledBy: structuredClone(by) } : {}),
         ...(outcome === "compensated" ? { rolledBackAt: at } : {}),
       },
     );

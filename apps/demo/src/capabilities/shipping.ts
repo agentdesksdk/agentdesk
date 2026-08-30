@@ -194,6 +194,25 @@ export const shippingCapabilities: Capability[] = [
             observed: false,
           };
     },
+    // `verify` asks whether the refund is still applied, which only detects
+    // an undo that did nothing. This asks the question that matters after an
+    // undo, whether the recorded before-state is actually back.
+    verifyRollback: (input, _ctx, changes) => {
+      const order = orderFromInput(input);
+      if (!order) {
+        return { status: "PARTIAL", unverified: ["shipping_refunded"] };
+      }
+      const refundChange = changes.find((c) => c.field === "shipping_refunded");
+      const expected = refundChange ? refundChange.before === true : false;
+      return order.shippingRefunded === expected
+        ? { status: "VERIFIED" }
+        : {
+            status: "MISMATCH",
+            field: "shipping_refunded",
+            expected,
+            observed: order.shippingRefunded,
+          };
+    },
     // Restores from the values the receipt recorded, not from guesses about
     // what the prior state must have been.
     rollback: (input, _ctx, changes) => {
