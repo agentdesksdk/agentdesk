@@ -651,6 +651,15 @@ One disproof outranks the opt-out. If `verify` reports the original change
 still in place, the undo demonstrably did nothing, and the receipt is
 unreconciled whatever `rollbackEvidence` says.
 
+The decision is a `RollbackProof` of `proven`, `accepted`, or
+`unreconciled`, not a verification status. Those are different facts, and
+collapsing them was a real defect: `UNSUPPORTED` meant both "a declared
+verifier could not check" and "the capability accepts the handler's word",
+so a verifier answering `UNSUPPORTED` recorded a rollback nobody had
+proven. Only `accepted` comes from the opt-out. Declaring `verifyRollback`
+alongside `rollbackEvidence: "handler"` is a contradiction and
+`defineCapability` rejects it.
+
 Before calling the handler, the runtime re-runs the capability's `verify`
 against the receipt's stored input and changes. Anything other than
 `VERIFIED` releases the claim and refuses with a conflict, because the

@@ -235,3 +235,60 @@ describe("reconciling an indeterminate rollback", () => {
     expect(event && "actor" in event ? event.actor?.id : undefined).toBe("human-7");
   });
 });
+
+describe("the source of rollback evidence", () => {
+  it("does not accept a verifier that could not verify as the handler opt-out", async () => {
+    const store: Store = { value: 0, compensations: 0 };
+    const runtime = await runtimeFor(store, {
+      verifyRollback: () => ({ status: "UNSUPPORTED" }),
+      rollback: (_i, _c, changes) => {
+        store.value = changes[0]?.before as number;
+        return "restored";
+      },
+    });
+
+    const outcome = await runtime.rollback(runtime.queryReceipts()[0]!.id);
+
+    expect(outcome.ok).toBe(false);
+    expect(runtime.queryReceipts()[0]!.rollbackState).toBe("INDETERMINATE");
+    expect(runtime.getSnapshot().audit.map((e) => e.kind)).not.toContain(
+      "rollback_performed",
+    );
+  });
+
+  it("refuses to define a capability that declares a verifier and waives it", () => {
+    expect(() =>
+      defineCapability({
+        name: "contradictory",
+        description: "Declares a rollback verifier and then waives it",
+        risk: "WRITE",
+        verifyRollback: () => ({ status: "VERIFIED" }),
+        rollbackEvidence: "handler",
+        rollback: () => undefined,
+        execute: () => ({ ok: true }),
+      }),
+    ).toThrow(/verifyRollback/);
+  });
+});
+
+describe("reconciling with an actor the platform cannot clone", () => {
+  it("refuses through the result contract instead of throwing", async () => {
+    const store: Store = { value: 0, compensations: 0 };
+    const runtime = await runtimeFor(store, {
+      rollback: () => {
+        throw new Error("unknown outcome");
+      },
+    });
+    const id = runtime.queryReceipts()[0]!.id;
+    await runtime.rollback(id);
+
+    const settled = runtime.reconcileRollback(id, "compensated", {
+      id: "human-1",
+      kind: "human",
+      notify: () => undefined,
+    } as never);
+
+    expect(settled.ok).toBe(false);
+    expect(runtime.queryReceipts()[0]!.rollbackState).toBe("INDETERMINATE");
+  });
+});

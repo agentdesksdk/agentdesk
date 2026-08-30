@@ -374,6 +374,11 @@ export function defineCapability(spec: CapabilitySpec): Capability {
   if (spec.verifyRollback !== undefined) {
     capability.verifyRollback = spec.verifyRollback;
   }
+  if (spec.verifyRollback !== undefined && spec.rollbackEvidence === "handler") {
+    throw new Error(
+      `${name} declares verifyRollback and also waives it with rollbackEvidence "handler". Keep the verifier, or drop it and accept the handler's word, but not both.`,
+    );
+  }
   if (spec.rollbackEvidence !== undefined) {
     capability.rollbackEvidence = spec.rollbackEvidence;
   } else if (spec.verifyRollback !== undefined) {

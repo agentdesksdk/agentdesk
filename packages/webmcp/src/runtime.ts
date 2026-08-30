@@ -80,6 +80,19 @@ const BUILTIN_NAMES = new Set([
 
 export type Exposure = "routed" | "flat";
 
+/**
+ * Why a rollback may or may not be recorded, kept separate from the
+ * `VerificationResult` it carries.
+ *
+ * Collapsing these onto the status was the earlier bug. `UNSUPPORTED` meant
+ * both "a declared verifier could not check" and "the capability accepts the
+ * handler's word", and only the second one is evidence.
+ */
+type RollbackProof =
+  | { kind: "proven"; verification: VerificationResult }
+  | { kind: "accepted"; verification: VerificationResult }
+  | { kind: "unreconciled"; verification: VerificationResult; detail: string };
+
 export type RoutedMatch = {
   name: string;
   title?: string;
@@ -768,7 +781,7 @@ export function createAgentDeskRuntime(options: {
     capability: Capability,
     input: Record<string, unknown>,
     changes: readonly Change[],
-  ): Promise<VerificationResult & { detail: string }> {
+  ): Promise<RollbackProof> {
     if (capability.verifyRollback) {
       let result: VerificationResult;
       try {
@@ -780,13 +793,17 @@ export function createAgentDeskRuntime(options: {
           note: `rollback verifier failed: ${err instanceof Error ? err.message : String(err)}`,
         };
       }
-      return {
-        ...result,
-        detail:
-          result.status === "VERIFIED"
-            ? "the recorded before-state is back"
-            : "the rollback verifier could not confirm the recorded before-state is back",
-      };
+      // Only VERIFIED. A declared verifier answering UNSUPPORTED is saying it
+      // could not check, which is not the same fact as a capability declaring
+      // that the handler's word is the evidence.
+      return result.status === "VERIFIED"
+        ? { kind: "proven", verification: result }
+        : {
+            kind: "unreconciled",
+            verification: result,
+            detail:
+              "the rollback verifier did not confirm the recorded before-state is back",
+          };
     }
     // No rollback verifier. `verify` still detects the one failure it can
     // see, a handler that returned while its change is untouched, and that
@@ -795,10 +812,13 @@ export function createAgentDeskRuntime(options: {
       const seen = await runVerification(capability, input, changes);
       if (seen.status === "VERIFIED") {
         return {
-          status: "MISMATCH",
-          field: changes[0]?.field ?? "",
-          expected: changes[0]?.before,
-          observed: changes[0]?.after,
+          kind: "unreconciled",
+          verification: {
+            status: "MISMATCH",
+            field: changes[0]?.field ?? "",
+            expected: changes[0]?.before,
+            observed: changes[0]?.after,
+          },
           detail:
             "the handler reported success while the original change was still in place",
         };
@@ -806,14 +826,17 @@ export function createAgentDeskRuntime(options: {
     }
     if (capability.rollbackEvidence === "handler") {
       return {
-        status: "UNSUPPORTED",
-        detail: "recorded on the handler's word, as the capability declared",
+        kind: "accepted",
+        verification: { status: "UNSUPPORTED" },
       };
     }
     return {
-      status: "PARTIAL",
-      unverified: changes.map((change) => change.field),
-      note: "no rollback evidence",
+      kind: "unreconciled",
+      verification: {
+        status: "PARTIAL",
+        unverified: changes.map((change) => change.field),
+        note: "no rollback evidence",
+      },
       detail:
         "nothing proves the recorded before-state is back. Declare verifyRollback, or rollbackEvidence: \"handler\" to accept the handler's word",
     };
@@ -1745,7 +1768,7 @@ export function createAgentDeskRuntime(options: {
         // deliberately declared that the handler word is the evidence.
         // Anything else is an unreconciled receipt rather than a claim
         // nobody checked.
-        if (restored.status !== "VERIFIED" && restored.status !== "UNSUPPORTED") {
+        if (restored.kind === "unreconciled") {
           receipts.markIndeterminate(receiptId, now(), restored.detail);
           audit.append({
             kind: "rollback_indeterminate",
@@ -1759,7 +1782,7 @@ export function createAgentDeskRuntime(options: {
             reason: `rollback of ${receiptId} is unreconciled: ${restored.detail}`,
           };
         }
-        receipts.markRolledBack(receiptId, now(), restored);
+        receipts.markRolledBack(receiptId, now(), restored.verification);
         audit.append({
           kind: "rollback_performed",
           capability: stored.capability,
@@ -1813,15 +1836,17 @@ export function createAgentDeskRuntime(options: {
       // Reconciling is a claim about what someone went and observed. The
       // ambient actor is usually the agent whose compensation failed, and
       // letting it clear its own indeterminate receipt is the one thing this
-      // record exists to prevent.
-      const reconciler = ownActor(by);
-      if (reconciler === undefined || reconciler.kind !== "human") {
-        return {
-          ok: false,
-          reason:
-            "reconciling a rollback must name a human who checked the application; pass one to reconcileRollback rather than relying on the acting actor",
-        };
+      // record exists to prevent. Same snapshot-parse-then-check path as an
+      // approval or a review, so all three refuse an unrecordable identity
+      // identically rather than each inventing its own rule.
+      const owned = resolveHumanActor(
+        by,
+        "reconciling a rollback must name a human who checked the application; pass one to reconcileRollback rather than relying on the acting actor",
+      );
+      if (!owned.ok) {
+        return { ok: false, reason: owned.reason };
       }
+      const reconciler = owned.actor;
       if (!receipts.reconcile(receiptId, outcome, now(), reconciler)) {
         return {
           ok: false,
