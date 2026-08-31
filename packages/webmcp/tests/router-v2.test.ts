@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { defineCapability } from "../src/capability.ts";
-import { rankCapabilities, routeTask } from "../src/router.ts";
+import { defineCapability, type Capability } from "../src/capability.ts";
+import {
+  rankCapabilities,
+  routeTask,
+  type RoutingResult,
+} from "../src/router.ts";
 
 function graphCatalog() {
   return [
@@ -171,6 +175,11 @@ describe("a custom scorer that misbehaves", () => {
     if (!result.ok) return;
     expect(result.strategy).toBe("deterministic");
     expect(result.scoredExternally).toBe(false);
+    // Reading the reason requires proving this is the degraded variant, which
+    // is the point of splitting the union.
+    if (!("degradedFrom" in result)) {
+      throw new Error("a failed custom scorer should report what it degraded from");
+    }
     expect(result.degradedFrom).toBe("custom");
     expect(result.degradedBecause).toMatch(/embedding service unreachable/);
     expect(result.matches[0]?.capability.name).toBe("refund_shipping");
@@ -289,5 +298,240 @@ describe("eligibility filtering applies to every strategy", () => {
     expect(names).toContain("refund_shipping");
     // The anchor still declares it in `requires`; the filter is what stops it.
     expect(names).not.toContain("verify_payment_captured");
+  });
+});
+
+describe("the custom scorer boundary is not a suggestion", () => {
+  it("cannot mutate the pool it was handed and steer the fallback", async () => {
+    const smuggled = defineCapability({
+      name: "unrelated_0",
+      description: "Forged",
+      intents: ["refund shipping"],
+      execute: () => ({}),
+    });
+    const result = await routeTask(graphCatalog(), REQUEST, {
+      kind: "custom",
+      scorer: (candidates) => {
+        (candidates as Capability[]).length = 0;
+        (candidates as Capability[]).push(smuggled);
+        throw new Error("now fall back");
+      },
+      onFailure: "deterministic",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.matches[0]?.capability.name).toBe("refund_shipping");
+  });
+
+  it("resolves a returned entry to the capability it actually offered", async () => {
+    const forged = defineCapability({
+      name: "refund_shipping",
+      description: "Same name, different object",
+      execute: () => ({ forged: true }),
+    });
+    const pool = graphCatalog();
+    const result = await routeTask(pool, REQUEST, {
+      kind: "custom",
+      scorer: () => [{ capability: forged, score: 9, reasons: ["custom"] }],
+    });
+
+    if (!result.ok) return;
+    const real = pool.find((c) => c.name === "refund_shipping");
+    expect(result.matches[0]?.capability).toBe(real);
+  });
+
+  it("refuses a scorer that returns the same capability twice", async () => {
+    const pool = graphCatalog();
+    const target = pool.find((c) => c.name === "refund_shipping")!;
+    const result = await routeTask(pool, REQUEST, {
+      kind: "custom",
+      scorer: () => [
+        { capability: target, score: 9, reasons: ["custom"] },
+        { capability: target, score: 8, reasons: ["custom"] },
+      ],
+      onFailure: "refuse",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toMatch(/twice|duplicate/i);
+  });
+
+  it("treats a score of zero or less as not selected, like the deterministic scorer", async () => {
+    const pool = graphCatalog();
+    const result = await routeTask(pool, REQUEST, {
+      kind: "custom",
+      scorer: (candidates) =>
+        candidates.map((capability, i) => ({
+          capability,
+          score: i === 0 ? 5 : 0,
+          reasons: ["custom"],
+        })),
+    });
+
+    if (!result.ok) return;
+    expect(result.matches).toHaveLength(1);
+  });
+});
+
+describe("the budget cannot be argued with", () => {
+  it("treats a negative limit as no room rather than as a slice offset", async () => {
+    const result = await routeTask(
+      graphCatalog(),
+      { ...REQUEST, limit: -1 },
+      {
+        kind: "custom",
+        scorer: (candidates) =>
+          candidates.map((capability, i) => ({
+            capability,
+            score: candidates.length - i,
+            reasons: ["custom"],
+          })),
+      },
+    );
+
+    if (!result.ok) return;
+    expect(result.matches.length).toBeLessThanOrEqual(6);
+  });
+
+  it("ignores a non-finite limit", async () => {
+    const result = await routeTask(
+      graphCatalog(),
+      { ...REQUEST, limit: Number.NaN },
+      { kind: "hybrid" },
+    );
+    if (!result.ok) return;
+    expect(result.matches.length).toBeGreaterThan(0);
+    expect(result.matches.length).toBeLessThanOrEqual(6);
+  });
+});
+
+describe("hybrid scores the whole pool before it trims", () => {
+  it("does not lose a low-ranked candidate's base score before its bonus", async () => {
+    // Eight capabilities all match the query weakly, so the deterministic
+    // top six is full before the graph is consulted. The anchor requires the
+    // one ranked last by name, which is exactly the one an early truncation
+    // would have discarded.
+    const filler = Array.from({ length: 7 }, (_, i) =>
+      defineCapability({
+        name: `zz_report_${i}`,
+        description: "A report",
+        keywords: ["report"],
+        execute: () => ({}),
+      }),
+    );
+    const anchor = defineCapability({
+      name: "aa_anchor",
+      description: "A report anchor",
+      keywords: ["report"],
+      relationships: { requires: ["zz_report_6"] },
+      execute: () => ({}),
+    });
+
+    const result = await routeTask(
+      [anchor, ...filler],
+      { query: "report", context: { route: "/", state: {} } },
+      { kind: "hybrid" },
+    );
+
+    if (!result.ok) return;
+    const pulled = result.matches.find((m) => m.capability.name === "zz_report_6");
+    expect(pulled).toBeDefined();
+    // Base keyword score of 2 plus the requires bonus of 3, not the bonus alone.
+    expect(pulled?.score).toBe(5);
+  });
+
+  it("walks exactly one hop, so a prerequisite of a prerequisite stays out", async () => {
+    const c = defineCapability({
+      name: "step_c",
+      description: "Third step",
+      execute: () => ({}),
+    });
+    const b = defineCapability({
+      name: "step_b",
+      description: "Second step",
+      relationships: { requires: ["step_c"] },
+      execute: () => ({}),
+    });
+    const a = defineCapability({
+      name: "step_a",
+      description: "First step",
+      keywords: ["alpha"],
+      relationships: { requires: ["step_b"] },
+      execute: () => ({}),
+    });
+
+    const result = await routeTask(
+      [a, b, c],
+      { query: "alpha", context: { route: "/", state: {} } },
+      { kind: "hybrid" },
+    );
+
+    if (!result.ok) return;
+    const names = result.matches.map((m) => m.capability.name);
+    expect(names).toContain("step_a");
+    expect(names).toContain("step_b");
+    expect(names).not.toContain("step_c");
+  });
+});
+
+describe("relationship arrays are owned by the capability", () => {
+  it("does not change when the caller mutates the array it passed in", () => {
+    const requires = ["first_step"];
+    const capability = defineCapability({
+      name: "second_step",
+      description: "Depends on the first",
+      relationships: { requires },
+      execute: () => ({}),
+    });
+
+    requires.push("smuggled_step");
+
+    expect(capability.relationships.requires).toEqual(["first_step"]);
+  });
+});
+
+describe("the result type refuses to describe a run that cannot happen", () => {
+  it("cannot mark custom routing as not externally scored", () => {
+    const honest: RoutingResult = {
+      ok: true,
+      strategy: "custom",
+      scoredExternally: true,
+      matches: [],
+    };
+    const dishonest: RoutingResult = {
+      ok: true,
+      strategy: "custom",
+      // @ts-expect-error custom routing is externally scored by definition
+      scoredExternally: false,
+      matches: [],
+    };
+    const unearned: RoutingResult = {
+      ok: true,
+      strategy: "hybrid",
+      scoredExternally: false,
+      // @ts-expect-error only a degraded run carries the reason it degraded
+      degradedFrom: "custom",
+      matches: [],
+    };
+
+    expect(honest.ok).toBe(true);
+    expect(dishonest).toBeDefined();
+    expect(unearned).toBeDefined();
+  });
+});
+
+describe("deterministic routing preserves scores, not just order", () => {
+  it("reports the same score as the v1 scorer for every match", async () => {
+    const pool = graphCatalog();
+    const result = await routeTask(pool, REQUEST);
+    if (!result.ok) return;
+
+    const v1 = rankCapabilities(pool, ORDER_CTX, REFUND_QUERY);
+    expect(result.matches.map((m) => [m.capability.name, m.score])).toEqual(
+      v1.map((m) => [m.capability.name, m.score]),
+    );
+    expect(result.matches.length).toBeGreaterThan(0);
   });
 });

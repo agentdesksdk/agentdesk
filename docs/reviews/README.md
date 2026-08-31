@@ -79,4 +79,10 @@ and executed under plain Node, and the design doc check passed.
 | — | ACCEPTED | [Unreconciled records and artifacts do not survive a restart](2026-08-31-accepted-unreconciled-records-are-not-durable.md) |
 | P2 | RESOLVED | [Durability docs overclaim record reconstruction](2026-08-31-p2-durability-docs-overclaim-record-reconstruction.md) |
 
+| P1 | RESOLVED | [A custom scorer can bypass eligibility](2026-08-31-p1-custom-scorer-bypasses-eligibility.md) |
+| P1 | RESOLVED | [An invalid routing limit bypasses the hard budget](2026-08-31-p1-routing-limit-bypasses-budget.md) |
+| P1 | RESOLVED | [Hybrid routing truncates deterministic scores before adding bonuses](2026-08-31-p1-hybrid-truncates-before-bonuses.md) |
+| P2 | RESOLVED | [Normalized routing relationships retain mutable aliases](2026-08-31-p2-routing-relationships-retain-mutable-aliases.md) |
+| P2 | RESOLVED | [Routing result types allow false scorer provenance](2026-08-31-p2-routing-result-allows-false-provenance.md) |
+
 Delete this directory only after every open item has either a validated fix or an explicit accepted-risk decision.

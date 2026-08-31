@@ -35,6 +35,11 @@ order, same scores.
 **`hybrid`** adds three lexical and structural signals on top. It is not
 semantic and this document will not call it that.
 
+It scores the whole eligible pool before trimming, not the deterministic top
+six. Trimming first would discard the base score of a capability ranked
+seventh, so its relationship bonus would start from zero and it would lose
+to capabilities it should beat.
+
 | Signal | Weight | Matches when |
 | --- | --- | --- |
 | Exact term | 6 | The query names the capability, by name or title |
@@ -94,8 +99,14 @@ runtime's behaviour is unchanged by this document.
 
 ## The visible-capability budget
 
-`DEFAULT_ROUTED` is 5 and `MAX_ROUTED` is 6. Every strategy is capped at
-`min(limit, MAX_ROUTED)`, including relationship pulls and custom scorers.
+`DEFAULT_ROUTED` is 5 and `MAX_ROUTED` is 6. Every strategy is capped,
+including relationship pulls and custom scorers.
+
+The cap is `max(0, min(floor(limit), MAX_ROUTED))`, and a non-finite limit
+falls back to the default. A plain `min` was wrong: a negative limit reached
+`slice(0, -1)`, which drops one entry and returns the rest, so `limit: -1`
+published almost the whole catalog.
+
 Nothing widens the surface. A graph edge can change which capabilities are
 visible; it cannot change how many.
 
@@ -126,20 +137,39 @@ failed scorer quietly returns nothing, because an empty result and a failed
 scorer are different facts and a caller has to be able to tell them apart.
 
 A scorer is treated as failed when it throws or rejects, returns anything
-other than an array, returns an entry whose score is not finite, or returns
-a capability it was not offered.
+other than an array, returns an entry whose score is not finite, returns a
+capability it was not offered, or returns the same capability twice. A
+duplicate is refused rather than deduplicated, because it would otherwise
+spend the budget on one capability.
+
+The scorer receives a frozen copy of the pool and a frozen copy of the
+request. It cannot widen or empty the set the fallback path would score.
+Entries it returns are resolved back to the capability that was offered
+under that name, so an object carrying a real name but a different
+`execute` never becomes the thing that runs.
+
+A score of zero or below means not selected, matching the deterministic
+scorer, so a similarity of zero drops the capability rather than routing it
+at the bottom.
 
 ## Reading the result
 
 ```ts
 type RoutingResult =
+  | { ok: true; strategy: "custom"; scoredExternally: true; matches: Matches }
   | {
       ok: true;
-      strategy: "deterministic" | "hybrid" | "custom";
-      scoredExternally: boolean;
-      degradedFrom?: RoutingStrategyKind;
-      degradedBecause?: string;
-      matches: readonly ScoredCapability[];
+      strategy: "deterministic" | "hybrid";
+      scoredExternally: false;
+      matches: Matches;
+    }
+  | {
+      ok: true;
+      strategy: "deterministic";
+      scoredExternally: false;
+      degradedFrom: "custom";
+      degradedBecause: string;
+      matches: Matches;
     }
   | { ok: false; strategy: "custom"; reason: string };
 ```
@@ -148,6 +178,13 @@ type RoutingResult =
 that fell back reports `deterministic`. `scoredExternally` is true only when
 a supplied scorer produced the ordering. Those two fields exist so no caller
 can report semantic retrieval it did not perform.
+
+The variants are spelled out rather than collapsed into optional fields,
+because the combinations that cannot happen should not be constructible. A
+single loose shape allowed `strategy: "custom"` with
+`scoredExternally: false`, which is a claim about provenance that no run can
+produce. Reading `degradedBecause` now requires narrowing to the degraded
+variant first.
 
 Every match carries `reasons`, in the order the contributions applied, so
 "why is this here" is answerable without re-running the scorer.

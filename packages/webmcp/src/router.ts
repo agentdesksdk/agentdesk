@@ -51,6 +51,25 @@ export function rankCapabilities(
   query: string,
   limit: number = DEFAULT_ROUTED,
 ): RankedCapability[] {
+  return scoreAll(capabilities, ctx, query).slice(
+    0,
+    Math.min(limit, MAX_ROUTED),
+  );
+}
+
+/**
+ * The scoring pass without the budget applied.
+ *
+ * Hybrid routing needs this. Trimming to six before relationship and session
+ * bonuses are added throws away the base score of a capability ranked
+ * seventh, so its bonus would start from zero and it would rank below
+ * capabilities it should beat.
+ */
+function scoreAll(
+  capabilities: readonly Capability[],
+  ctx: AppContext,
+  query: string,
+): RankedCapability[] {
   const tokens = new Set(tokenize(query));
   const contextDomain =
     typeof ctx.state.domain === "string" ? ctx.state.domain : undefined;
@@ -97,7 +116,7 @@ export function rankCapabilities(
     (a, b) =>
       b.score - a.score || a.capability.name.localeCompare(b.capability.name),
   );
-  return ranked.slice(0, Math.min(limit, MAX_ROUTED));
+  return ranked;
 }
 
 /** "/" is the exact root route, not a universal prefix. */
@@ -184,16 +203,32 @@ export type RoutingStrategy =
       onFailure?: "deterministic" | "refuse";
     };
 
+/**
+ * Four outcomes, spelled out, because the combinations that cannot happen
+ * should not be constructible. A custom result is externally scored by
+ * definition, a built-in result never is, and only a degraded result carries
+ * the reason it degraded.
+ */
 export type RoutingResult =
   | {
       ok: true;
-      /** What actually ran, which is not always what was asked for. */
-      strategy: RoutingStrategyKind;
-      /** True only when a custom scorer supplied the ordering. */
-      scoredExternally: boolean;
-      /** Set when a requested strategy could not run and this one replaced it. */
-      degradedFrom?: RoutingStrategyKind;
-      degradedBecause?: string;
+      strategy: "custom";
+      scoredExternally: true;
+      matches: readonly ScoredCapability[];
+    }
+  | {
+      ok: true;
+      strategy: "deterministic" | "hybrid";
+      scoredExternally: false;
+      matches: readonly ScoredCapability[];
+    }
+  | {
+      ok: true;
+      strategy: "deterministic";
+      scoredExternally: false;
+      /** The strategy that was asked for and could not run. */
+      degradedFrom: "custom";
+      degradedBecause: string;
       matches: readonly ScoredCapability[];
     }
   | { ok: false; strategy: "custom"; reason: string };
@@ -223,8 +258,10 @@ export async function routeTask(
   strategy: RoutingStrategy = { kind: "deterministic" },
   eligible: (capability: Capability) => boolean = () => true,
 ): Promise<RoutingResult> {
-  const limit = request.limit ?? DEFAULT_ROUTED;
-  const budget = Math.min(limit, MAX_ROUTED);
+  const budget = clampBudget(request.limit);
+  // Filtered into an array the caller never handed us, and handed to a
+  // scorer as a frozen copy, so nothing downstream can widen the pool the
+  // fallback path later scores.
   const pool = candidates.filter(eligible);
 
   if (strategy.kind === "custom") {
@@ -271,7 +308,7 @@ function deterministic(
   pool: readonly Capability[],
   request: RoutingRequest,
 ): ScoredCapability[] {
-  return rankCapabilities(pool, request.context, request.query, MAX_ROUTED).map(
+  return scoreAll(pool, request.context, request.query).map(
     ({ capability, score }) => ({ capability, score, reasons: ["deterministic"] }),
   );
 }
@@ -348,6 +385,21 @@ function namedOutright(capability: Capability, tokens: ReadonlySet<string>): boo
   return matches(nameWords) || matches(titleWords);
 }
 
+/**
+ * A budget of six, whatever the caller passes.
+ *
+ * A negative limit used to reach `slice(0, -1)`, which drops one entry and
+ * returns the rest, so `limit: -1` published almost the whole catalog. A
+ * budget is a maximum, and every value that is not a usable maximum resolves
+ * to one that is.
+ */
+function clampBudget(limit: number | undefined): number {
+  if (limit === undefined || !Number.isFinite(limit)) {
+    return Math.min(DEFAULT_ROUTED, MAX_ROUTED);
+  }
+  return Math.max(0, Math.min(Math.floor(limit), MAX_ROUTED));
+}
+
 async function runScorer(
   scorer: CapabilityScorer,
   pool: readonly Capability[],
@@ -355,9 +407,10 @@ async function runScorer(
 ): Promise<
   { ok: true; matches: readonly ScoredCapability[] } | { ok: false; reason: string }
 > {
+  const offered = new Map(pool.map((c) => [c.name as string, c]));
   let raw: unknown;
   try {
-    raw = await scorer(pool, request);
+    raw = await scorer(Object.freeze([...pool]), Object.freeze({ ...request }));
   } catch (err) {
     return {
       ok: false,
@@ -367,8 +420,8 @@ async function runScorer(
   if (!Array.isArray(raw)) {
     return { ok: false, reason: "the custom scorer did not return an array" };
   }
-  const known = new Set(pool.map((c) => c.name as string));
   const matches: ScoredCapability[] = [];
+  const seen = new Set<string>();
   for (const entry of raw) {
     if (
       typeof entry !== "object" ||
@@ -379,18 +432,35 @@ async function runScorer(
       return { ok: false, reason: "the custom scorer returned an entry with no finite score" };
     }
     const scored = entry as ScoredCapability;
+    const name =
+      typeof scored.capability?.name === "string" ? scored.capability.name : undefined;
     // A scorer cannot widen the surface. Returning something the eligibility
     // filter already removed would route past availability and policy.
-    if (!scored.capability || !known.has(scored.capability.name)) {
+    const real = name === undefined ? undefined : offered.get(name);
+    if (!real) {
       return {
         ok: false,
         reason: "the custom scorer returned a capability that was not offered to it",
       };
     }
+    if (seen.has(name!)) {
+      return {
+        ok: false,
+        reason: `the custom scorer returned ${name} twice, and a duplicate would spend the budget on one capability`,
+      };
+    }
+    seen.add(name!);
+    // The offered capability, never the object handed back. A forged object
+    // carrying a real name would otherwise become the thing that executes.
+    if (scored.score <= 0) {
+      continue;
+    }
     matches.push({
-      capability: scored.capability,
+      capability: real,
       score: scored.score,
-      reasons: scored.reasons ?? ["custom"],
+      reasons: Array.isArray(scored.reasons) && scored.reasons.every((r) => typeof r === "string")
+        ? scored.reasons
+        : ["custom"],
     });
   }
   return { ok: true, matches };
