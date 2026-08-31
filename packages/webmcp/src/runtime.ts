@@ -60,9 +60,12 @@ import {
 } from "./results.ts";
 import {
   buildStageHandler,
+  StagedCommitIndeterminate,
   StagedProposalStore,
+  UnreconciledStore,
   type StagedProposal,
   type StagingAdapter,
+  type Unreconciled,
 } from "./staging.ts";
 import { ToolSurfaceManager } from "./tool-surface.ts";
 import {
@@ -165,6 +168,22 @@ export type AgentDeskRuntime = {
    */
   approve: (actionId: string, by?: Actor) => Promise<ToolResult>;
   reject: (actionId: string, by?: Actor) => ToolResult;
+
+  /**
+   * Staged outcomes nobody can call settled: a commit that threw after it
+   * may already have written, and a disposal that failed and left the
+   * artifact open. Both need a person to say what happened.
+   */
+  listUnreconciled: () => Unreconciled[];
+  /**
+   * Records what a human found. `target` is an approval id or the record's
+   * own id, and `by` must be a human, because nobody else can go and look.
+   */
+  reconcile: (
+    target: string,
+    outcome: "applied" | "not_applied",
+    by?: Actor,
+  ) => { ok: true } | { ok: false; reason: string };
 
   /** Records who is acting on subsequent operations. */
   setActor: (actor: Actor | undefined) => void;
@@ -275,6 +294,9 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   // each one, never by business input. Disposal is this store's job on
   // every path that resolves an owner without committing it.
   const proposals = new StagedProposalStore();
+  // Staged outcomes nobody can call settled: a commit that threw after it may
+  // have written, and a disposal that failed and left the artifact open.
+  const unreconciled = new UnreconciledStore();
   // Detached and frozen on the way in, so a caller mutating the object it
   // handed over cannot retroactively rewrite provenance already recorded,
   // and so a getter-backed property is read exactly once. The clone failure
@@ -781,7 +803,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   ):
     | { ok: true; proposal?: StagedProposal }
     | { ok: false; error: string } {
-    if (!capability.stagedWrite) {
+    if (!capability.stagedOperation) {
       return { ok: true };
     }
     if (!options.staging) {
@@ -791,18 +813,32 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       };
     }
     const stage = buildStageHandler(
-      capability.name,
+      capability.stagedOperation,
       options.staging,
-      capability.stagedWrite,
+      {
+        cleanupFailed: (failure) => {
+          // Attempting a hook that throws disposes nothing, so the artifact
+          // is still open in the application and has to stay findable.
+          const record = unreconciled.record({
+            capability: capability.name,
+            kind: "cleanup_failed",
+            detail: failure.detail,
+            changes: [],
+            at: now(),
+          });
+          audit.append({
+            kind: "staged_cleanup_failed",
+            capability: capability.name,
+            recordId: record.id,
+            detail: failure.detail,
+            at: now(),
+          });
+        },
+      },
     );
     const linked = linkSignals(signal, epochController.signal);
     try {
-      const proposal = stage(input, {
-        route: context.route,
-        state: context.state,
-        signal: linked.signal,
-        executionId: `STAGE-${++executionCounter}`,
-      });
+      const proposal = stage(input);
       return { ok: true, proposal };
     } catch (err) {
       return {
@@ -856,7 +892,13 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         result: ToolResult;
         verification?: VerificationResult;
       }
-    | { ok: false; executionId?: string; result: ToolResult };
+    | {
+        ok: false;
+        executionId?: string;
+        /** Set when the commit threw after it may already have written. */
+        indeterminate?: { detail: string; recordId: string };
+        result: ToolResult;
+      };
 
   type ExecutionOptions = {
     /**
@@ -1234,6 +1276,37 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         };
       }
       const message = err instanceof Error ? err.message : String(err);
+      // A commit that threw may already have written. Recording that as a
+      // clean failure would invite a retry that applies the change twice.
+      if (err instanceof StagedCommitIndeterminate) {
+        const record = unreconciled.record({
+          capability: capability.name,
+          kind: "commit_indeterminate",
+          detail: message,
+          changes: err.changes,
+          at: now(),
+        });
+        audit.append({
+          kind: "execution_indeterminate",
+          capability: capability.name,
+          executionId,
+          recordId: record.id,
+          detail: message,
+          ...(actingActor !== undefined ? { actor: actingActor } : {}),
+          at: now(),
+        });
+        present(capability, "capability_failed", input, actingActor, {
+          executionId,
+          humanInitiated,
+        });
+        emit();
+        return {
+          ok: false,
+          executionId,
+          indeterminate: { detail: message, recordId: record.id },
+          result: errorResult(message),
+        };
+      }
       audit.append({
         kind: "execution_failed",
         capability: capability.name,
@@ -1309,7 +1382,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       const proposal = proposals.take(
         StagedProposalStore.planKey(planId, index),
       );
-      if (routed.stagedWrite && !proposal) {
+      if (routed.stagedOperation && !proposal) {
         return blocked(
           "STAGED_PROPOSAL_MISSING: the staged change reviewed for this operation is no longer held by the runtime",
         );
@@ -1502,6 +1575,15 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       base.reasonCode = record.reasonCode;
       base.reason = record.reason;
     }
+    if (record.status === "INDETERMINATE") {
+      base.detail = record.detail;
+      base.record_id = record.recordId;
+      base.changes = unreconciled
+        .list()
+        .find((entry) => entry.id === record.recordId)?.changes;
+      base.hint =
+        "The commit threw after it may already have written. Check the application, then call reconcile with what you found. Do not retry.";
+    }
     return toToolResult(base);
   }
 
@@ -1527,11 +1609,11 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       // card for something that could never run.
       const unbacked = catalog
         .all()
-        .filter((capability: Capability) => capability.stagedWrite !== undefined);
+        .filter((capability: Capability) => capability.stagedOperation !== undefined);
       if (unbacked.length > 0 && !options.staging) {
         throw new Error(
           `${unbacked
-            .map((capability) => capability.name)
+            .map((capability: Capability) => capability.name)
             .join(", ")} stage their writes and no staging adapter is bound; pass one to createAgentDeskRuntime`,
         );
       }
@@ -1539,11 +1621,25 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         for (const hook of ["scope", "fork", "diff", "commit", "release"] as const) {
           if (typeof options.staging[hook] !== "function") {
             throw new Error(
-              `the staging adapter is missing ${hook}, so a staged change could not be ${
-                hook === "diff" ? "described" : "handled"
-              }`,
+              `the staging adapter is missing ${hook}, so a staged change could not be handled`,
             );
           }
+        }
+        // A capability naming an operation the adapter has not got would fail
+        // at approval time, after an operator was already shown a card for a
+        // change that could never run.
+        const known = new Set(options.staging.operations ?? []);
+        const missing = unbacked.filter(
+          (capability: Capability) => !known.has(capability.stagedOperation!),
+        );
+        if (missing.length > 0) {
+          throw new Error(
+            `the staging adapter owns no operation named ${missing
+              .map((capability: Capability) => capability.stagedOperation)
+              .join(", ")}, named by ${missing
+              .map((capability: Capability) => capability.name)
+              .join(", ")}`,
+          );
         }
       }
       await surface.reconcile(desiredNative());
@@ -1600,6 +1696,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     async reset() {
       endEpoch();
       proposals.discardAll();
+      unreconciled.clear();
       approvals.clear();
       idempotency.clear();
       plans.clear();
@@ -1659,7 +1756,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       // operation one staged. Without it the human reviews previews computed
       // against a state the earlier operations are about to change.
       if (
-        routedOperations.some(({ routed }) => routed.stagedWrite) &&
+        routedOperations.some(({ routed }) => routed.stagedOperation) &&
         !options.staging
       ) {
         throw new Error(
@@ -1844,7 +1941,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           const routed = routeCapability(catalog, operation.capability);
           return (
             !isRouteError(routed) &&
-            routed.stagedWrite &&
+            routed.stagedOperation &&
             !proposals.has(StagedProposalStore.planKey(planId, index))
           );
         });
@@ -2294,7 +2391,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       // capability. Missing it is a fail-closed refusal, never a fallback
       // to running the handler outside the fork the human reviewed.
       const proposal = proposals.take(actionId);
-      if (routed.stagedWrite && !proposal) {
+      if (routed.stagedOperation && !proposal) {
         const missing = unavailable(
           "STAGED_PROPOSAL_MISSING",
           `The staged change behind ${actionId} is no longer held by the runtime, so approving it would run a write nobody reviewed. Request the action again.`,
@@ -2340,6 +2437,17 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           result: outcome.value,
           resolvedAt: now(),
         });
+      } else if (outcome.indeterminate) {
+        // The artifact is deliberately not discarded. It is the evidence a
+        // human reconciles against, and nothing here proves it did not land.
+        unreconciled.attachAction(outcome.indeterminate.recordId, actionId);
+        approvals.resolve(actionId, {
+          status: "INDETERMINATE",
+          action,
+          detail: outcome.indeterminate.detail,
+          recordId: outcome.indeterminate.recordId,
+          resolvedAt: now(),
+        });
       } else {
         proposal?.discard();
         approvals.resolve(actionId, {
@@ -2373,6 +2481,37 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         return errorResult(message);
       }
     },
+    listUnreconciled() {
+      return unreconciled.list();
+    },
+
+    reconcile(target, outcome, by) {
+      const authorizer = resolveHumanActor(
+        by ?? actor,
+        "reconciling a staged outcome must name a human; nobody else can find out what happened",
+      );
+      if (!authorizer.ok) {
+        return { ok: false, reason: authorizer.reason };
+      }
+      const open =
+        unreconciled.forAction(target) ??
+        unreconciled.list().find((entry) => entry.id === target);
+      if (!open) {
+        return { ok: false, reason: `nothing unreconciled for ${target}` };
+      }
+      unreconciled.settle(open.id);
+      audit.append({
+        kind: "staged_reconciled",
+        capability: open.capability,
+        recordId: open.id,
+        outcome,
+        actor: authorizer.actor,
+        at: now(),
+      });
+      emit();
+      return { ok: true };
+    },
+
     reject(actionId, by) {
       const authorizer = resolveHumanActor(
         by ?? actor,

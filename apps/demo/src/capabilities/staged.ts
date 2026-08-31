@@ -113,12 +113,29 @@ function release(staged: StagedBranch): void {
   live.delete(staged);
 }
 
-const modes = new Map<string, CommitMode>();
+/**
+ * The operations this application is willing to stage.
+ *
+ * The adapter owns the code, not the capability declaration. A capability
+ * names an entry here and the runtime hands it input, so nothing a
+ * capability declares can reach live state outside the fork this opens.
+ */
+type Operation = {
+  run: (input: Record<string, unknown>) => unknown;
+  mode: CommitMode;
+};
 
-/** Declared by the capability factory when the capability is defined. */
-export function setCommitMode(capability: string, mode: CommitMode): void {
-  modes.set(capability, mode);
+const registry = new Map<string, Operation>();
+
+/** Called by the capability factory when the capability is defined. */
+export function registerOperation(
+  name: string,
+  run: (input: Record<string, unknown>) => unknown,
+  mode: CommitMode,
+): void {
+  registry.set(name, { run, mode });
 }
+
 
 /**
  * The one place this application forks, describes, and lands its own state.
@@ -128,13 +145,27 @@ export function setCommitMode(capability: string, mode: CommitMode): void {
  * from the same branch that lands.
  */
 export const stagingAdapter: StagingAdapter<StagedBranch> = {
+  // A live view, because capabilities register as their modules load and
+  // the runtime reads this at start.
+  get operations() {
+    return new Set(registry.keys());
+  },
+
   scope: stagingScope,
 
-  fork(capability, write, previous) {
-    const { result, branch } = stage(capability, write, previous?.branch.at);
+  fork(operation, input, previous) {
+    const owned = registry.get(operation);
+    if (!owned) {
+      throw new Error(`no staged operation named ${operation}`);
+    }
+    const { result, branch } = stage(
+      operation,
+      () => owned.run(input),
+      previous?.branch.at,
+    );
     const staged: StagedBranch = {
-      capability,
-      mode: modes.get(capability) ?? "merge",
+      capability: operation,
+      mode: owned.mode,
       branch,
       result,
       settled: false,

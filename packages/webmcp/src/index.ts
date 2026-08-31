@@ -23,11 +23,13 @@ export {
 } from "./capability.ts";
 export { CapabilityCatalog } from "./catalog.ts";
 export {
+  StagedCommitIndeterminate,
+  StagedCommitRefused,
   StagedProposalError,
   StagedProposalStore,
   type StagedProposal,
-  type StagedWrite,
   type StagingAdapter,
+  type Unreconciled,
 } from "./staging.ts";
 export {
   highestRisk,

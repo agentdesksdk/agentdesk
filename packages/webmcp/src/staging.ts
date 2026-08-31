@@ -1,20 +1,27 @@
-import type { Change, ExecutionContext } from "./capability.ts";
+import { CapabilityUnavailableError, type Change } from "./capability.ts";
 
 /**
- * How an application forks, diffs, and lands its own state.
+ * How an application stages, describes, and lands its own writes.
  *
- * Bound once, at `createAgentDeskRuntime`. A capability declares only its
- * write and cannot reach this, so the author of an operation cannot describe
- * one change and perform another; both the diff a human approves and the
- * commit that lands come from the single opaque `S` this adapter produced.
- * `S` is never inspected by the runtime.
+ * Bound once, at `createAgentDeskRuntime`, and it owns the operations too. A
+ * capability names one and supplies input; it never hands over executable
+ * code, so nothing a capability declares can reach live state outside a fork.
+ * The diff a human approves and the write that lands are both derived by the
+ * runtime from the single opaque `S` this adapter produced, and `S` is never
+ * inspected by the runtime.
  *
- * This is a trusted boundary, and it is one per application rather than one
- * per capability. An adapter whose `diff` disagrees with its `commit` can
- * still lie; nothing below the application's own data layer can prevent
- * that. Placing it here makes it a single audited integration point.
+ * This is a trusted boundary and it is one per application. An adapter whose
+ * `diff` disagrees with its `commit`, or whose operation writes outside its
+ * own fork, can still lie. Placing all of it here makes that a single audited
+ * integration point chosen at composition time rather than per-operation code.
  */
 export type StagingAdapter<S> = {
+  /**
+   * Names this adapter is willing to stage. Checked at `start`, so a
+   * capability naming an operation that does not exist is refused before an
+   * operator can be shown a card for it.
+   */
+  operations: ReadonlySet<string> | readonly string[];
   /**
    * Runs a sequence of stagings so each derives against its predecessor's
    * staged head rather than against live state. Plan preparation needs this;
@@ -23,24 +30,33 @@ export type StagingAdapter<S> = {
    */
   scope: <T>(run: () => T) => T;
   /**
-   * Runs `write` against a fork of live state. `previous` is the artifact of
-   * an earlier run of the same operation, so an adapter that pins a clock or
-   * a seed can reproduce it rather than drift.
+   * Stages `operation` with `input` against a fork of live state. `previous`
+   * is the artifact of an earlier run of the same operation, so an adapter
+   * that pins a clock or a seed can reproduce it rather than drift.
    */
   fork: (
-    capability: string,
-    write: () => unknown,
+    operation: string,
+    input: Record<string, unknown>,
     previous?: S,
   ) => { staged: S; result: unknown };
   /** What this staged run did. The only source of a `derived` diff. */
   diff: (staged: S) => Change[];
   /**
-   * Lands the staged run. `restage` re-runs the same write on a fresh fork
-   * for an adapter that must re-derive against current state. Throwing
-   * refuses the commit and lands nothing.
+   * Lands the staged run. `restage` re-runs the same operation on a fresh
+   * fork for an adapter that must re-derive against current state.
+   *
+   * Throwing refuses the commit. It does not prove the write did not land,
+   * so the runtime treats it as indeterminate rather than a clean failure.
+   *
+   * An adapter that knows nothing was dispatched says so by throwing
+   * `StagedCommitRefused` or `CapabilityUnavailableError`. Both mean the
+   * commit stopped before it wrote, which only the adapter can establish.
    */
   commit: (staged: S, restage: () => { staged: S; result: unknown }) => unknown;
-  /** Releases a staged run that will never land. Called at most once. */
+  /**
+   * Releases a staged run that will never land. Called at most once, and
+   * only a successful return establishes disposal.
+   */
   release: (staged: S) => void;
 };
 
@@ -59,20 +75,7 @@ export type StagedProposal = {
 };
 
 /** Internal. Produced only by `buildStageHandler`. */
-export type StageHandler = (
-  input: Record<string, unknown>,
-  ctx: ExecutionContext,
-) => StagedProposal;
-
-/**
- * The handler a capability author writes. Synchronous by contract, because a
- * handler that suspends resumes after its fork has closed and its remaining
- * writes would reach live state before anyone approved them.
- */
-export type StagedWrite = (
-  input: Record<string, unknown>,
-  ctx: ExecutionContext,
-) => unknown;
+export type StageHandler = (input: Record<string, unknown>) => StagedProposal;
 
 export class StagedProposalError extends Error {
   constructor(message: string) {
@@ -80,6 +83,53 @@ export class StagedProposalError extends Error {
     this.name = "StagedProposalError";
   }
 }
+
+/**
+ * Thrown by an adapter that knows its commit never reached the application.
+ * Only an adapter can know that, so it is the one thing that turns a thrown
+ * commit back into an ordinary failure.
+ */
+export class StagedCommitRefused extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StagedCommitRefused";
+  }
+}
+
+/**
+ * A commit that threw after it may already have written.
+ *
+ * The exception proves the adapter did not return, not that nothing landed.
+ * The approved diff rides along so a human has something to reconcile
+ * against, and the artifact is deliberately not released.
+ */
+export class StagedCommitIndeterminate extends Error {
+  readonly changes: readonly Change[];
+  readonly reason: unknown;
+
+  constructor(operation: string, changes: readonly Change[], reason: unknown) {
+    super(
+      `${operation} threw while committing, so whether the change landed is unknown: ${
+        reason instanceof Error ? reason.message : String(reason)
+      }`,
+    );
+    this.name = "StagedCommitIndeterminate";
+    this.changes = changes;
+    this.reason = reason;
+  }
+}
+
+/**
+ * A staged artifact that could not be disposed. Invoking a hook that throws
+ * is an attempted cleanup, not a completed one, so the artifact is still open
+ * in the application and has to stay findable.
+ */
+export type CleanupFailure = { operation: string; detail: string };
+
+export type StageHooks = {
+  /** Called when `release` throws, so the runtime records and retains it. */
+  cleanupFailed: (failure: CleanupFailure) => void;
+};
 
 function isThenable(value: unknown): boolean {
   return (
@@ -89,94 +139,93 @@ function isThenable(value: unknown): boolean {
 }
 
 /**
- * Releases an artifact that will never be committed, then rethrows what went
- * wrong. A cleanup that fails must not replace the reason staging failed,
- * which is the thing a human has to read.
- */
-function releaseAndRethrow<S>(
-  adapter: StagingAdapter<S>,
-  staged: S,
-  cause: unknown,
-): never {
-  try {
-    adapter.release(staged);
-  } catch {
-    // Reported through the original failure below rather than thrown over
-    // it. A cleanup error is a diagnosis; the staging error is the outcome.
-  }
-  throw cause;
-}
-
-/**
- * Turns an application adapter and a capability's write into the staged
- * proposal the runtime owns.
+ * Builds the staged proposal the runtime owns.
  *
- * The author supplies neither `changes` nor `commit`. Both are derived here
- * from the same `staged` artifact, so the diff on the approval card and the
- * change that lands cannot come from two different places.
+ * The capability supplies neither the diff, nor the commit, nor the write, so
+ * the evidence a human approves is derived here from the same artifact that
+ * lands.
  */
 export function buildStageHandler<S>(
-  name: string,
+  operation: string,
   adapter: StagingAdapter<S>,
-  write: StagedWrite,
+  hooks: StageHooks,
 ): StageHandler {
-  const stageOnce = (
-    input: Record<string, unknown>,
-    ctx: ExecutionContext,
-    previous?: S,
-  ) => {
-    const forked = adapter.fork(name, () => write(input, ctx), previous);
+  const tryRelease = (staged: S): void => {
+    try {
+      adapter.release(staged);
+    } catch (err) {
+      hooks.cleanupFailed({
+        operation,
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  // A cleanup that fails must not replace the reason staging failed, which is
+  // what a human has to read, but it must not vanish either.
+  const releaseAndRethrow = (staged: S, cause: unknown): never => {
+    tryRelease(staged);
+    throw cause;
+  };
+
+  const stageOnce = (input: Record<string, unknown>, previous?: S) => {
+    const forked = adapter.fork(operation, input, previous);
     if (isThenable(forked?.result)) {
       (forked.result as Promise<unknown>).catch?.(() => {});
       releaseAndRethrow(
-        adapter,
         forked.staged,
         new StagedProposalError(
-          `${name} staged asynchronously. A staged handler must finish before it returns, because its writes go to a fork that closes when it does.`,
+          `${operation} staged asynchronously. A staged operation must finish before it returns, because its writes go to a fork that closes when it does.`,
         ),
       );
     }
     return forked;
   };
 
-  return (input, ctx) => {
-    const forked = stageOnce(input, ctx);
+  return (input) => {
+    const forked = stageOnce(input);
 
-    let changes: readonly Change[];
+    let derived: Change[] | undefined;
     try {
-      changes = adapter.diff(forked.staged);
+      derived = adapter.diff(forked.staged);
     } catch (err) {
-      releaseAndRethrow(adapter, forked.staged, err);
+      releaseAndRethrow(forked.staged, err);
     }
-    if (!Array.isArray(changes)) {
-      releaseAndRethrow(
-        adapter,
+    if (!Array.isArray(derived)) {
+      return releaseAndRethrow(
         forked.staged,
         new StagedProposalError(
-          `${name} staged a change the adapter could not describe.`,
+          `${operation} staged a change the adapter could not describe.`,
         ),
       );
     }
 
-    // Settled only once the artifact has actually been handed to `commit` or
-    // `release`. Marking it before the call let a throwing commit leave the
-    // artifact open with the later discard skipping it as already settled.
+    const changes: readonly Change[] = derived;
     let settled = false;
     return {
       changes,
       commit: () => {
         if (settled) {
           throw new StagedProposalError(
-            `${name} staged a change that was already settled`,
+            `${operation} staged a change that was already settled`,
           );
         }
         settled = true;
         try {
           return adapter.commit(forked.staged, () =>
-            stageOnce(input, ctx, forked.staged),
+            stageOnce(input, forked.staged),
           );
         } catch (err) {
-          releaseAndRethrow(adapter, forked.staged, err);
+          // Only the adapter can know the write never reached the
+          // application. Anything else may have landed, so the artifact is
+          // kept rather than released and the outcome stays unknown.
+          if (
+            err instanceof StagedCommitRefused ||
+            err instanceof CapabilityUnavailableError
+          ) {
+            releaseAndRethrow(forked.staged, err);
+          }
+          throw new StagedCommitIndeterminate(operation, changes, err);
         }
       },
       discard: () => {
@@ -184,7 +233,7 @@ export function buildStageHandler<S>(
           return;
         }
         settled = true;
-        adapter.release(forked.staged);
+        tryRelease(forked.staged);
       },
     };
   };
@@ -251,5 +300,61 @@ export class StagedProposalStore {
 
   size(): number {
     return this.proposals.size;
+  }
+}
+
+/**
+ * A staged outcome nobody can call settled.
+ *
+ * Either a commit threw after it may have written, or a disposal failed and
+ * left the artifact open in the application. Both need a person, so they stay
+ * listed until one says what happened.
+ */
+export type Unreconciled = {
+  id: string;
+  /** The approval this belongs to, when it had one. */
+  actionId?: string;
+  capability: string;
+  kind: "commit_indeterminate" | "cleanup_failed";
+  detail: string;
+  /** What the human approved, kept as the thing to reconcile against. */
+  changes: readonly Change[];
+  at: number;
+};
+
+export class UnreconciledStore {
+  private readonly entries: Unreconciled[] = [];
+  private nextId = 1;
+
+  record(entry: Omit<Unreconciled, "id">): Unreconciled {
+    const stored: Unreconciled = { ...entry, id: `UNREC-${this.nextId++}` };
+    this.entries.push(stored);
+    return stored;
+  }
+
+  list(): Unreconciled[] {
+    return this.entries.map((entry) => ({ ...entry }));
+  }
+
+  /** Binds a record to the approval it belongs to, once one is known. */
+  attachAction(id: string, actionId: string): void {
+    const entry = this.entries.find((candidate) => candidate.id === id);
+    if (entry) {
+      entry.actionId = actionId;
+    }
+  }
+
+  /** The open record for an approval, if it has one. */
+  forAction(actionId: string): Unreconciled | undefined {
+    return this.entries.find((entry) => entry.actionId === actionId);
+  }
+
+  settle(id: string): Unreconciled | undefined {
+    const index = this.entries.findIndex((entry) => entry.id === id);
+    return index === -1 ? undefined : this.entries.splice(index, 1)[0];
+  }
+
+  clear(): void {
+    this.entries.length = 0;
   }
 }

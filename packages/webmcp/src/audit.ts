@@ -134,6 +134,30 @@ export type AuditEvent =
       at: number;
     }
   | {
+      kind: "staged_reconciled";
+      capability: string;
+      recordId: string;
+      outcome: "applied" | "not_applied";
+      actor: Actor;
+      at: number;
+    }
+  | {
+      kind: "staged_cleanup_failed";
+      capability: string;
+      recordId: string;
+      detail: string;
+      at: number;
+    }
+  | {
+      kind: "execution_indeterminate";
+      capability: string;
+      executionId: string;
+      recordId: string;
+      detail: string;
+      actor?: Actor;
+      at: number;
+    }
+  | {
       kind: "rollback_indeterminate";
       capability: string;
       receiptId: string;

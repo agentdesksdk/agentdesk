@@ -4,21 +4,28 @@ import {
   type CapabilitySpec,
   type DirectCapabilitySpec,
   type DistributiveOmit,
-  type StagedWrite,
+  type ExecutionContext,
 } from "@agentdesk/webmcp";
-import { setCommitMode, type CommitMode } from "./staged.ts";
+import { registerOperation, type CommitMode } from "./staged.ts";
 
 type FactorySpec = DistributiveOmit<CapabilitySpec, "risk" | "policy">;
 
 /**
- * A capability that writes declares only how it writes. Its diff comes from
- * staging that write, so there is no preview callback or evidence label to
- * set here and no way to claim one without the staged run behind it.
+ * A capability that writes declares only how it writes. That handler is
+ * registered with the staging adapter, and the capability names it, so the
+ * declaration itself carries no executable code the runtime would have to
+ * trust.
  */
 type WriteSpec = Omit<
   DirectCapabilitySpec,
   "risk" | "policy" | "execute" | "previewChanges" | "approvalEvidence" | "stage"
 >;
+
+/** A staged write. Synchronous, because its fork closes when it returns. */
+export type StagedExecute = (
+  input: Record<string, unknown>,
+  ctx?: ExecutionContext,
+) => unknown;
 
 /**
  * Every write stages, whatever its risk.
@@ -29,12 +36,21 @@ type WriteSpec = Omit<
  * costs a fork and buys a complete preview.
  */
 function staged(
-  spec: WriteSpec & { execute: StagedWrite; commitMode?: CommitMode },
+  spec: WriteSpec & { execute: StagedExecute; commitMode?: CommitMode },
   risk: "WRITE" | "CONSEQUENTIAL",
 ): Capability {
   const { execute, commitMode, ...rest } = spec;
-  setCommitMode(spec.name, commitMode ?? "merge");
-  return defineCapability({ ...rest, risk, staging: { write: execute } });
+  if (execute.constructor?.name === "AsyncFunction") {
+    throw new Error(
+      `${spec.name} declares an async handler. A staged write must finish before it returns, because its fork closes when it does.`,
+    );
+  }
+  registerOperation(spec.name, (input) => execute(input), commitMode ?? "merge");
+  return defineCapability({
+    ...rest,
+    risk,
+    staging: { operation: spec.name },
+  });
 }
 
 export function createSearchCapability(spec: FactorySpec): Capability {
@@ -46,21 +62,20 @@ export function createReadCapability(spec: FactorySpec): Capability {
 }
 
 export function createUpdateCapability(
-  spec: WriteSpec & { execute: StagedWrite },
+  spec: WriteSpec & { execute: StagedExecute },
 ): Capability {
   return staged(spec, "WRITE");
 }
 
 /**
- * A consequential transition holds its staged write for a human. `execute`
- * becomes the staged run and is never called directly; the runtime holds the
- * proposal and commits it, or discards it and nothing happened.
+ * A consequential transition holds its staged write for a human. The runtime
+ * holds the proposal and commits it, or discards it and nothing happened.
  */
 export function createStateTransitionCapability(
   spec: WriteSpec & {
     consequential?: boolean;
     commitMode?: CommitMode;
-    execute: StagedWrite;
+    execute: StagedExecute;
   },
 ): Capability {
   const { consequential, ...rest } = spec;

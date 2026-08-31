@@ -24,7 +24,12 @@ function makeStore() {
   type Artifact = { name: string; before: Doc; head: Doc; settled: boolean };
   const artifacts: Artifact[] = [];
 
+  const registry = new Map<string, (draft: Doc) => void>();
+
   const adapter: StagingAdapter<Artifact> = {
+    get operations() {
+      return new Set(registry.keys());
+    },
     scope: (run) => {
       const outermost = open === null;
       if (open === null) {
@@ -38,15 +43,15 @@ function makeStore() {
         }
       }
     },
-    fork(capability, write) {
+    fork(operation) {
       const outermost = open === null;
       if (open === null) {
         open = { ...live };
       }
       const before = { ...open };
-      const result = write();
+      const result = registry.get(operation)!(open);
       const artifact: Artifact = {
-        name: capability,
+        name: operation,
         before,
         head: { ...open },
         settled: false,
@@ -82,6 +87,9 @@ function makeStore() {
 
   return {
     adapter,
+    register: (operation: string, write: (draft: Doc) => void) => {
+      registry.set(operation, write);
+    },
     artifacts,
     last: () => artifacts[artifacts.length - 1]!,
     handed: artifacts,
@@ -102,15 +110,12 @@ function stagedCapability(
   name: string,
   write: (draft: Record<string, string>) => void,
 ): Capability {
+  store.register(name, write);
   return defineCapability({
     name,
     description: `Stages ${name} for approval.`,
     risk: "CONSEQUENTIAL",
-    staging: {
-      write: () => {
-        write(store.draft());
-      },
-    },
+    staging: { operation: name },
   });
 }
 
@@ -182,41 +187,6 @@ describe("derived evidence cannot be self-attested", () => {
         executionId: "EXE-0",
       }),
     ).toThrow(/must be committed through the proposal/);
-  });
-});
-
-describe("a staged handler must be synchronous", () => {
-  it("refuses an async staged handler at definition", () => {
-    const store = makeStore();
-    expect(() =>
-      defineCapability({
-        name: "async_stage",
-        description: "Stages asynchronously.",
-        risk: "CONSEQUENTIAL",
-        staging: {
-          write: async () => {
-            store.draft().status = "cancelled";
-          },
-        },
-      }),
-    ).toThrow(/async staged handler/);
-  });
-
-  it("refuses a plain handler that hands back a promise", async () => {
-    const store = makeStore();
-    const capability = defineCapability({
-      name: "thenable_stage",
-      description: "Returns a promise from a non-async function.",
-      risk: "CONSEQUENTIAL",
-      staging: {
-        write: () => Promise.resolve({ done: true }),
-      },
-    });
-    const runtime = startRuntime([capability], store);
-    await runtime.start();
-    const result = await runtime.invoke("thenable_stage", {});
-    expect(result.code).toBe("PREVIEW_UNAVAILABLE");
-    expect(runtime.getSnapshot().pending).toHaveLength(0);
   });
 });
 

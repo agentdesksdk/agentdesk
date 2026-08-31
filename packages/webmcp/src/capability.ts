@@ -31,7 +31,7 @@ export type ExecutionContext = AppContext & {
 
 import type { FocusPolicy } from "./presentation.ts";
 import type { VerificationResult } from "./plan.ts";
-import type { StagedWrite } from "./staging.ts";
+
 
 export type RiskLevel = "READ" | "WRITE" | "CONSEQUENTIAL";
 
@@ -175,11 +175,11 @@ export type Capability = {
    */
   approvalEvidence: "derived" | "diff" | "summary";
   /**
-   * Present exactly when `approvalEvidence` is `derived`. The runtime pairs
-   * it with the staging adapter bound at construction to build the proposal
-   * it owns; the capability has no say in how its change is described.
+   * Present exactly when `approvalEvidence` is `derived`. The name of an
+   * operation the staging adapter owns. The capability supplies no code, so
+   * it has no say in how its change is made or described.
    */
-  stagedWrite?: StagedWrite;
+  stagedOperation?: string;
   /**
    * Reads state back after execution and reports whether it matches what
    * the change was supposed to do. This is the difference between a
@@ -325,13 +325,14 @@ export type DirectCapabilitySpec = CapabilitySpecBase & {
  */
 export type StagedCapabilitySpec = CapabilitySpecBase & {
   /**
-   * This capability's write, and nothing else. The staging adapter is bound
-   * once at `createAgentDeskRuntime`, so a capability cannot supply the code
-   * that describes its own change. That separation is what `derived`
-   * evidence asserts.
+   * The name of an operation the staging adapter owns, and nothing else. A
+   * capability supplies no executable code, so it can neither describe its
+   * own change nor reach live state outside the fork the adapter opens.
+   * That separation is what `derived` evidence asserts.
    */
   staging: {
-    write: StagedWrite;
+    operation: string;
+    write?: undefined;
     adapter?: undefined;
   };
   execute?: undefined;
@@ -374,10 +375,7 @@ export function defineCapability(spec: CapabilitySpec): Capability {
   // two shapes are separated again here rather than trusted from the type.
   const staging = (spec as { staging?: StagedCapabilitySpec["staging"] })
     .staging;
-  const staged =
-    typeof staging === "object" &&
-    staging !== null &&
-    typeof staging.write === "function";
+  const staged = typeof staging === "object" && staging !== null;
   if (staged) {
     if (typeof spec.execute === "function") {
       throw new Error(
@@ -394,18 +392,13 @@ export function defineCapability(spec: CapabilitySpec): Capability {
         `${name} supplies a stage handler directly. A staged proposal is built by the runtime, so an author-assembled one cannot claim derived evidence.`,
       );
     }
-    if (staging.adapter !== undefined) {
+    if (staging.adapter !== undefined || staging.write !== undefined) {
       throw new Error(
-        `${name} supplies its own staging adapter. The adapter is bound once at createAgentDeskRuntime, because a capability that describes its own change could describe one and perform another.`,
+        `${name} supplies staging code. A capability only names an operation the adapter owns, because code it supplied could reach live state outside the fork or describe a change it does not make.`,
       );
     }
-    // Prevention, not detection. A staged async handler resumes after its
-    // fork has closed, and by the time a returned promise could be
-    // inspected the continuation is already scheduled against live state.
-    if (staging.write.constructor?.name === "AsyncFunction") {
-      throw new Error(
-        `${name} declares an async staged handler. Staging must finish before it returns, because its writes go to a fork that closes when it does.`,
-      );
+    if (typeof staging.operation !== "string" || staging.operation === "") {
+      throw new Error(`${name} declares staging without an operation name`);
     }
   } else {
     if (typeof spec.execute !== "function") {
@@ -469,7 +462,7 @@ export function defineCapability(spec: CapabilitySpec): Capability {
       : spec.execute!,
   };
   if (staged) {
-    capability.stagedWrite = staging.write;
+    capability.stagedOperation = staging.operation;
   }
   if (spec.domain !== undefined) {
     capability.domain = spec.domain;

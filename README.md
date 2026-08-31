@@ -141,26 +141,48 @@ fails closed with `STAGED_PROPOSAL_MISSING` rather than running the write
 outside what was reviewed.
 
 `approvalEvidence: "derived"` is not selectable, and neither is the proposal.
-A capability declares an application adapter and a write; the runtime builds
-the artifact and derives both the diff and the commit from it, so an author
-has nothing to fabricate:
+A capability names an operation the adapter owns and supplies no code at all,
+so it can neither describe its own change nor reach live state outside the
+fork:
 
 ```ts
-defineCapability({
+const refundShipping = defineCapability({
   name: "refund_shipping",
+  description: "Refund the shipping fee for an order.",
   risk: "CONSEQUENTIAL",
-  // No execute, no previewChanges, no approvalEvidence, no proposal. The
-  // staged run is the preview, and it is the change.
-  staging: { adapter: stagingAdapter, write: refundShipping },
+  // No execute, no previewChanges, no approvalEvidence, no code at all. The
+  // capability names an operation the adapter owns and the runtime hands it
+  // the validated input.
+  staging: { operation: "refund_shipping" },
+});
+
+const runtime = createAgentDeskRuntime({
+  capabilities: [refundShipping],
+  // Bound once. The adapter owns the operations, the diff, and the commit,
+  // so a capability can neither describe its own change nor reach live state
+  // outside the fork this opens.
+  staging: meridianStaging,
 });
 ```
 
-The adapter is bound once at `createAgentDeskRuntime` and supplies `scope`,
-`fork`, `diff`, `commit`, and `release`. A capability declares only its write,
-so a capability author cannot influence its own evidence at all. The
-application that composes the runtime still supplies the adapter, so that is
-one audited integration point rather than per-operation code. Starting with a
-staged capability and no bound adapter is refused.
+The adapter is bound once at `createAgentDeskRuntime` and supplies
+`operations`, `scope`, `fork`, `diff`, `commit`, and `release`. Starting with
+a staged capability whose operation the adapter does not own is refused, as is
+starting with no adapter bound at all.
+
+A commit that throws is not treated as a clean failure. The exception proves
+the adapter did not return, not that nothing landed, so the approval resolves
+`INDETERMINATE`, the staged diff is retained, and `listUnreconciled` holds it
+until a human calls `reconcile`. An adapter that knows nothing was dispatched
+says so with `StagedCommitRefused`, which is an ordinary refusal. A `release`
+that throws is an attempted cleanup rather than a completed one, so it is
+recorded and the artifact stays listed.
+
+The application that composes the runtime still supplies the adapter, so that
+is one audited integration point rather than per-operation code. An adapter
+whose `diff` disagrees with its `commit`, or whose operation writes outside
+its own fork, can still lie. Nothing below the application's data layer can
+prevent that.
 
 Staging is synchronous by contract. A handler that suspends resumes after its
 fork closed, so `defineCapability` refuses an async handler, `runStage`

@@ -279,10 +279,12 @@ read a diff the handler produced, a diff the author wrote, or a sentence.
 
 ### Staged proposals
 
-A staged capability declares `staging: { write }`. The adapter is bound once
-at `createAgentDeskRuntime`, so the code that describes a change and the code
-that performs it are not both supplied by whoever declared the operation. The
-runtime calls `adapter.fork`, then derives the proposal from the single opaque
+A staged capability declares `staging: { operation }`, a name and nothing
+else. The adapter is bound once at `createAgentDeskRuntime` and owns the
+operations as well as the artifact, so a capability supplies no executable
+code and cannot reach live state outside the fork. `start` refuses a
+capability naming an operation the adapter does not own. The runtime calls
+`adapter.fork`, then derives the proposal from the single opaque
 artifact it returns: `changes` from `adapter.diff`, `commit` from `adapter.commit` over
 the same artifact. The author supplies neither, so a capability cannot show
 one diff and perform a different write, and supplying a `stage` handler
@@ -291,7 +293,17 @@ runtime owns the resulting proposal, keyed by the pending action's id or by a
 plan id and operation index. Once `fork` has produced an artifact, every path
 that does not reach a successful commit releases it exactly once, including a
 throwing `diff`, a malformed diff, a suspended write, and a throwing
-`commit`; a failing `release` never replaces the error that caused it. Nothing is keyed by business input, so two approvals of the
+`commit`; a failing `release` never replaces the error that caused it, and is
+recorded as a cleanup failure that keeps the artifact listed for a human,
+because invoking a hook that throws disposes nothing.
+
+A commit that throws is indeterminate rather than failed. The exception says
+the adapter did not return, not that nothing was written, so the approval
+resolves `INDETERMINATE`, the artifact is retained rather than released, and
+the approved diff stays available through `listUnreconciled` until a human
+records what happened with `reconcile`. `StagedCommitRefused` and
+`CapabilityUnavailableError` are the two ways an adapter states that nothing
+was dispatched, and both stay ordinary refusals. Nothing is keyed by business input, so two approvals of the
 same capability and input hold two artifacts and neither can consume the
 other. A repeated identical request keeps the artifact behind the preview
 already shown.
@@ -314,7 +326,7 @@ after its fork has closed. `defineCapability` refuses an `AsyncFunction`,
 `runStage` refuses a returned thenable, and a host store can refuse later
 writes once a staged handler has escaped.
 
-Plan preparation runs every staging inside one `stagingScope`, so each
+Plan preparation runs every staging inside one `adapter.scope`, so each
 operation derives against its predecessor's staged head. Commit consumes the
 same artifacts by index and refuses the whole plan if any is missing, rather
 than landing an earlier operation and failing a later one.

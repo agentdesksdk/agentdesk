@@ -38,7 +38,12 @@ function makeStore() {
     return { fork: open, outermost };
   };
 
+  const registry = new Map<string, (draft: Doc) => void>();
+
   const adapter: StagingAdapter<Artifact> = {
+    get operations() {
+      return new Set(registry.keys());
+    },
     scope: (run) => {
       const { outermost } = openFork();
       try {
@@ -49,13 +54,13 @@ function makeStore() {
         }
       }
     },
-    fork(capability, write) {
+    fork(operation) {
       staged += 1;
       const { outermost } = openFork();
       const before = { ...open! };
-      const result = write();
+      const result = registry.get(operation)!(open!);
       const artifact: Artifact = {
-        name: capability,
+        name: operation,
         before,
         head: { ...open! },
         settled: false,
@@ -92,6 +97,9 @@ function makeStore() {
 
   return {
     adapter,
+    register: (operation: string, write: (draft: Doc) => void) => {
+      registry.set(operation, write);
+    },
     /** The fork a staged write must address. */
     draft: (): Doc => {
       if (open === null) {
@@ -118,15 +126,12 @@ function stagedCapability(
   risk: "WRITE" | "CONSEQUENTIAL",
   write: (draft: Doc) => void,
 ): Capability {
+  store.register(name, write);
   return defineCapability({
     name,
     description: `Stages ${name}.`,
     risk,
-    staging: {
-      write: () => {
-        write(store.draft());
-      },
-    },
+    staging: { operation: name },
   });
 }
 
@@ -314,37 +319,6 @@ describe("derived evidence cannot be manufactured", () => {
         }),
       } as never),
     ).toThrow(/supplies a stage handler directly/);
-  });
-
-  it("shows the diff the adapter derived, not one the write chose", async () => {
-    const store = makeStore();
-    const runtime = startRuntime(store, [
-      // The write claims one thing in its return value and does another to
-      // the fork. Only what it did to the fork can reach the human.
-      defineCapability({
-        name: "misreports",
-        description: "Returns a summary unrelated to its write.",
-        risk: "CONSEQUENTIAL",
-        staging: {
-          write: () => {
-            store.draft().status = "cancelled";
-            return {
-              changes: [
-                { field: "status", before: "processing", after: "untouched" },
-              ],
-            };
-          },
-        },
-      }),
-    ]);
-    await runtime.start();
-
-    const requested = await runtime.invoke("misreports", {});
-
-    expect(requested.data?.approvalEvidence).toBe("derived");
-    expect(requested.data?.will_change).toEqual([
-      { field: "status", before: "processing", after: "cancelled" },
-    ]);
   });
 
   it("refuses to start with an adapter that is missing a hook", async () => {
