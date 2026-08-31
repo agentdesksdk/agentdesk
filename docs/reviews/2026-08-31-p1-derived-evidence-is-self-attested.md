@@ -112,7 +112,7 @@ Add a regression using only the public package API that declares an inline
 adapter with a mismatched diff and commit. Construction or runtime startup must
 refuse it, or the result must not claim `derived` evidence.
 
-## Resolution at `4a4dbf1`
+## Resolution at `7667d74`
 
 The adapter is bound once, at `createAgentDeskRuntime`. `StagedCapabilitySpec`
 carries `staging: { write }` and nothing else; supplying `staging.adapter`
@@ -138,3 +138,48 @@ the adapter, and an adapter whose `diff` disagrees with its `commit` can still
 lie. That is one audited integration point chosen at composition time rather
 than per-operation code, which is the strongest separation available without
 the SDK owning the application's data layer.
+
+## Re-review at `0123fbc`
+
+The runtime-level adapter boundary prevents a capability from supplying its
+own `diff` or `commit`, but the staged write remains an arbitrary JavaScript
+closure. `adapter.fork` calls that closure; it cannot constrain what the
+closure mutates. A capability can therefore bypass the fork, change live state
+during the preview call, and still receive `approvalEvidence: "derived"` from
+an unchanged staged artifact.
+
+This was reproduced against the built package. A staged capability wrote
+`live.status = "changed-before-approval"` directly. `runtime.invoke` changed
+the live object immediately, returned `APPROVAL_REQUIRED`, and reported a
+derived change of `safe -> safe` from the adapter artifact. No human had
+approved when the live write occurred.
+
+The current public claim is therefore stronger than the generic API can
+enforce. Either the adapter must own the operation as well as the artifact
+(for example, capabilities select an adapter-defined operation and supply
+data, rather than an arbitrary closure), or generic `staging.write` must not
+earn the `derived` label. A demo store can enforce fork-only writes, but that
+application-specific property cannot be attributed to the SDK.
+
+Add a regression using only the public API whose staged write mutates an
+external live object. It must be unable to claim derived evidence, or the
+runtime must prove live state remains untouched before approval.
+
+## Resolution at `1f4a2b6`
+
+The adapter owns the operations as well as the artifact. `StagedCapabilitySpec`
+is `staging: { operation }`, a name and nothing else; a `write` or an `adapter`
+beside it is refused, as `stage` already was. `adapter.fork` receives the
+operation name and the validated input and looks up the code itself, so a
+capability declaration carries nothing executable and cannot reach live state
+outside the fork. `start` refuses a capability naming an operation the adapter
+does not own, so a bad name fails before an operator sees a card.
+
+The reproduction is gone: there is no longer a place to put the closure that
+wrote `live.status` during preview. A regression asserts live state is
+unchanged while an approval is pending.
+
+The remaining trust is the adapter itself, chosen at composition time. An
+adapter whose `diff` disagrees with its `commit`, or whose operation writes
+outside its own fork, can still lie. The README, the architecture document,
+and this record all say that rather than claiming more.
