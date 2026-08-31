@@ -1,12 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createAgentDeskRuntime } from "@agentdesk/webmcp";
 import { capabilities } from "../src/capabilities/index.ts";
-import {
-  getState,
-  mutate,
-  resetStore,
-  stagingScope,
-} from "../src/data/store.ts";
+import { stagingAdapter } from "../src/capabilities/staged.ts";
+import { getState, mutate, resetStore } from "../src/data/store.ts";
 
 function revision(): string {
   const state = getState();
@@ -24,7 +20,7 @@ async function startRuntime() {
     capabilities,
     registerTool: async () => {},
     revision,
-    stagingScope,
+    staging: stagingAdapter,
     actor: { id: "agent", name: "Agent", kind: "agent" },
   });
   await runtime.start();

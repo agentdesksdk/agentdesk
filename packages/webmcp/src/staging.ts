@@ -3,13 +3,25 @@ import type { Change, ExecutionContext } from "./capability.ts";
 /**
  * How an application forks, diffs, and lands its own state.
  *
- * One adapter per application, not one per capability. The capability author
- * writes only the handler; the changes a human approves and the commit that
- * lands them are both derived by the runtime from the single opaque `S` this
- * adapter produced, so a capability cannot display one diff and perform a
- * different write. `S` is never inspected by the runtime.
+ * Bound once, at `createAgentDeskRuntime`. A capability declares only its
+ * write and cannot reach this, so the author of an operation cannot describe
+ * one change and perform another; both the diff a human approves and the
+ * commit that lands come from the single opaque `S` this adapter produced.
+ * `S` is never inspected by the runtime.
+ *
+ * This is a trusted boundary, and it is one per application rather than one
+ * per capability. An adapter whose `diff` disagrees with its `commit` can
+ * still lie; nothing below the application's own data layer can prevent
+ * that. Placing it here makes it a single audited integration point.
  */
 export type StagingAdapter<S> = {
+  /**
+   * Runs a sequence of stagings so each derives against its predecessor's
+   * staged head rather than against live state. Plan preparation needs this;
+   * a plan whose second operation previews against live state shows the
+   * human a plan that will not happen.
+   */
+  scope: <T>(run: () => T) => T;
   /**
    * Runs `write` against a fork of live state. `previous` is the artifact of
    * an earlier run of the same operation, so an adapter that pins a clock or
@@ -62,16 +74,6 @@ export type StagedWrite = (
   ctx: ExecutionContext,
 ) => unknown;
 
-/**
- * Runs a sequence of stagings so each derives against its predecessor's
- * staged head rather than against live state.
- *
- * Plan preparation requires one. A plan whose second operation previews
- * against live state shows the human a plan that will not happen, because by
- * then the first operation has already run.
- */
-export type StagingScope = <T>(run: () => T) => T;
-
 export class StagedProposalError extends Error {
   constructor(message: string) {
     super(message);
@@ -79,16 +81,30 @@ export class StagedProposalError extends Error {
   }
 }
 
-function refuseThenable(name: string, value: unknown): void {
-  if (
+function isThenable(value: unknown): boolean {
+  return (
     value !== null &&
     typeof (value as PromiseLike<unknown> | null)?.then === "function"
-  ) {
-    (value as Promise<unknown>).catch?.(() => {});
-    throw new StagedProposalError(
-      `${name} staged asynchronously. A staged handler must finish before it returns, because its writes go to a fork that closes when it does.`,
-    );
+  );
+}
+
+/**
+ * Releases an artifact that will never be committed, then rethrows what went
+ * wrong. A cleanup that fails must not replace the reason staging failed,
+ * which is the thing a human has to read.
+ */
+function releaseAndRethrow<S>(
+  adapter: StagingAdapter<S>,
+  staged: S,
+  cause: unknown,
+): never {
+  try {
+    adapter.release(staged);
+  } catch {
+    // Reported through the original failure below rather than thrown over
+    // it. A cleanup error is a diagnosis; the staging error is the outcome.
   }
+  throw cause;
 }
 
 /**
@@ -110,18 +126,41 @@ export function buildStageHandler<S>(
     previous?: S,
   ) => {
     const forked = adapter.fork(name, () => write(input, ctx), previous);
-    refuseThenable(name, forked?.result);
+    if (isThenable(forked?.result)) {
+      (forked.result as Promise<unknown>).catch?.(() => {});
+      releaseAndRethrow(
+        adapter,
+        forked.staged,
+        new StagedProposalError(
+          `${name} staged asynchronously. A staged handler must finish before it returns, because its writes go to a fork that closes when it does.`,
+        ),
+      );
+    }
     return forked;
   };
 
   return (input, ctx) => {
     const forked = stageOnce(input, ctx);
-    const changes = adapter.diff(forked.staged);
+
+    let changes: readonly Change[];
+    try {
+      changes = adapter.diff(forked.staged);
+    } catch (err) {
+      releaseAndRethrow(adapter, forked.staged, err);
+    }
     if (!Array.isArray(changes)) {
-      throw new StagedProposalError(
-        `${name} staged a change the adapter could not describe.`,
+      releaseAndRethrow(
+        adapter,
+        forked.staged,
+        new StagedProposalError(
+          `${name} staged a change the adapter could not describe.`,
+        ),
       );
     }
+
+    // Settled only once the artifact has actually been handed to `commit` or
+    // `release`. Marking it before the call let a throwing commit leave the
+    // artifact open with the later discard skipping it as already settled.
     let settled = false;
     return {
       changes,
@@ -132,9 +171,13 @@ export function buildStageHandler<S>(
           );
         }
         settled = true;
-        return adapter.commit(forked.staged, () =>
-          stageOnce(input, ctx, forked.staged),
-        );
+        try {
+          return adapter.commit(forked.staged, () =>
+            stageOnce(input, ctx, forked.staged),
+          );
+        } catch (err) {
+          releaseAndRethrow(adapter, forked.staged, err);
+        }
       },
       discard: () => {
         if (settled) {

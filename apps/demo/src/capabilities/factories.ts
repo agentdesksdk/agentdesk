@@ -6,12 +6,7 @@ import {
   type DistributiveOmit,
   type StagedWrite,
 } from "@agentdesk/webmcp";
-import {
-  setCommitMode,
-  stagingAdapter,
-  type CommitMode,
-  type StagedBranch,
-} from "./staged.ts";
+import { setCommitMode, type CommitMode } from "./staged.ts";
 
 type FactorySpec = DistributiveOmit<CapabilitySpec, "risk" | "policy">;
 
@@ -39,11 +34,7 @@ function staged(
 ): Capability {
   const { execute, commitMode, ...rest } = spec;
   setCommitMode(spec.name, commitMode ?? "merge");
-  return defineCapability<StagedBranch>({
-    ...rest,
-    risk,
-    staging: { adapter: stagingAdapter, write: execute },
-  });
+  return defineCapability({ ...rest, risk, staging: { write: execute } });
 }
 
 export function createSearchCapability(spec: FactorySpec): Capability {

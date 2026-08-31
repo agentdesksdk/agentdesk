@@ -9,15 +9,10 @@ import { createStateTransitionCapability } from "../src/capabilities/factories.t
 import {
   openProposalCount,
   stagedChangesFor,
+  stagingAdapter,
 } from "../src/capabilities/staged.ts";
 import { deriveChanges } from "../src/data/branch.ts";
-import {
-  getState,
-  mutate,
-  resetStore,
-  stage,
-  stagingScope,
-} from "../src/data/store.ts";
+import { getState, mutate, resetStore, stage } from "../src/data/store.ts";
 import type { DemoState } from "../src/data/types.ts";
 
 const HUMAN = { id: "operator-1", name: "Amein", kind: "human" as const };
@@ -27,7 +22,7 @@ async function startRuntime(extra: Parameters<typeof defineCapability>[0][] = []
     capabilities: [...capabilities, ...extra.map(defineCapability)],
     registerTool: async () => {},
     actor: { id: "agent", name: "Agent", kind: "agent" },
-    stagingScope,
+    staging: stagingAdapter,
   });
   await runtime.start();
   return runtime;

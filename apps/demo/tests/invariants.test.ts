@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createAgentDeskRuntime } from "@agentdesk/webmcp";
 import { capabilities } from "../src/capabilities/index.ts";
+import { stagingAdapter } from "../src/capabilities/staged.ts";
 import { getState, resetStore } from "../src/data/store.ts";
 
 async function startRuntime() {
   const runtime = createAgentDeskRuntime({
     capabilities,
     registerTool: async () => {},
+    staging: stagingAdapter,
   });
   await runtime.start();
   return runtime;

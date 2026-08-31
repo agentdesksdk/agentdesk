@@ -279,13 +279,19 @@ read a diff the handler produced, a diff the author wrote, or a sentence.
 
 ### Staged proposals
 
-A staged capability declares `staging: { adapter, write }`. The runtime calls
-`adapter.fork`, then derives the proposal from the single opaque artifact it
-returns: `changes` from `adapter.diff`, `commit` from `adapter.commit` over
+A staged capability declares `staging: { write }`. The adapter is bound once
+at `createAgentDeskRuntime`, so the code that describes a change and the code
+that performs it are not both supplied by whoever declared the operation. The
+runtime calls `adapter.fork`, then derives the proposal from the single opaque
+artifact it returns: `changes` from `adapter.diff`, `commit` from `adapter.commit` over
 the same artifact. The author supplies neither, so a capability cannot show
 one diff and perform a different write, and supplying a `stage` handler
-directly is refused. The runtime owns the resulting proposal, keyed by the
-pending action's id or by a plan id and operation index. Nothing is keyed by business input, so two approvals of the
+directly is refused, as is a capability that supplies its own adapter. The
+runtime owns the resulting proposal, keyed by the pending action's id or by a
+plan id and operation index. Once `fork` has produced an artifact, every path
+that does not reach a successful commit releases it exactly once, including a
+throwing `diff`, a malformed diff, a suspended write, and a throwing
+`commit`; a failing `release` never replaces the error that caused it. Nothing is keyed by business input, so two approvals of the
 same capability and input hold two artifacts and neither can consume the
 other. A repeated identical request keeps the artifact behind the preview
 already shown.

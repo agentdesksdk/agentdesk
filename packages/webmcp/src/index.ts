@@ -28,7 +28,6 @@ export {
   type StagedProposal,
   type StagedWrite,
   type StagingAdapter,
-  type StagingScope,
 } from "./staging.ts";
 export {
   highestRisk,

@@ -5,7 +5,6 @@ import {
   receipt,
   type Capability,
   type StagingAdapter,
-  type StagingScope,
 } from "../src/index.ts";
 
 const HUMAN = { id: "operator-1", name: "Amein", kind: "human" as const };
@@ -40,6 +39,16 @@ function makeStore() {
   };
 
   const adapter: StagingAdapter<Artifact> = {
+    scope: (run) => {
+      const { outermost } = openFork();
+      try {
+        return run();
+      } finally {
+        if (outermost) {
+          open = null;
+        }
+      }
+    },
     fork(capability, write) {
       staged += 1;
       const { outermost } = openFork();
@@ -98,16 +107,6 @@ function makeStore() {
     moveRevision: (next: string) => {
       revision = next;
     },
-    scope: (<T,>(run: () => T): T => {
-      const { outermost } = openFork();
-      try {
-        return run();
-      } finally {
-        if (outermost) {
-          open = null;
-        }
-      }
-    }) as StagingScope,
   };
 }
 
@@ -124,7 +123,6 @@ function stagedCapability(
     description: `Stages ${name}.`,
     risk,
     staging: {
-      adapter: store.adapter,
       write: () => {
         write(store.draft());
       },
@@ -137,7 +135,7 @@ function startRuntime(store: Store, capabilities: Capability[]) {
     capabilities,
     registerTool: async () => {},
     actor: { id: "agent", name: "Agent", kind: "agent" },
-    stagingScope: store.scope,
+    staging: store.adapter,
     revision: store.revision,
   });
 }
@@ -306,7 +304,7 @@ describe("derived evidence cannot be manufactured", () => {
         name: "hand_rolled",
         description: "Supplies its own staged proposal.",
         risk: "CONSEQUENTIAL",
-        staging: { adapter: store.adapter, write: () => undefined },
+        staging: { write: () => undefined },
         // The public spec has no `stage`, so this is the only way a
         // JavaScript caller could hand one over.
         stage: () => ({
@@ -328,7 +326,6 @@ describe("derived evidence cannot be manufactured", () => {
         description: "Returns a summary unrelated to its write.",
         risk: "CONSEQUENTIAL",
         staging: {
-          adapter: store.adapter,
           write: () => {
             store.draft().status = "cancelled";
             return {
@@ -350,18 +347,18 @@ describe("derived evidence cannot be manufactured", () => {
     ]);
   });
 
-  it("refuses an adapter that is missing a hook", () => {
+  it("refuses to start with an adapter that is missing a hook", async () => {
     const store = makeStore();
-    expect(() =>
-      defineCapability({
-        name: "half_adapter",
-        description: "Declares staging without a release hook.",
-        risk: "CONSEQUENTIAL",
-        staging: {
-          adapter: { ...store.adapter, release: undefined } as never,
-          write: () => undefined,
-        },
-      }),
-    ).toThrow(/release is missing/);
+    const runtime = createAgentDeskRuntime({
+      capabilities: [
+        stagedCapability(store, "cancel_thing", "CONSEQUENTIAL", (draft) => {
+          draft.status = "cancelled";
+        }),
+      ],
+      registerTool: async () => {},
+      staging: { ...store.adapter, release: undefined } as never,
+    });
+
+    await expect(runtime.start()).rejects.toThrow(/missing release/);
   });
 });

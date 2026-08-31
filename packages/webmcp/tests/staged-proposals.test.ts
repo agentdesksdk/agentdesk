@@ -7,7 +7,6 @@ import {
   type Capability,
   type StagedProposal,
   type StagingAdapter,
-  type StagingScope,
 } from "../src/index.ts";
 
 const HUMAN = { id: "operator-1", name: "Amein", kind: "human" as const };
@@ -26,6 +25,19 @@ function makeStore() {
   const artifacts: Artifact[] = [];
 
   const adapter: StagingAdapter<Artifact> = {
+    scope: (run) => {
+      const outermost = open === null;
+      if (open === null) {
+        open = { ...live };
+      }
+      try {
+        return run();
+      } finally {
+        if (outermost) {
+          open = null;
+        }
+      }
+    },
     fork(capability, write) {
       const outermost = open === null;
       if (open === null) {
@@ -80,19 +92,6 @@ function makeStore() {
       return open;
     },
     committed: () => ({ ...live }),
-    scope: (<T,>(run: () => T): T => {
-      const outermost = open === null;
-      if (open === null) {
-        open = { ...live };
-      }
-      try {
-        return run();
-      } finally {
-        if (outermost) {
-          open = null;
-        }
-      }
-    }) as StagingScope,
   };
 }
 
@@ -108,7 +107,6 @@ function stagedCapability(
     description: `Stages ${name} for approval.`,
     risk: "CONSEQUENTIAL",
     staging: {
-      adapter: store.adapter,
       write: () => {
         write(store.draft());
       },
@@ -121,7 +119,7 @@ function startRuntime(capabilities: Capability[], store?: Store) {
     capabilities,
     registerTool: async () => {},
     actor: { id: "agent", name: "Agent", kind: "agent" },
-    ...(store ? { stagingScope: store.scope } : {}),
+    ...(store ? { staging: store.adapter } : {}),
   });
   return runtime;
 }
@@ -151,7 +149,7 @@ describe("derived evidence cannot be self-attested", () => {
         name: "stage_and_preview",
         description: "Declares both a staged run and a hand-written preview.",
         risk: "CONSEQUENTIAL",
-        staging: { adapter: store.adapter, write: () => undefined },
+        staging: { write: () => undefined },
         previewChanges: () => [],
       } as never),
     ).toThrow(/previewChanges or approvalEvidence/);
@@ -164,7 +162,7 @@ describe("derived evidence cannot be self-attested", () => {
         name: "stage_and_execute",
         description: "Declares both a staged run and a direct handler.",
         risk: "CONSEQUENTIAL",
-        staging: { adapter: store.adapter, write: () => undefined },
+        staging: { write: () => undefined },
         execute: () => ({ ok: true }),
       } as never),
     ).toThrow(/both stage and execute/);
@@ -196,7 +194,6 @@ describe("a staged handler must be synchronous", () => {
         description: "Stages asynchronously.",
         risk: "CONSEQUENTIAL",
         staging: {
-          adapter: store.adapter,
           write: async () => {
             store.draft().status = "cancelled";
           },
@@ -212,7 +209,6 @@ describe("a staged handler must be synchronous", () => {
       description: "Returns a promise from a non-async function.",
       risk: "CONSEQUENTIAL",
       staging: {
-        adapter: store.adapter,
         write: () => Promise.resolve({ done: true }),
       },
     });
@@ -270,7 +266,7 @@ describe("a proposal belongs to its approval", () => {
       ],
       registerTool: async () => {},
       actor: { id: "agent", name: "Agent", kind: "agent" },
-      stagingScope: store.scope,
+      staging: store.adapter,
       policy: () =>
         deny ? { kind: "deny", reason: "blocked" } : { kind: "require_approval" },
     });

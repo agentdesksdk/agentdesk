@@ -59,9 +59,10 @@ import {
   type ToolResult,
 } from "./results.ts";
 import {
+  buildStageHandler,
   StagedProposalStore,
   type StagedProposal,
-  type StagingScope,
+  type StagingAdapter,
 } from "./staging.ts";
 import { ToolSurfaceManager } from "./tool-surface.ts";
 import {
@@ -236,7 +237,7 @@ export type AgentDeskRuntime = {
   ) => { ok: true; receipt: StoredReceipt } | { ok: false; reason: string };
 };
 
-export function createAgentDeskRuntime(options: {
+export function createAgentDeskRuntime<S = unknown>(options: {
   capabilities?: readonly Capability[];
   registerTool?: RegisterToolFn | null;
   adapter?: WebMcpAdapter;
@@ -255,12 +256,13 @@ export function createAgentDeskRuntime(options: {
    */
   revision?: (ctx: AppContext) => string;
   /**
-   * Runs a sequence of stagings so each derives against its predecessor's
-   * staged head. Required before a staged capability can appear in a plan,
-   * because otherwise operation two previews against state operation one is
-   * about to change and the human reviews a plan that will not happen.
+   * How this application forks, describes, and lands its own state.
+   *
+   * Bound here rather than on each capability, so the code that describes a
+   * change and the code that performs it are not both supplied by whoever
+   * declared the operation. Required before any staged capability can run.
    */
-  stagingScope?: StagingScope;
+  staging?: StagingAdapter<S>;
   /** Who is acting. Recorded on audit events, receipts, and presentation. */
   actor?: Actor;
 }): AgentDeskRuntime {
@@ -779,12 +781,23 @@ export function createAgentDeskRuntime(options: {
   ):
     | { ok: true; proposal?: StagedProposal }
     | { ok: false; error: string } {
-    if (!capability.stage) {
+    if (!capability.stagedWrite) {
       return { ok: true };
     }
+    if (!options.staging) {
+      return {
+        ok: false,
+        error: `${capability.name} stages its write and the runtime has no staging adapter, so nothing can derive or land it`,
+      };
+    }
+    const stage = buildStageHandler(
+      capability.name,
+      options.staging,
+      capability.stagedWrite,
+    );
     const linked = linkSignals(signal, epochController.signal);
     try {
-      const proposal = capability.stage(input, {
+      const proposal = stage(input, {
         route: context.route,
         state: context.state,
         signal: linked.signal,
@@ -1296,7 +1309,7 @@ export function createAgentDeskRuntime(options: {
       const proposal = proposals.take(
         StagedProposalStore.planKey(planId, index),
       );
-      if (routed.stage && !proposal) {
+      if (routed.stagedWrite && !proposal) {
         return blocked(
           "STAGED_PROPOSAL_MISSING: the staged change reviewed for this operation is no longer held by the runtime",
         );
@@ -1508,6 +1521,31 @@ export function createAgentDeskRuntime(options: {
       if (started) {
         return;
       }
+      // Checked once, here, rather than at each staged invocation. A staged
+      // capability with no adapter has no way to derive or land its change,
+      // and finding that out at approval time would mean an operator saw a
+      // card for something that could never run.
+      const unbacked = catalog
+        .all()
+        .filter((capability: Capability) => capability.stagedWrite !== undefined);
+      if (unbacked.length > 0 && !options.staging) {
+        throw new Error(
+          `${unbacked
+            .map((capability) => capability.name)
+            .join(", ")} stage their writes and no staging adapter is bound; pass one to createAgentDeskRuntime`,
+        );
+      }
+      if (options.staging) {
+        for (const hook of ["scope", "fork", "diff", "commit", "release"] as const) {
+          if (typeof options.staging[hook] !== "function") {
+            throw new Error(
+              `the staging adapter is missing ${hook}, so a staged change could not be ${
+                hook === "diff" ? "described" : "handled"
+              }`,
+            );
+          }
+        }
+      }
       await surface.reconcile(desiredNative());
       started = true;
       emit();
@@ -1621,14 +1659,16 @@ export function createAgentDeskRuntime(options: {
       // operation one staged. Without it the human reviews previews computed
       // against a state the earlier operations are about to change.
       if (
-        routedOperations.some(({ routed }) => routed.stage) &&
-        !options.stagingScope
+        routedOperations.some(({ routed }) => routed.stagedWrite) &&
+        !options.staging
       ) {
         throw new Error(
-          "this plan contains a staged capability and the runtime has no stagingScope, so its operations would each preview against live state rather than against their predecessors",
+          "this plan contains a staged capability and the runtime has no staging adapter, so its operations would each preview against live state rather than against their predecessors",
         );
       }
-      const scope: StagingScope = options.stagingScope ?? ((run) => run());
+      const scope = options.staging
+        ? options.staging.scope
+        : <T,>(run: () => T): T => run();
       try {
         scope(() => {
           for (const { routed, input } of routedOperations) {
@@ -1804,7 +1844,7 @@ export function createAgentDeskRuntime(options: {
           const routed = routeCapability(catalog, operation.capability);
           return (
             !isRouteError(routed) &&
-            routed.stage &&
+            routed.stagedWrite &&
             !proposals.has(StagedProposalStore.planKey(planId, index))
           );
         });
@@ -2254,7 +2294,7 @@ export function createAgentDeskRuntime(options: {
       // capability. Missing it is a fail-closed refusal, never a fallback
       // to running the handler outside the fork the human reviewed.
       const proposal = proposals.take(actionId);
-      if (routed.stage && !proposal) {
+      if (routed.stagedWrite && !proposal) {
         const missing = unavailable(
           "STAGED_PROPOSAL_MISSING",
           `The staged change behind ${actionId} is no longer held by the runtime, so approving it would run a write nobody reviewed. Request the action again.`,

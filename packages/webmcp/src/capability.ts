@@ -31,12 +31,7 @@ export type ExecutionContext = AppContext & {
 
 import type { FocusPolicy } from "./presentation.ts";
 import type { VerificationResult } from "./plan.ts";
-import {
-  buildStageHandler,
-  type StageHandler,
-  type StagingAdapter,
-  type StagedWrite,
-} from "./staging.ts";
+import type { StagedWrite } from "./staging.ts";
 
 export type RiskLevel = "READ" | "WRITE" | "CONSEQUENTIAL";
 
@@ -180,10 +175,11 @@ export type Capability = {
    */
   approvalEvidence: "derived" | "diff" | "summary";
   /**
-   * Present exactly when `approvalEvidence` is `derived`. Produces the
-   * proposal the runtime owns until it is committed or discarded.
+   * Present exactly when `approvalEvidence` is `derived`. The runtime pairs
+   * it with the staging adapter bound at construction to build the proposal
+   * it owns; the capability has no say in how its change is described.
    */
-  stage?: StageHandler;
+  stagedWrite?: StagedWrite;
   /**
    * Reads state back after execution and reports whether it matches what
    * the change was supposed to do. This is the difference between a
@@ -327,16 +323,16 @@ export type DirectCapabilitySpec = CapabilitySpecBase & {
  * neither the preview callback nor the evidence label is separately
  * selectable here.
  */
-export type StagedCapabilitySpec<S = unknown> = CapabilitySpecBase & {
+export type StagedCapabilitySpec = CapabilitySpecBase & {
   /**
-   * The application adapter and this capability's write. The author never
-   * builds the diff or the commit; the runtime derives both from the single
-   * artifact `adapter.fork` produced, which is what `derived` evidence
-   * asserts. There is no way to hand over a preview unrelated to the write.
+   * This capability's write, and nothing else. The staging adapter is bound
+   * once at `createAgentDeskRuntime`, so a capability cannot supply the code
+   * that describes its own change. That separation is what `derived`
+   * evidence asserts.
    */
   staging: {
-    adapter: StagingAdapter<S>;
     write: StagedWrite;
+    adapter?: undefined;
   };
   execute?: undefined;
   previewChanges?: undefined;
@@ -344,18 +340,14 @@ export type StagedCapabilitySpec<S = unknown> = CapabilitySpecBase & {
   stage?: undefined;
 };
 
-export type CapabilitySpec =
-  | DirectCapabilitySpec
-  | StagedCapabilitySpec<unknown>;
+export type CapabilitySpec = DirectCapabilitySpec | StagedCapabilitySpec;
 
 /** `Omit` over a union, which would otherwise collapse to the shared keys. */
 export type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
   ? Omit<T, K>
   : never;
 
-export function defineCapability<S = unknown>(
-  spec: DirectCapabilitySpec | StagedCapabilitySpec<S>,
-): Capability {
+export function defineCapability(spec: CapabilitySpec): Capability {
   if (spec.description.trim() === "") {
     throw new Error("capability description must be non-empty");
   }
@@ -380,9 +372,7 @@ export function defineCapability<S = unknown>(
 
   // A JavaScript caller can hand over an object the union rejects, so the
   // two shapes are separated again here rather than trusted from the type.
-  // `S` is erased here on purpose. The runtime never inspects a staged
-  // artifact; only the adapter that produced it does.
-  const staging = (spec as { staging?: StagedCapabilitySpec<S>["staging"] })
+  const staging = (spec as { staging?: StagedCapabilitySpec["staging"] })
     .staging;
   const staged =
     typeof staging === "object" &&
@@ -401,15 +391,13 @@ export function defineCapability<S = unknown>(
     }
     if ((spec as { stage?: unknown }).stage !== undefined) {
       throw new Error(
-        `${name} supplies a stage handler directly. A staged proposal is built by the runtime from the adapter, so an author-assembled one cannot claim derived evidence.`,
+        `${name} supplies a stage handler directly. A staged proposal is built by the runtime, so an author-assembled one cannot claim derived evidence.`,
       );
     }
-    for (const hook of ["fork", "diff", "commit", "release"] as const) {
-      if (typeof staging.adapter?.[hook] !== "function") {
-        throw new Error(
-          `${name} declares staging without a complete adapter; ${hook} is missing.`,
-        );
-      }
+    if (staging.adapter !== undefined) {
+      throw new Error(
+        `${name} supplies its own staging adapter. The adapter is bound once at createAgentDeskRuntime, because a capability that describes its own change could describe one and perform another.`,
+      );
     }
     // Prevention, not detection. A staged async handler resumes after its
     // fork has closed, and by the time a returned promise could be
@@ -481,7 +469,7 @@ export function defineCapability<S = unknown>(
       : spec.execute!,
   };
   if (staged) {
-    capability.stage = buildStageHandler(name, staging.adapter, staging.write);
+    capability.stagedWrite = staging.write;
   }
   if (spec.domain !== undefined) {
     capability.domain = spec.domain;

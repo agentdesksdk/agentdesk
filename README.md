@@ -155,10 +155,12 @@ defineCapability({
 });
 ```
 
-The adapter is one per application and supplies `fork`, `diff`, `commit`, and
-`release`. A capability author cannot fabricate evidence at all. The adapter
-author still could, since those four are their code, but that is one audited
-integration point rather than per-capability code.
+The adapter is bound once at `createAgentDeskRuntime` and supplies `scope`,
+`fork`, `diff`, `commit`, and `release`. A capability declares only its write,
+so a capability author cannot influence its own evidence at all. The
+application that composes the runtime still supplies the adapter, so that is
+one audited integration point rather than per-operation code. Starting with a
+staged capability and no bound adapter is refused.
 
 Staging is synchronous by contract. A handler that suspends resumes after its
 fork closed, so `defineCapability` refuses an async handler, `runStage`

@@ -6,6 +6,7 @@ import {
   type ToolResult,
 } from "@agentdesk/webmcp";
 import { capabilities } from "../src/capabilities/index.ts";
+import { stagingAdapter } from "../src/capabilities/staged.ts";
 import { getState, resetStore } from "../src/data/store.ts";
 
 type ExerciseCase = {
@@ -218,6 +219,7 @@ describe("capability execution", () => {
       const runtime = createAgentDeskRuntime({
         capabilities,
         registerTool: async () => {},
+    staging: stagingAdapter,
         exposure: "flat",
       });
       await runtime.start();

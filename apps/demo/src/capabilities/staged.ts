@@ -10,7 +10,13 @@ import {
   mergeBranch,
   type MergeConflict,
 } from "../data/branch.ts";
-import { getCommittedState, land, onReset, stage } from "../data/store.ts";
+import {
+  getCommittedState,
+  land,
+  onReset,
+  stage,
+  stagingScope,
+} from "../data/store.ts";
 import type { Branch } from "../data/types.ts";
 
 /**
@@ -122,6 +128,8 @@ export function setCommitMode(capability: string, mode: CommitMode): void {
  * from the same branch that lands.
  */
 export const stagingAdapter: StagingAdapter<StagedBranch> = {
+  scope: stagingScope,
+
   fork(capability, write, previous) {
     const { result, branch } = stage(capability, write, previous?.branch.at);
     const staged: StagedBranch = {
