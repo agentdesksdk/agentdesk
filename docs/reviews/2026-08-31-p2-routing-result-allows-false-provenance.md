@@ -1,6 +1,6 @@
 # P2: routing result types allow false scorer provenance
 
-Status: **OPEN**
+Status: **RESOLVED**
 
 Reviewed worktree: `crisp-grove`, commit `efb5553` (PR #12)
 

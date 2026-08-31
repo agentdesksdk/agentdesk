@@ -13,6 +13,7 @@ export {
   type DistributiveOmit,
   type StagedCapabilitySpec,
   type CapabilityRelationships,
+  type NormalizedRelationships,
   type Change,
   type ExecutionContext,
   type InputSchema,
@@ -68,10 +69,12 @@ export {
   type CapabilityScorer,
   type RankedCapability,
   type RoutingRequest,
+  type RoutingDescriptor,
   type RoutingResult,
   type RoutingStrategy,
   type RoutingStrategyKind,
   type ScoredCapability,
+  type ScoredDescriptor,
 } from "./router.ts";
 export {
   createAgentDeskRuntime,

@@ -106,11 +106,7 @@ describe("routing strategies", () => {
         kind: "custom",
         scorer: (candidates) => {
           seen.push(...candidates.map((c) => c.name));
-          return candidates.map((capability) => ({
-            capability,
-            score: 1,
-            reasons: ["custom"],
-          }));
+          return candidates.map((d) => ({ name: d.name, score: 1, reasons: ["custom"] }));
         },
       },
       (capability) => capability.name !== "refund_shipping",
@@ -206,7 +202,7 @@ describe("a custom scorer that misbehaves", () => {
     });
     const result = await routeTask(graphCatalog(), REQUEST, {
       kind: "custom",
-      scorer: () => [{ capability: smuggled, score: 99, reasons: ["custom"] }],
+      scorer: () => [{ name: smuggled.name, score: 99, reasons: ["custom"] }],
       onFailure: "refuse",
     });
 
@@ -219,11 +215,7 @@ describe("a custom scorer that misbehaves", () => {
     const result = await routeTask(graphCatalog(), REQUEST, {
       kind: "custom",
       scorer: (candidates) =>
-        candidates.map((capability) => ({
-          capability,
-          score: Number.NaN,
-          reasons: ["custom"],
-        })),
+        candidates.map((d) => ({ name: d.name, score: Number.NaN, reasons: ["custom"] })),
       onFailure: "refuse",
     });
 
@@ -236,11 +228,7 @@ describe("a custom scorer that misbehaves", () => {
     const good = await routeTask(graphCatalog(), REQUEST, {
       kind: "custom",
       scorer: (candidates) =>
-        candidates.map((capability, i) => ({
-          capability,
-          score: candidates.length - i,
-          reasons: ["custom"],
-        })),
+        candidates.map((d, i) => ({ name: d.name, score: candidates.length - i, reasons: ["custom"] })),
     });
     expect(good.ok && good.scoredExternally).toBe(true);
 
@@ -333,7 +321,7 @@ describe("the custom scorer boundary is not a suggestion", () => {
     const pool = graphCatalog();
     const result = await routeTask(pool, REQUEST, {
       kind: "custom",
-      scorer: () => [{ capability: forged, score: 9, reasons: ["custom"] }],
+      scorer: () => [{ name: forged.name, score: 9, reasons: ["custom"] }],
     });
 
     if (!result.ok) return;
@@ -347,8 +335,8 @@ describe("the custom scorer boundary is not a suggestion", () => {
     const result = await routeTask(pool, REQUEST, {
       kind: "custom",
       scorer: () => [
-        { capability: target, score: 9, reasons: ["custom"] },
-        { capability: target, score: 8, reasons: ["custom"] },
+        { name: target.name, score: 9, reasons: ["custom"] },
+        { name: target.name, score: 8, reasons: ["custom"] },
       ],
       onFailure: "refuse",
     });
@@ -363,11 +351,7 @@ describe("the custom scorer boundary is not a suggestion", () => {
     const result = await routeTask(pool, REQUEST, {
       kind: "custom",
       scorer: (candidates) =>
-        candidates.map((capability, i) => ({
-          capability,
-          score: i === 0 ? 5 : 0,
-          reasons: ["custom"],
-        })),
+        candidates.map((d, i) => ({ name: d.name, score: i === 0 ? 5 : 0, reasons: ["custom"] })),
     });
 
     if (!result.ok) return;
@@ -383,11 +367,7 @@ describe("the budget cannot be argued with", () => {
       {
         kind: "custom",
         scorer: (candidates) =>
-          candidates.map((capability, i) => ({
-            capability,
-            score: candidates.length - i,
-            reasons: ["custom"],
-          })),
+          candidates.map((d, i) => ({ name: d.name, score: candidates.length - i, reasons: ["custom"] })),
       },
     );
 
@@ -533,5 +513,85 @@ describe("deterministic routing preserves scores, not just order", () => {
       v1.map((m) => [m.capability.name, m.score]),
     );
     expect(result.matches.length).toBeGreaterThan(0);
+  });
+});
+
+describe("the scorer never touches an executable capability", () => {
+  it("cannot replace a handler on something it was offered", async () => {
+    const pool = graphCatalog();
+    const target = pool.find((c) => c.name === "refund_shipping")!;
+    const original = target.execute;
+    let tampered = false;
+
+    await routeTask(pool, REQUEST, {
+      kind: "custom",
+      scorer: (offered) => {
+        const first = offered[0] as unknown as Record<string, unknown>;
+        try {
+          first.execute = () => {
+            tampered = true;
+            return { hijacked: true };
+          };
+        } catch {
+          /* frozen, which is the point */
+        }
+        throw new Error("now fall back");
+      },
+      onFailure: "deterministic",
+    });
+
+    expect(target.execute).toBe(original);
+    expect(tampered).toBe(false);
+  });
+
+  it("is handed no handler to call in the first place", async () => {
+    let sawExecutable = true;
+    await routeTask(graphCatalog(), REQUEST, {
+      kind: "custom",
+      scorer: (offered) => {
+        sawExecutable = offered.some(
+          (d) => typeof (d as unknown as Record<string, unknown>).execute === "function",
+        );
+        return [];
+      },
+    });
+    expect(sawExecutable).toBe(false);
+  });
+
+  it("turns a throwing score getter into a structured refusal", async () => {
+    const result = await routeTask(graphCatalog(), REQUEST, {
+      kind: "custom",
+      scorer: (offered) => [
+        {
+          name: offered[0]!.name,
+          get score(): number {
+            throw new Error("score getter exploded");
+          },
+        },
+      ],
+      onFailure: "refuse",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toMatch(/score getter exploded|no finite score/);
+  });
+});
+
+describe("normalized relationships are not optional", () => {
+  it("needs no undefined guard on a defined capability", () => {
+    const capability = defineCapability({
+      name: "typed_relationships",
+      description: "Declares nothing",
+      execute: () => ({}),
+    });
+
+    // No `?? []` and no `?.` on either side. If these were still optional the
+    // reads below would not typecheck under exactOptionalPropertyTypes.
+    const requires: readonly string[] = capability.relationships.requires;
+    const related: readonly string[] = capability.relationships.related;
+
+    expect(requires).toEqual([]);
+    expect(related).toEqual([]);
   });
 });

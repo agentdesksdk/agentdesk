@@ -41,7 +41,7 @@ substitution, duplicate output, malformed reasons, and throwing property
 getters. Every successful result must contain only the exact canonical objects
 that passed `eligible`.
 
-## Resolved
+## Attempted resolution at `0887a62`
 
 The scorer now receives a frozen copy of the pool and a frozen copy of the
 request, so it cannot empty or extend the array the fallback path later
@@ -55,3 +55,42 @@ deterministic scorer.
 Regression tests are in `packages/webmcp/tests/router-v2.test.ts` under
 "the custom scorer boundary is not a suggestion". Reverting the frozen copy
 alone fails the mutation case, checked by reverting rather than assumed.
+
+## Follow-up verification
+
+The finding remains open. Freezing `[...pool]` protects only the array. Its
+elements are still the live executable `Capability` objects. A scorer can
+replace `offered[0].execute`, throw, and make deterministic fallback return the
+mutated capability. This reproduced against the built package at `0887a62`:
+both the catalog object and the fallback match carried the replacement
+handler.
+
+The scorer result is also still read through unchecked casts outside the
+guarded invocation. A `score` getter that throws rejects `routeTask` with the
+raw error instead of producing the configured structured refusal. Malformed
+`reasons` are silently replaced rather than rejected. The original requirement
+to give the scorer detached routing descriptors and parse its output therefore
+still stands. The frozen array and canonical name lookup are useful partial
+fixes, but they do not form the trust boundary described by this record.
+
+## Reopened, then resolved properly
+
+The first fix was wrong and the report on it was worse. `Object.freeze` on a
+copied array freezes the array, not the capabilities inside it, so a scorer
+still held live `execute`, `availability`, and `verify` functions on the
+real objects. I described that as a boundary. It was a fence around the
+wrong thing.
+
+The scorer now receives `RoutingDescriptor` objects carrying name,
+description, risk, and routing metadata and none of the functions, and it
+answers with `ScoredDescriptor`, which is a name and a number. There is no
+handler to replace and nothing to forge, so the previous name-check is now
+a lookup rather than a validation.
+
+The call and the parse share one guard. Reading `score` can invoke a getter,
+and a getter that throws outside the guard escaped as a raw rejected promise
+from a method whose type promises `{ ok: false, reason }`.
+
+Regression tests are in `packages/webmcp/tests/router-v2.test.ts` under
+"the scorer never touches an executable capability". Reverting the
+descriptor mapping fails two of them.

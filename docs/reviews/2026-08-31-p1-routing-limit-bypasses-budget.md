@@ -1,6 +1,6 @@
 # P1: an invalid routing limit bypasses the hard budget
 
-Status: **OPEN**
+Status: **RESOLVED**
 
 Reviewed worktree: `crisp-grove`, commit `efb5553` (PR #12)
 

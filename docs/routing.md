@@ -117,8 +117,8 @@ const result = await routeTask(candidates, request, {
   kind: "custom",
   scorer: async (offered, { query }) => {
     const ranked = await myEmbeddingService.rank(query, offered);
-    return ranked.map(({ capability, similarity }) => ({
-      capability,
+    return ranked.map(({ name, similarity }) => ({
+      name,
       score: similarity,
       reasons: ["embedding"],
     }));
@@ -142,11 +142,18 @@ capability it was not offered, or returns the same capability twice. A
 duplicate is refused rather than deduplicated, because it would otherwise
 spend the budget on one capability.
 
-The scorer receives a frozen copy of the pool and a frozen copy of the
-request. It cannot widen or empty the set the fallback path would score.
-Entries it returns are resolved back to the capability that was offered
-under that name, so an object carrying a real name but a different
-`execute` never becomes the thing that runs.
+The scorer never sees a `Capability`. It receives `RoutingDescriptor`
+objects, which carry the name, description, risk, and routing metadata and
+none of the functions. Freezing an array of capabilities was not enough,
+because the objects inside it were the live ones and a scorer could replace
+a handler on something it was merely scoring.
+
+It answers with names, not objects, so there is nothing to forge. Accepted
+names map back to the capability that was offered under that name.
+
+The call and the parse share one guard, because reading `score` can invoke a
+getter and a getter that throws outside the guard escapes as a raw rejection
+from a method whose type promises a structured refusal.
 
 A score of zero or below means not selected, matching the deterministic
 scorer, so a similarity of zero drops the capability rather than routing it

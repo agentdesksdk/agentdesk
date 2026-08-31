@@ -1,4 +1,9 @@
-﻿import type { AppContext, Capability } from "./capability.ts";
+﻿import type {
+  AppContext,
+  Capability,
+  NormalizedRelationships,
+  RiskLevel,
+} from "./capability.ts";
 import type { CapabilityCatalog } from "./catalog.ts";
 
 export type RouteError = {
@@ -175,17 +180,47 @@ export type ScoredCapability = {
 };
 
 /**
+ * What a scorer is allowed to see: everything routing decides on, and none
+ * of the functions that do anything.
+ *
+ * Handing over a `Capability` gave a scorer a live `execute`, `availability`,
+ * and `verify`. Freezing the array around them fixed nothing, because the
+ * objects inside it were the real ones. A descriptor has no handler to
+ * replace and none to call.
+ */
+export type RoutingDescriptor = {
+  readonly name: string;
+  readonly title?: string;
+  readonly description: string;
+  readonly domain?: string;
+  readonly risk: RiskLevel;
+  readonly intents: readonly string[];
+  readonly keywords: readonly string[];
+  readonly entities: readonly string[];
+  readonly routes: readonly string[];
+  readonly relationships: NormalizedRelationships;
+};
+
+/** What a scorer returns: an identifier and a number, nothing to forge. */
+export type ScoredDescriptor = {
+  name: string;
+  score: number;
+  reasons?: readonly string[];
+};
+
+/**
  * The seam an embedding model plugs into later.
  *
  * It may be async, so a scorer that calls out to a service needs no change
- * to this contract when it arrives. It receives candidates that have already
- * passed availability and policy filtering, so a scorer cannot resurrect
- * something the runtime declined to offer.
+ * to this contract when it arrives. It receives descriptors for candidates
+ * that already passed availability and policy filtering, and it answers with
+ * names, so it can neither resurrect something the runtime declined to offer
+ * nor substitute the object that would run.
  */
 export type CapabilityScorer = (
-  candidates: readonly Capability[],
+  candidates: readonly RoutingDescriptor[],
   request: RoutingRequest,
-) => readonly ScoredCapability[] | Promise<readonly ScoredCapability[]>;
+) => readonly ScoredDescriptor[] | Promise<readonly ScoredDescriptor[]>;
 
 export type RoutingStrategy =
   | { kind: "deterministic" }
@@ -408,62 +443,85 @@ async function runScorer(
   { ok: true; matches: readonly ScoredCapability[] } | { ok: false; reason: string }
 > {
   const offered = new Map(pool.map((c) => [c.name as string, c]));
-  let raw: unknown;
+  // The call and the parse share one guard. Reading `.score` can invoke a
+  // getter, and a getter that throws outside the guard escapes as a raw
+  // rejection from a method whose type promises a structured refusal.
   try {
-    raw = await scorer(Object.freeze([...pool]), Object.freeze({ ...request }));
+    const raw = await scorer(pool.map(describe), Object.freeze({ ...request }));
+    if (!Array.isArray(raw)) {
+      return { ok: false, reason: "the custom scorer did not return an array" };
+    }
+    const matches: ScoredCapability[] = [];
+    const seen = new Set<string>();
+    for (const entry of raw) {
+      if (typeof entry !== "object" || entry === null) {
+        return { ok: false, reason: "the custom scorer returned an entry that is not an object" };
+      }
+      const { name, score, reasons } = entry as ScoredDescriptor;
+      if (typeof score !== "number" || !Number.isFinite(score)) {
+        return { ok: false, reason: "the custom scorer returned an entry with no finite score" };
+      }
+      // Names map back to what was offered. A scorer cannot widen the surface
+      // past availability and policy, and it never held the object that runs.
+      const real = typeof name === "string" ? offered.get(name) : undefined;
+      if (!real) {
+        return {
+          ok: false,
+          reason: "the custom scorer returned a capability that was not offered to it",
+        };
+      }
+      if (seen.has(name)) {
+        return {
+          ok: false,
+          reason: `the custom scorer returned ${name} twice, and a duplicate would spend the budget on one capability`,
+        };
+      }
+      seen.add(name);
+      if (score <= 0) {
+        continue;
+      }
+      matches.push({
+        capability: real,
+        score,
+        reasons:
+          Array.isArray(reasons) && reasons.every((r) => typeof r === "string")
+            ? [...reasons]
+            : ["custom"],
+      });
+    }
+    return { ok: true, matches };
   } catch (err) {
     return {
       ok: false,
       reason: `the custom scorer threw: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
-  if (!Array.isArray(raw)) {
-    return { ok: false, reason: "the custom scorer did not return an array" };
+}
+
+/** Everything routing decides on, and nothing that does anything. */
+function describe(capability: Capability): RoutingDescriptor {
+  const descriptor: {
+    -readonly [K in keyof RoutingDescriptor]: RoutingDescriptor[K];
+  } = {
+    name: capability.name,
+    description: capability.description,
+    risk: capability.risk,
+    intents: [...capability.intents],
+    keywords: [...capability.keywords],
+    entities: [...capability.entities],
+    routes: [...capability.routes],
+    relationships: {
+      requires: [...capability.relationships.requires],
+      related: [...capability.relationships.related],
+    },
+  };
+  if (capability.title !== undefined) {
+    descriptor.title = capability.title;
   }
-  const matches: ScoredCapability[] = [];
-  const seen = new Set<string>();
-  for (const entry of raw) {
-    if (
-      typeof entry !== "object" ||
-      entry === null ||
-      typeof (entry as ScoredCapability).score !== "number" ||
-      !Number.isFinite((entry as ScoredCapability).score)
-    ) {
-      return { ok: false, reason: "the custom scorer returned an entry with no finite score" };
-    }
-    const scored = entry as ScoredCapability;
-    const name =
-      typeof scored.capability?.name === "string" ? scored.capability.name : undefined;
-    // A scorer cannot widen the surface. Returning something the eligibility
-    // filter already removed would route past availability and policy.
-    const real = name === undefined ? undefined : offered.get(name);
-    if (!real) {
-      return {
-        ok: false,
-        reason: "the custom scorer returned a capability that was not offered to it",
-      };
-    }
-    if (seen.has(name!)) {
-      return {
-        ok: false,
-        reason: `the custom scorer returned ${name} twice, and a duplicate would spend the budget on one capability`,
-      };
-    }
-    seen.add(name!);
-    // The offered capability, never the object handed back. A forged object
-    // carrying a real name would otherwise become the thing that executes.
-    if (scored.score <= 0) {
-      continue;
-    }
-    matches.push({
-      capability: real,
-      score: scored.score,
-      reasons: Array.isArray(scored.reasons) && scored.reasons.every((r) => typeof r === "string")
-        ? scored.reasons
-        : ["custom"],
-    });
+  if (capability.domain !== undefined) {
+    descriptor.domain = capability.domain;
   }
-  return { ok: true, matches };
+  return Object.freeze(descriptor);
 }
 
 /** Score descending, then name, so equal scores never reorder between runs. */

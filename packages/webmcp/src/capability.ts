@@ -82,6 +82,19 @@ export type CapabilityRelationships = {
   related?: readonly string[];
 };
 
+/**
+ * What a defined capability carries. Both arrays are always present, so
+ * routing reads `relationships.requires` without a guard.
+ *
+ * Author input stays optional above, because making a caller write two empty
+ * arrays to say nothing would be a worse API. Normalization is what closes
+ * the gap, and this is the type that records it happened.
+ */
+export type NormalizedRelationships = {
+  readonly requires: readonly string[];
+  readonly related: readonly string[];
+};
+
 export type Policy =
   | { kind: "allow" }
   | { kind: "approval_required" };
@@ -151,7 +164,7 @@ export type Capability = {
    * cannot run yet says so through `availability` or `checkInput`, where
    * the refusal carries a reason a human can read.
    */
-  relationships: CapabilityRelationships;
+  relationships: NormalizedRelationships;
   risk: RiskLevel;
   inputSchema: InputSchema;
   annotations: {
