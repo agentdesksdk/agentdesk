@@ -12,6 +12,7 @@ export {
   type DirectCapabilitySpec,
   type DistributiveOmit,
   type StagedCapabilitySpec,
+  type CapabilityRelationships,
   type Change,
   type ExecutionContext,
   type InputSchema,
@@ -60,9 +61,17 @@ export {
 export { availableCapabilities, evaluateAvailability } from "./availability.ts";
 export {
   rankCapabilities,
+  routeTask,
   tokenize,
+  RELATION_WEIGHTS,
   ROUTING_WEIGHTS,
+  type CapabilityScorer,
   type RankedCapability,
+  type RoutingRequest,
+  type RoutingResult,
+  type RoutingStrategy,
+  type RoutingStrategyKind,
+  type ScoredCapability,
 } from "./router.ts";
 export {
   createAgentDeskRuntime,
