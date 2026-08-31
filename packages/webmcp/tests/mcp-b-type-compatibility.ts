@@ -11,6 +11,7 @@
  * silently moving the boundary.
  */
 import type {
+  ChromeModelContextExecuteToolOptions,
   ChromeModelContextExtensions,
   ModelContext as McpBModelContext,
   ModelContextRegisterToolOptions as McpBRegisterToolOptions,
@@ -72,14 +73,88 @@ export const bothSchemaArmsFit: Conforms<
 > = true;
 
 /**
- * The Chromium `executeTool` extension, which is what `callTool` drives. It
- * resolves `null` for a tool with no textual output, so AgentDesk's return
- * type has to admit that.
+ * The Chromium `executeTool` extension, which is what `callTool` drives.
+ *
+ * Checking only the return type would let a change to the tool argument, the
+ * input encoding, or the abort options pass unnoticed, so every position is
+ * pinned separately and the intentional difference is named rather than
+ * averaged away.
  */
 type McpBExecuteTool = NonNullable<ChromeModelContextExtensions["executeTool"]>;
+type OurExecuteTool = NonNullable<ModelContextLike["executeTool"]>;
+type McpBExecuteParams = Parameters<McpBExecuteTool>;
+type OurExecuteParams = Parameters<OurExecuteTool>;
+
+/** It resolves `null` for a tool with no textual output. */
 export const executeToolResultFits: Conforms<
   Awaited<ReturnType<McpBExecuteTool>>,
-  Awaited<ReturnType<NonNullable<ModelContextLike["executeTool"]>>>
+  Awaited<ReturnType<OurExecuteTool>>
+> = true;
+
+/**
+ * Three positions on each side, so adding or dropping one is visible. The
+ * unions are what optional trailing parameters produce.
+ *
+ * MCP-B requires the input argument; AgentDesk's is optional because
+ * `callTool` defaults it to `{}` for a tool that takes none. That is the
+ * second intentional widening, alongside the encoding below.
+ */
+export const executeToolArity: Equals<McpBExecuteParams["length"], 2 | 3> = true;
+export const ourExecuteToolArity: Equals<
+  OurExecuteParams["length"],
+  1 | 2 | 3
+> = true;
+
+/**
+ * The descriptor position. Values come from `getTools`, so what matters is
+ * that MCP-B's fits where AgentDesk reads it.
+ */
+export const executeToolTakesTheirTool: Conforms<
+  McpBExecuteParams[0],
+  OurExecuteParams[0]
+> = true;
+
+/**
+ * Not the other way round, and deliberately so. AgentDesk's `RegisteredTool`
+ * is a projection whose `window` is optional, so a hand-built descriptor is
+ * legal here and would not satisfy MCP-B, whose `window` is required. Every
+ * descriptor AgentDesk actually forwards came from the browser and carries
+ * one. This stops compiling if the projection tightens, which is when the
+ * note should go.
+ */
+export const ourToolStaysLooser: StillDiverges<
+  OurExecuteParams[0],
+  McpBExecuteParams[0]
+> = true;
+
+/**
+ * The one intentional widening. MCP-B types the payload as `string`, which is
+ * what Chrome 152 requires and what `callTool` sends by default. AgentDesk
+ * accepts `object | string` because `negotiateEncoding` can settle on the
+ * object encoding against a browser that takes it, and the encoding is chosen
+ * before the call rather than discovered by retrying a write.
+ *
+ * So MCP-B's parameter fits ours and not the other way round. Both directions
+ * are asserted, and the second stops compiling if MCP-B ever widens too,
+ * which is when this note should be deleted.
+ */
+export const executeToolInputIsWiderHere: Conforms<
+  McpBExecuteParams[1],
+  OurExecuteParams[1]
+> = true;
+export const executeToolInputStillNarrowerUpstream: StillDiverges<
+  OurExecuteParams[1],
+  McpBExecuteParams[1]
+> = true;
+
+/** Abort options, which is the position a signal change would move. */
+export const executeToolOptionsMatch: Conforms<
+  ChromeModelContextExecuteToolOptions,
+  NonNullable<OurExecuteParams[2]>
+> = true;
+export const executeToolSignalIsAnAbortSignal: Equals<
+  NonNullable<ChromeModelContextExecuteToolOptions["signal"]>,
+  AbortSignal
 > = true;
 
 /**

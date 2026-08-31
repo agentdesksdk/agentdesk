@@ -65,10 +65,12 @@ A consumer that assumes either arm breaks on the other half of the field, and
 a bare `JSON.parse` on the string arm turns a malformed schema into a thrown
 exception in the middle of tool discovery. `readInputSchema` branches on the
 type, parses only the string arm, then judges both arms with one check.
-Anything that is not a JSON Schema object is refused, including an array and
-an explicit `null`, because validity that depended on the transport encoding
-would defeat the point of normalizing the generations. Only an omitted member
-is absence.
+Anything that is not a plain JSON object is refused, including an array, an
+explicit `null`, and objects whose meaning lives in a prototype such as
+`Date`, `Map`, and `RegExp`, because validity that depended on the transport
+encoding would defeat the point of normalizing the generations. The check
+compares the internal class tag rather than a prototype, so a plain object
+built in another window is still accepted. Only an omitted member is absence.
 
 The polyfill produces the object arm. The string arm is exercised by
 re-serializing the schema over the same real registrations rather than by
@@ -188,6 +190,14 @@ WebMCP specification and is the file that decides the provider callback.
 exact MCP-B 5.1 types the dev dependency pins, checks the consumer and
 Chromium-extension surfaces AgentDesk claims to support, and records the
 disagreements as falsifiable assertions.
+
+`executeTool` is pinned position by position rather than by return type
+alone, so a change to the descriptor, the input encoding, or the abort
+options is visible. Three intentional differences are named there: AgentDesk
+accepts `object | string` where MCP-B requires `string`, makes the input
+argument optional where MCP-B requires it, and keeps `window` optional on its
+`RegisteredTool` projection. Each carries an assertion that stops compiling if
+upstream catches up.
 
 AgentDesk's exported `RegisteredTool` is a projection of the specification
 dictionary rather than a mirror. Members a browser sends are readable,

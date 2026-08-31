@@ -81,3 +81,43 @@ reaches the owning window without a cast. The type's doc comment now describes
 it as a projection of the specification dictionary rather than a mirror, and
 says why the members AgentDesk never constructs stay optional. Removing
 `window` again makes the compatibility lane fail to compile, which was checked.
+
+## Follow-up verification
+
+The new lane imports MCP-B and catches the provider arity and `window` drift,
+but it does not meet the record's Chrome-extension regression requirement.
+`executeToolResultFits` reduces both methods to
+`Awaited<ReturnType<...>>`. A change to MCP-B's `executeTool` tool parameter,
+input encoding, or abort-options parameter still compiles as long as the
+return remains `Promise<string | null>`.
+
+That is signature drift by construction, and it affects the method
+`createWebMcpClient.callTool` invokes. Keep this record open until the lane
+compares the parameter tuples as well as the return. Where AgentDesk
+intentionally accepts a wider input encoding than MCP-B, pin that difference
+explicitly instead of projecting the parameters away.
+
+## Resolution, second pass
+
+`executeTool` was reduced to its return type, so a change to the descriptor,
+the input encoding, or the abort options would have passed unnoticed. Every
+position is pinned separately now.
+
+Arity is asserted on both sides, as the unions optional trailing parameters
+produce, so an added or dropped position is visible. The descriptor position
+asserts MCP-B's fits where AgentDesk reads it, which is the direction that
+matters because values come from `getTools`. The abort options assert against
+`ChromeModelContextExecuteToolOptions`, and that its `signal` is an
+`AbortSignal`.
+
+Two intentional widenings are named rather than averaged away, each with a
+`StillDiverges` assertion that stops compiling if upstream catches up. MCP-B
+types the payload `string` while AgentDesk accepts `object | string`, because
+`negotiateEncoding` can settle on the object encoding. MCP-B requires the
+input argument while AgentDesk's is optional, because `callTool` defaults it
+for a tool that takes none. A third records that AgentDesk's `RegisteredTool`
+projection keeps `window` optional, so a hand-built descriptor is legal here
+and would not satisfy MCP-B.
+
+Verified load-bearing by deleting the options position from
+`ModelContextLike.executeTool`, which fails three assertions in this file.

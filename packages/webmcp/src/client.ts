@@ -245,11 +245,33 @@ export function readInputSchema(
     }
   }
 
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (!isPlainJsonObject(value)) {
     return {
       ok: false,
       reason: `${tool.name} reported an input schema that is not a JSON object`,
     };
   }
   return { ok: true, schema: value };
+}
+
+/**
+ * Whether a value is a plain data object, judged without same-realm
+ * prototype identity.
+ *
+ * A schema is data. `typeof value === "object"` also admits `Date`, `Map`,
+ * `Set`, `RegExp`, and `Error`, whose meaning lives in their prototype and
+ * which lose it on the way through JSON, so accepting them in the direct arm
+ * made a verdict depend on the transport encoding.
+ *
+ * `instanceof Object` and a `=== Object.prototype` comparison would both
+ * reject a plain object built in another window, which is exactly what a
+ * cross-document tool sends. The internal class tag survives the realm
+ * boundary, and reports `[object Object]` for a null-prototype object too.
+ */
+function isPlainJsonObject(value: unknown): value is object {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    Object.prototype.toString.call(value) === "[object Object]"
+  );
 }
