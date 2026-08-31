@@ -65,5 +65,10 @@ and executed under plain Node, and the design doc check passed.
 | P1 | RESOLVED | [Staging adapter failures leak the artifact](2026-08-31-p1-staging-adapter-failure-leaks-artifact.md) |
 | P1 | RESOLVED | [A staged commit can land and be recorded as failed](2026-08-31-p1-staged-commit-can-land-and-be-recorded-failed.md) |
 | P2 | RESOLVED | [Staging documentation still shows the removed API](2026-08-31-p2-staging-docs-show-removed-api.md) |
+| P1 | RESOLVED | [A plan collapses an indeterminate commit to failure](2026-08-31-p1-plan-collapses-indeterminate-commit-to-failure.md) |
+| P1 | RESOLVED | [Reset forgets open staged artifacts](2026-08-31-p1-reset-forgets-open-staged-artifacts.md) |
+| P1 | RESOLVED | [Reconcile drops the record without settling the artifact](2026-08-31-p1-reconcile-drops-record-without-settling-artifact.md) |
+| P1 | RESOLVED | [Unreconciled evidence is mutable through the public API](2026-08-31-p1-unreconciled-evidence-is-mutable.md) |
+| P2 | RESOLVED | [The staged reconciler event is typed as a generic actor](2026-08-31-p2-staged-reconciler-event-is-generic-actor.md) |
 
 Delete this directory only after every open item has either a validated fix or an explicit accepted-risk decision.
