@@ -1,0 +1,183 @@
+{
+  "schemaVersion": 1,
+  "runId": "reference",
+  "at": "2026-08-31T23:45:19.822Z",
+  "taskSet": {
+    "path": "scripts/evals/tasks/v1.tasks.jsonl",
+    "taskCount": 6
+  },
+  "arms": {
+    "baseline": {
+      "label": "Baseline (flat exposure)",
+      "exposure": "flat",
+      "metrics": {
+        "toolSelectionAccuracy": {
+          "name": "toolSelectionAccuracy",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0,
+          "provenance": "unavailable",
+          "reason": "no recorded model transcript; tool selection is a model decision and was not observed"
+        },
+        "argumentAccuracy": {
+          "name": "argumentAccuracy",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0,
+          "provenance": "unavailable",
+          "reason": "no recorded model transcript; arguments are a model decision and were not observed"
+        },
+        "taskCompletion": {
+          "name": "taskCompletion",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0,
+          "provenance": "unavailable",
+          "reason": "no recorded model transcript; completion depends on what the model attempted"
+        },
+        "approvalCompliance": {
+          "name": "approvalCompliance",
+          "value": 1,
+          "numerator": 3,
+          "denominator": 3,
+          "provenance": "measured"
+        },
+        "unsafeExecutionsBlocked": {
+          "name": "unsafeExecutionsBlocked",
+          "value": 1,
+          "numerator": 1,
+          "denominator": 1,
+          "provenance": "measured"
+        },
+        "visibleToolCount": {
+          "name": "visibleToolCount",
+          "value": 51,
+          "mean": 51,
+          "max": 51,
+          "min": 51,
+          "denominator": 6,
+          "provenance": "measured"
+        },
+        "registeredSchemaBytes": {
+          "name": "registeredSchemaBytes",
+          "value": 10455,
+          "mean": 10455,
+          "max": 10455,
+          "min": 10455,
+          "denominator": 6,
+          "provenance": "measured"
+        },
+        "estimatedSchemaTokens": {
+          "name": "estimatedSchemaTokens",
+          "value": 2614,
+          "max": 2614,
+          "denominator": 6,
+          "provenance": "estimated",
+          "formula": "registeredSchemaBytes / 4"
+        }
+      }
+    },
+    "agentdesk": {
+      "label": "AgentDesk (routed exposure)",
+      "exposure": "routed",
+      "metrics": {
+        "toolSelectionAccuracy": {
+          "name": "toolSelectionAccuracy",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0,
+          "provenance": "unavailable",
+          "reason": "no recorded model transcript; tool selection is a model decision and was not observed"
+        },
+        "argumentAccuracy": {
+          "name": "argumentAccuracy",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0,
+          "provenance": "unavailable",
+          "reason": "no recorded model transcript; arguments are a model decision and were not observed"
+        },
+        "taskCompletion": {
+          "name": "taskCompletion",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0,
+          "provenance": "unavailable",
+          "reason": "no recorded model transcript; completion depends on what the model attempted"
+        },
+        "approvalCompliance": {
+          "name": "approvalCompliance",
+          "value": 1,
+          "numerator": 3,
+          "denominator": 3,
+          "provenance": "measured"
+        },
+        "unsafeExecutionsBlocked": {
+          "name": "unsafeExecutionsBlocked",
+          "value": 1,
+          "numerator": 1,
+          "denominator": 1,
+          "provenance": "measured"
+        },
+        "visibleToolCount": {
+          "name": "visibleToolCount",
+          "value": 6.666666666666667,
+          "mean": 6.666666666666667,
+          "max": 7,
+          "min": 6,
+          "denominator": 6,
+          "provenance": "measured"
+        },
+        "registeredSchemaBytes": {
+          "name": "registeredSchemaBytes",
+          "value": 2486.1666666666665,
+          "mean": 2486.1666666666665,
+          "max": 2557,
+          "min": 2365,
+          "denominator": 6,
+          "provenance": "measured"
+        },
+        "estimatedSchemaTokens": {
+          "name": "estimatedSchemaTokens",
+          "value": 622,
+          "max": 639,
+          "denominator": 6,
+          "provenance": "estimated",
+          "formula": "registeredSchemaBytes / 4"
+        }
+      }
+    }
+  },
+  "unavailable": [
+    {
+      "arm": "baseline",
+      "metric": "toolSelectionAccuracy",
+      "reason": "no recorded model transcript; tool selection is a model decision and was not observed"
+    },
+    {
+      "arm": "baseline",
+      "metric": "argumentAccuracy",
+      "reason": "no recorded model transcript; arguments are a model decision and were not observed"
+    },
+    {
+      "arm": "baseline",
+      "metric": "taskCompletion",
+      "reason": "no recorded model transcript; completion depends on what the model attempted"
+    },
+    {
+      "arm": "agentdesk",
+      "metric": "toolSelectionAccuracy",
+      "reason": "no recorded model transcript; tool selection is a model decision and was not observed"
+    },
+    {
+      "arm": "agentdesk",
+      "metric": "argumentAccuracy",
+      "reason": "no recorded model transcript; arguments are a model decision and were not observed"
+    },
+    {
+      "arm": "agentdesk",
+      "metric": "taskCompletion",
+      "reason": "no recorded model transcript; completion depends on what the model attempted"
+    }
+  ]
+}

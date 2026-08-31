@@ -7,3 +7,7 @@ coverage/
 resources/
 agentdesk.md
 .playwright-mcp/
+
+# Timestamped eval runs. scripts/evals/runs/reference is committed as the
+# checked-in example every aggregate in docs/evaluations.md is computed from.
+scripts/evals/runs/eval-*
