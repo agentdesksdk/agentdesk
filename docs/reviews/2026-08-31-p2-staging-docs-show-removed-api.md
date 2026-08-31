@@ -27,7 +27,7 @@ the removed capability-level adapter shape before merging.
 Compile or execute the README's staged-capability example in the documentation
 check so a removed public shape cannot remain the primary onboarding path.
 
-## Resolution at `1f4a2b6`
+## Resolution at `fb76baf`
 
 The README example is now generated from
 `packages/webmcp/examples/staged-capability.ts`, which `pnpm typecheck`

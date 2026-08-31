@@ -73,7 +73,7 @@ successful return from `release` may establish disposal; merely invoking a
 hook that throws cannot. Add a regression that asserts the artifact's actual
 terminal state, not only the number of release attempts.
 
-## Resolution at `1f4a2b6`
+## Resolution at `fb76baf`
 
 A `release` that throws is now reported rather than swallowed. It raises
 `staged_cleanup_failed` in the audit and records an entry in

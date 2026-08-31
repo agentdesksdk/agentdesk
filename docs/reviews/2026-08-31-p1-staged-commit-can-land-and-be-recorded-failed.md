@@ -38,7 +38,7 @@ and audit must not say `FAILED`, the artifact must not be silently released as
 though nothing landed, and the runtime must expose a reconciliation path or an
 equally explicit indeterminate terminal state.
 
-## Resolution at `1f4a2b6`
+## Resolution at `fb76baf`
 
 A thrown commit is no longer read as a clean failure. `buildStageHandler`
 wraps it in `StagedCommitIndeterminate`, keeps the artifact rather than

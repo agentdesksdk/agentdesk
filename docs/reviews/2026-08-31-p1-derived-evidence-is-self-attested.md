@@ -165,7 +165,7 @@ Add a regression using only the public API whose staged write mutates an
 external live object. It must be unable to claim derived evidence, or the
 runtime must prove live state remains untouched before approval.
 
-## Resolution at `1f4a2b6`
+## Resolution at `fb76baf`
 
 The adapter owns the operations as well as the artifact. `StagedCapabilitySpec`
 is `staging: { operation }`, a name and nothing else; a `write` or an `adapter`
