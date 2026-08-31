@@ -49,6 +49,7 @@ import {
   capabilityUnavailable,
   errorResult,
   executionCancelled,
+  executionIndeterminate,
   idempotencyCapacity,
   idempotencyConflict,
   isReceiptEnvelope,
@@ -60,6 +61,7 @@ import {
 } from "./results.ts";
 import {
   buildStageHandler,
+  parseResolution,
   StagedCommitIndeterminate,
   StagedProposalStore,
   UnreconciledStore,
@@ -747,6 +749,23 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         capability.approvalEvidence,
       );
     }
+    // A previous call of this exact operation may already have written. A
+    // repeat would apply it twice, so it is refused until a human has said
+    // what happened. This guards the unapproved path, which is the one a
+    // caller can reach without anyone looking.
+    const unresolved = unreconciled.forOperation(
+      operationKey(capability.name, input),
+    );
+    if (unresolved) {
+      emit();
+      return executionIndeterminate(
+        capability.name,
+        unresolved.id,
+        unresolved.detail,
+        unresolved.changes,
+      );
+    }
+
     // Ownership of the idempotency slot is settled before anything is
     // staged. A replay or a refusal that staged first would leave behind a
     // proposal that neither commits nor is discarded, because only the
@@ -797,6 +816,17 @@ export function createAgentDeskRuntime<S = unknown>(options: {
    * capability with no `stage` returns no proposal and keeps whatever
    * preview it declared.
    */
+  /**
+   * Identity of one call. Two invocations that agree on capability and input
+   * are the same operation, which is what makes a repeat detectable.
+   */
+  function operationKey(
+    capability: string,
+    input: Record<string, unknown>,
+  ): string {
+    return `${capability}:${fingerprintInput(input)}`;
+  }
+
   function stageFor(
     capability: Capability,
     input: Record<string, unknown>,
@@ -900,7 +930,11 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         ok: false;
         executionId?: string;
         /** Set when the commit threw after it may already have written. */
-        indeterminate?: { detail: string; recordId: string };
+        indeterminate?: {
+          detail: string;
+          recordId: string;
+          changes: readonly Change[];
+        };
         result: ToolResult;
       };
 
@@ -1286,6 +1320,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         const record = unreconciled.record(
           {
             capability: capability.name,
+            operationKey: operationKey(capability.name, input),
             kind: "commit_indeterminate",
             detail: message,
             changes: err.changes,
@@ -1311,8 +1346,17 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         return {
           ok: false,
           executionId,
-          indeterminate: { detail: message, recordId: record.id },
-          result: errorResult(message),
+          indeterminate: {
+            detail: message,
+            recordId: record.id,
+            changes: err.changes,
+          },
+          result: executionIndeterminate(
+            capability.name,
+            record.id,
+            message,
+            err.changes,
+          ),
         };
       }
       audit.append({
@@ -1642,7 +1686,14 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         );
       }
       if (options.staging) {
-        for (const hook of ["scope", "fork", "diff", "commit", "release"] as const) {
+        for (const hook of [
+          "scope",
+          "fork",
+          "diff",
+          "commit",
+          "release",
+          "reconcile",
+        ] as const) {
           if (typeof options.staging[hook] !== "function") {
             throw new Error(
               `the staging adapter is missing ${hook}, so a staged change could not be handled`,
@@ -2055,11 +2106,13 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       });
       audit.append({
         kind:
-          status === "FAILED" || status === "INDETERMINATE"
-            ? "plan_failed"
-            : status === "PARTIAL"
-              ? "plan_partial"
-              : "plan_committed",
+          status === "INDETERMINATE"
+            ? "plan_indeterminate"
+            : status === "FAILED"
+              ? "plan_failed"
+              : status === "PARTIAL"
+                ? "plan_partial"
+                : "plan_committed",
         planId,
         outcomes: outcomes.map((outcome) => ({
           capability: outcome.capability,
@@ -2562,6 +2615,13 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       if (!found) {
         return { ok: false, reason: `nothing unreconciled for ${target}` };
       }
+      // Checked before the adapter is touched. Settling an unknown write by
+      // claiming a cleanup was disposed answers a question nobody asked and
+      // then deletes the only record of the write.
+      const parsed = parseResolution(found.record.kind, resolution);
+      if (!parsed.ok) {
+        return { ok: false, reason: parsed.reason };
+      }
       // Only the adapter can make the artifact terminal, and only a
       // successful return says it did. A throw leaves the record and its
       // evidence exactly where they were.
@@ -2570,7 +2630,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         // back is the one place the erased type is reconstituted.
         (options.staging as StagingAdapter<unknown>).reconcile(
           found.artifact,
-          resolution,
+          parsed.resolution,
         );
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
@@ -2592,7 +2652,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         kind: "staged_reconciled",
         capability: found.record.capability,
         recordId: found.record.id,
-        resolution: resolution.kind,
+        resolution: parsed.resolution.kind,
         actor: authorizer.actor,
         at: now(),
       });

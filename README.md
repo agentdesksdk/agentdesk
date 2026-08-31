@@ -171,12 +171,18 @@ a staged capability whose operation the adapter does not own is refused, as is
 starting with no adapter bound at all.
 
 A commit that throws is not treated as a clean failure. The exception proves
-the adapter did not return, not that nothing landed, so the approval resolves
-`INDETERMINATE`, the staged diff is retained frozen, and `listUnreconciled`
-holds it until a human calls `reconcile`, which hands the artifact back to the
-adapter and only settles when the adapter says it did. A plan reports it the
-same way and stops rather than writing on top of an unknown result. Reset does
-not clear these records. An adapter that knows nothing was dispatched
+the adapter did not return, not that nothing landed, so every path reports it
+the same way: an approval resolves `INDETERMINATE`, a plan resolves
+`INDETERMINATE` and stops rather than writing on top of an unknown result, and
+a direct write returns `EXECUTION_INDETERMINATE` naming the record and saying
+not to retry. The same call is then refused until a human reconciles it, so a
+caller cannot apply the change twice by asking twice.
+
+The staged diff is cloned and frozen before anything is dispatched, so
+evidence that could not be recorded is refused while refusing is still free.
+`listUnreconciled` holds the record until `reconcile` hands the artifact back
+to the adapter, and only a resolution the record can accept, and only the
+adapter's successful return, settles it. Reset does not clear these records. An adapter that knows nothing was dispatched
 says so with `StagedCommitRefused`, which is an ordinary refusal. A `release`
 that throws is an attempted cleanup rather than a completed one, so it is
 recorded and the artifact stays listed.

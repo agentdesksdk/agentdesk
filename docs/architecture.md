@@ -306,10 +306,24 @@ way: the operation and the plan both resolve `INDETERMINATE`, the record
 carries the plan id and the operation index, and later operations are skipped
 rather than written on top of a change nobody can confirm.
 
+All three entry points report an unknown commit the same way. A direct
+execution returns `EXECUTION_INDETERMINATE` with the record id and the
+approved changes, and a later invocation of the same capability and input is
+refused while that record is open, because a repeat could apply a change that
+already landed. An indeterminate plan emits `plan_indeterminate` rather than
+`plan_failed`, so a consumer reading the discriminant is not told the opposite
+of the plan's terminal state.
+
+Derived evidence is cloned and frozen at the staging boundary, before any
+commit runs, so a diff that cannot become durable evidence is refused rather
+than discovered after a write may have landed. Recording an unknown outcome
+cannot itself throw.
+
 `reconcile` is an adapter boundary, not a bookkeeping call. It hands the
 retained artifact back with a `StagedResolution` of `commit_applied`,
-`commit_not_applied`, or `cleanup_disposed`, and only a successful return
-settles the record. A throwing recovery leaves the record and its evidence in
+`commit_not_applied`, or `cleanup_disposed`, parsed and checked against the
+record's own kind first, so a cleanup resolution cannot settle an unknown
+commit. Only the adapter's successful return settles the record. A throwing recovery leaves the record and its evidence in
 place. Reset does not clear these records, because a reset cannot close an
 artifact still open in the application and deleting the record would lose the
 only thing that could find it. The evidence itself is cloned and deep-frozen

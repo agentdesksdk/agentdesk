@@ -243,6 +243,18 @@ function collapse(events: readonly AuditEvent[]): Rendered[] {
           meta: event.reason,
         });
         break;
+      case "plan_indeterminate":
+        out.push({
+          key,
+          at: event.at,
+          head: "Plan outcome unknown",
+          cap: event.planId,
+          meta: `${
+            event.outcomes.find((o) => o.status === "INDETERMINATE")
+              ?.capability ?? "an operation"
+          } may or may not have landed; reconcile before retrying`,
+        });
+        break;
       case "execution_indeterminate":
         out.push({
           key,

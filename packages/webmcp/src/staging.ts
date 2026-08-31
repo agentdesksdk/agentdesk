@@ -86,6 +86,55 @@ export type StagedResolution =
   | { kind: "cleanup_disposed" };
 
 /**
+ * Which resolutions can settle which record.
+ *
+ * Whether a write landed and whether a failed disposal later succeeded are
+ * different questions, so answering one of them about the other is a
+ * contradiction rather than a choice.
+ */
+const RESOLVES: Record<Unreconciled["kind"], ReadonlySet<string>> = {
+  commit_indeterminate: new Set(["commit_applied", "commit_not_applied"]),
+  cleanup_failed: new Set(["cleanup_disposed"]),
+};
+
+/**
+ * Parses a resolution arriving from a JavaScript caller and checks it against
+ * the record it claims to settle.
+ */
+export function parseResolution(
+  kind: Unreconciled["kind"],
+  resolution: unknown,
+): { ok: true; resolution: StagedResolution } | { ok: false; reason: string } {
+  if (
+    typeof resolution !== "object" ||
+    resolution === null ||
+    Array.isArray(resolution)
+  ) {
+    return { ok: false, reason: "a resolution must be an object" };
+  }
+  const keys = Object.keys(resolution);
+  if (keys.length !== 1 || keys[0] !== "kind") {
+    return {
+      ok: false,
+      reason: `a resolution carries only a kind, not ${keys.join(", ")}`,
+    };
+  }
+  const value = (resolution as { kind: unknown }).kind;
+  if (typeof value !== "string") {
+    return { ok: false, reason: "a resolution kind must be a string" };
+  }
+  if (!RESOLVES[kind].has(value)) {
+    return {
+      ok: false,
+      reason: `${value} cannot settle a ${kind} record; it accepts ${[
+        ...RESOLVES[kind],
+      ].join(" or ")}`,
+    };
+  }
+  return { ok: true, resolution: { kind: value } as StagedResolution };
+}
+
+/**
  * A capability's proposed write. Built by the runtime from one staged
  * artifact, never assembled by a capability author, which is what entitles
  * it to `approvalEvidence: "derived"`.
@@ -245,7 +294,23 @@ export function buildStageHandler<S>(
       );
     }
 
-    const changes: readonly Change[] = derived;
+    // Detached here, before anything is dispatched. Evidence that cannot be
+    // recorded has to be refused while refusing is still free; discovering it
+    // inside the catch after a commit would lose the record of a write that
+    // may already have landed.
+    let changes: readonly Change[];
+    try {
+      changes = deepFreeze(structuredClone(derived)) as readonly Change[];
+    } catch (err) {
+      return releaseAndRethrow(
+        forked.staged,
+        new StagedProposalError(
+          `${operation} staged a change that cannot be recorded as evidence, so it was refused before it ran: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        ),
+      );
+    }
     let settled = false;
     return {
       changes,
@@ -369,6 +434,12 @@ export type Unreconciled = {
   planId?: string;
   operationIndex?: number;
   capability: string;
+  /**
+   * Capability plus input fingerprint. An unresolved commit under this key
+   * blocks the same call being made again, because a repeat would apply a
+   * change that may already have landed.
+   */
+  operationKey?: string;
   kind: "commit_indeterminate" | "cleanup_failed";
   detail: string;
   /** What the human approved, kept as the thing to reconcile against. */
@@ -395,11 +466,24 @@ export class UnreconciledStore {
   }> = [];
   private nextId = 1;
 
+  /**
+   * Never throws. Evidence is detached at the staging boundary, before
+   * anything is dispatched, so by here it is already cloneable. This is
+   * called after a write may have landed, and throwing would lose the only
+   * record of it, so the detached evidence is reused if cloning fails
+   * anyway.
+   */
   record(entry: Omit<Unreconciled, "id">, artifact: unknown): Unreconciled {
-    const stored = deepFreeze({
-      ...structuredClone({ ...entry, changes: [...entry.changes] }),
-      id: `UNREC-${this.nextId++}`,
-    }) as Unreconciled;
+    const id = `UNREC-${this.nextId++}`;
+    let stored: Unreconciled;
+    try {
+      stored = deepFreeze({
+        ...structuredClone({ ...entry, changes: [...entry.changes] }),
+        id,
+      }) as Unreconciled;
+    } catch {
+      stored = deepFreeze({ ...entry, id }) as Unreconciled;
+    }
     this.entries.push({ record: stored, artifact });
     return stored;
   }
@@ -414,6 +498,16 @@ export class UnreconciledStore {
     if (found) {
       found.record = deepFreeze({ ...found.record, ...owner }) as Unreconciled;
     }
+  }
+
+  /** An unresolved unknown commit for this exact call, if there is one. */
+  forOperation(operationKey: string): Unreconciled | undefined {
+    const found = this.entries.find(
+      ({ record }) =>
+        record.kind === "commit_indeterminate" &&
+        record.operationKey === operationKey,
+    );
+    return found ? deepFreeze(structuredClone(found.record)) : undefined;
   }
 
   /** The open record for an approval, if it has one. */
