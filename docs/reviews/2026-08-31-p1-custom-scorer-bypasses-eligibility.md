@@ -94,3 +94,49 @@ from a method whose type promises `{ ok: false, reason }`.
 Regression tests are in `packages/webmcp/tests/router-v2.test.ts` under
 "the scorer never touches an executable capability". Reverting the
 descriptor mapping fails two of them.
+
+## Follow-up verification at `8f7de87`
+
+The descriptor change removes live capabilities and the shared guard converts
+throwing output getters into structured failures. The boundary is still open
+through `RoutingRequest`. `Object.freeze({ ...request })` is shallow, so the
+scorer receives the caller's live `context` object, `context.state`, and
+`session` array.
+
+This reproduced against the built package. A scorer set
+`received.context.state.approved = true`, appended to `received.session`, then
+threw. The caller's application state and original session were both changed,
+and deterministic fallback proceeded afterward. The scorer input must own a
+detached read-only request snapshot as well as detached capability descriptors.
+Do not deep-freeze caller-owned objects in place; clone the state the scorer is
+allowed to observe and freeze the owned copy.
+
+## Reopened again, then closed
+
+Descriptors fixed the capability side and left the request side open.
+`Object.freeze({ ...request })` seals one level, so `context`,
+`context.state`, and `session` were still the caller's objects. A scorer
+could set `context.state.approved` and push to the session array, and both
+survived the fallback.
+
+The scorer now receives a `RoutingRequestSnapshot`: query, route, optional
+domain, `contextKeys`, session, and limit, all owned and frozen. Nothing in
+it aliases the caller.
+
+`contextKeys` lists which state keys are set and never their values. That is
+a deliberate narrowing rather than a copy. Routing only asks whether an
+entity is present, and this seam is the one most likely to become a remote
+call, so a customer email sitting in `state` should not travel to an
+embedding service because some capability declared an entity. A probe
+confirms the serialized snapshot contains `orderId` and not the address.
+
+Malformed `reasons` are refused rather than replaced. Absent still defaults,
+because that means no explanation was offered. Present and malformed means
+the scorer is wrong about its own output, and quietly substituting a
+plausible reason would fabricate an explanation in the field that exists to
+explain.
+
+Reverting `router.ts` to the previous commit fails all three regression
+tests. This time the revert was `git stash` of the whole file rather than a
+hand-edited string, after two earlier approximate reverts in this review
+cycle silently proved nothing.

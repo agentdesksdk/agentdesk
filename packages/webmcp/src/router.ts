@@ -209,6 +209,28 @@ export type ScoredDescriptor = {
 };
 
 /**
+ * The request as a scorer sees it: owned, flat, and value-free.
+ *
+ * Passing `RoutingRequest` through meant handing over `context`,
+ * `context.state`, and `session` by reference, so a scorer could write to
+ * application state and to the caller's array. A shallow freeze stopped none
+ * of that, because it only sealed the wrapper.
+ *
+ * `contextKeys` names which state keys are set and never what they hold.
+ * Routing only asks whether an entity is present, and a scorer is the one
+ * component most likely to become a network call later, so the values have
+ * no business crossing this line.
+ */
+export type RoutingRequestSnapshot = {
+  readonly query: string;
+  readonly route: string;
+  readonly domain?: string;
+  readonly contextKeys: readonly string[];
+  readonly session: readonly string[];
+  readonly limit?: number;
+};
+
+/**
  * The seam an embedding model plugs into later.
  *
  * It may be async, so a scorer that calls out to a service needs no change
@@ -219,7 +241,7 @@ export type ScoredDescriptor = {
  */
 export type CapabilityScorer = (
   candidates: readonly RoutingDescriptor[],
-  request: RoutingRequest,
+  request: RoutingRequestSnapshot,
 ) => readonly ScoredDescriptor[] | Promise<readonly ScoredDescriptor[]>;
 
 export type RoutingStrategy =
@@ -447,7 +469,7 @@ async function runScorer(
   // getter, and a getter that throws outside the guard escapes as a raw
   // rejection from a method whose type promises a structured refusal.
   try {
-    const raw = await scorer(pool.map(describe), Object.freeze({ ...request }));
+    const raw = await scorer(pool.map(describe), snapshot(request));
     if (!Array.isArray(raw)) {
       return { ok: false, reason: "the custom scorer did not return an array" };
     }
@@ -480,13 +502,23 @@ async function runScorer(
       if (score <= 0) {
         continue;
       }
+      // Absent means "no explanation given", so it defaults. Present and
+      // malformed means the scorer is wrong about its own output, and
+      // quietly substituting a plausible reason would put words in its
+      // mouth in a field whose whole job is explaining a decision.
+      if (
+        reasons !== undefined &&
+        (!Array.isArray(reasons) || reasons.some((r) => typeof r !== "string"))
+      ) {
+        return {
+          ok: false,
+          reason: `the custom scorer returned reasons for ${name} that are not an array of strings`,
+        };
+      }
       matches.push({
         capability: real,
         score,
-        reasons:
-          Array.isArray(reasons) && reasons.every((r) => typeof r === "string")
-            ? [...reasons]
-            : ["custom"],
+        reasons: reasons === undefined ? ["custom"] : [...reasons],
       });
     }
     return { ok: true, matches };
@@ -530,4 +562,28 @@ function order(matches: readonly ScoredCapability[]): ScoredCapability[] {
     (a, b) =>
       b.score - a.score || a.capability.name.localeCompare(b.capability.name),
   );
+}
+
+/** An owned, value-free view of the request. Nothing here aliases the caller. */
+function snapshot(request: RoutingRequest): RoutingRequestSnapshot {
+  const state = request.context.state;
+  const view: {
+    -readonly [K in keyof RoutingRequestSnapshot]: RoutingRequestSnapshot[K];
+  } = {
+    query: request.query,
+    route: request.context.route,
+    contextKeys: Object.freeze(
+      Object.keys(state).filter(
+        (key) => state[key] !== undefined && state[key] !== null,
+      ),
+    ),
+    session: Object.freeze([...(request.session ?? [])]),
+  };
+  if (typeof state.domain === "string") {
+    view.domain = state.domain;
+  }
+  if (request.limit !== undefined) {
+    view.limit = request.limit;
+  }
+  return Object.freeze(view);
 }

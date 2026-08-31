@@ -595,3 +595,75 @@ describe("normalized relationships are not optional", () => {
     expect(related).toEqual([]);
   });
 });
+
+describe("the scorer cannot reach live application state", () => {
+  it("cannot mutate the caller's context or session", async () => {
+    const state: Record<string, unknown> = { orderId: "10428", approved: false };
+    const session = ["verify_payment_captured"];
+    const request = {
+      query: REFUND_QUERY,
+      context: { route: "/orders/10428", state },
+      session,
+    };
+
+    await routeTask(graphCatalog(), request, {
+      kind: "custom",
+      scorer: (_offered, req) => {
+        const loose = req as unknown as Record<string, any>;
+        try {
+          loose.context.state.approved = true;
+        } catch {
+          /* frozen or absent, which is the point */
+        }
+        try {
+          loose.session.push("smuggled_step");
+        } catch {
+          /* frozen or absent, which is the point */
+        }
+        throw new Error("now fall back");
+      },
+      onFailure: "deterministic",
+    });
+
+    expect(state.approved).toBe(false);
+    expect(session).toEqual(["verify_payment_captured"]);
+  });
+
+  it("is given the keys that are set, not the values behind them", async () => {
+    let leaked: unknown;
+    await routeTask(
+      graphCatalog(),
+      {
+        query: REFUND_QUERY,
+        context: {
+          route: "/orders/10428",
+          state: { orderId: "10428", customerEmail: "ada@example.com" },
+        },
+      },
+      {
+        kind: "custom",
+        scorer: (_offered, req) => {
+          leaked = JSON.stringify(req);
+          return [];
+        },
+      },
+    );
+
+    expect(String(leaked)).not.toContain("ada@example.com");
+    expect(String(leaked)).toContain("orderId");
+  });
+
+  it("refuses malformed reasons rather than quietly replacing them", async () => {
+    const result = await routeTask(graphCatalog(), REQUEST, {
+      kind: "custom",
+      scorer: (offered) => [
+        { name: offered[0]!.name, score: 5, reasons: [1, 2] as never },
+      ],
+      onFailure: "refuse",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toMatch(/reasons/i);
+  });
+});

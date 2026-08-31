@@ -82,7 +82,7 @@ and executed under plain Node, and the design doc check passed.
 | P1 | OPEN | [A custom scorer can bypass eligibility](2026-08-31-p1-custom-scorer-bypasses-eligibility.md) |
 | P1 | RESOLVED | [An invalid routing limit bypasses the hard budget](2026-08-31-p1-routing-limit-bypasses-budget.md) |
 | P1 | RESOLVED | [Hybrid routing truncates deterministic scores before adding bonuses](2026-08-31-p1-hybrid-truncates-before-bonuses.md) |
-| P2 | OPEN | [Normalized routing relationships retain mutable aliases](2026-08-31-p2-routing-relationships-retain-mutable-aliases.md) |
+| P2 | RESOLVED | [Normalized routing relationships retain mutable aliases](2026-08-31-p2-routing-relationships-retain-mutable-aliases.md) |
 | P2 | RESOLVED | [Routing result types allow false scorer provenance](2026-08-31-p2-routing-result-allows-false-provenance.md) |
 
 Delete this directory only after every open item has either a validated fix or an explicit accepted-risk decision.

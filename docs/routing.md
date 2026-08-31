@@ -155,6 +155,23 @@ The call and the parse share one guard, because reading `score` can invoke a
 getter and a getter that throws outside the guard escapes as a raw rejection
 from a method whose type promises a structured refusal.
 
+The request is a `RoutingRequestSnapshot`, not the `RoutingRequest` the
+caller passed. It is owned, flat, and value-free. Passing the request
+through handed over `context`, `context.state`, and `session` by reference,
+and a shallow freeze sealed only the wrapper, so a scorer could write to
+application state and to the caller array.
+
+`contextKeys` names which state keys are set and never what they hold.
+Routing only asks whether an entity is present, and a scorer is the
+component most likely to become a network call later, so the values have no
+business crossing that line. A customer email in `state` is not something an
+embedding service should receive because a capability declared an entity.
+
+`reasons` is optional. Absent means no explanation was given and defaults.
+Present but not an array of strings is a refusal, because substituting a
+plausible reason would put words in the scorer mouth in the one field whose
+job is explaining a decision.
+
 A score of zero or below means not selected, matching the deterministic
 scorer, so a similarity of zero drops the capability rather than routing it
 at the bottom.

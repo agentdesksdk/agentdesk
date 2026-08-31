@@ -1,6 +1,6 @@
 # P2: normalized routing relationships retain mutable aliases
 
-Status: **OPEN**
+Status: **RESOLVED**
 
 Reviewed worktree: `crisp-grove`, commit `efb5553` (PR #12)
 

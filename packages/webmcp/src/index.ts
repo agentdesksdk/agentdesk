@@ -69,6 +69,7 @@ export {
   type CapabilityScorer,
   type RankedCapability,
   type RoutingRequest,
+  type RoutingRequestSnapshot,
   type RoutingDescriptor,
   type RoutingResult,
   type RoutingStrategy,
