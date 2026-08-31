@@ -64,7 +64,9 @@ export type WebMcpClient = {
     tool: RegisteredTool,
     input?: object | string,
     options?: { signal?: AbortSignal },
-  ) => Promise<{ ok: true; output: string } | { ok: false; reason: string }>;
+  ) => Promise<
+    { ok: true; output: string | null } | { ok: false; reason: string }
+  >;
   onToolChange: (listener: () => void) => () => void;
 };
 
@@ -203,4 +205,98 @@ export function createWebMcpClient(
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Reads a registered tool's input schema across both generations.
+ *
+ * Chrome 149 through 153, and 154's same-document tools, return the schema
+ * as a serialized JSON string; webmcp#241 replaced that with an object from
+ * 154 onward. A consumer that assumes either arm breaks on the other half of
+ * the field, and a bare `JSON.parse` on the string arm turns a malformed
+ * schema into a thrown exception in the middle of tool discovery.
+ *
+ * Both arms are judged by the same check, because a schema that is invalid
+ * as an object is invalid serialized too. Validity that depended on the
+ * transport encoding would defeat the point of normalizing the generations.
+ *
+ * Only an omitted member is absence. An explicit `null` is a value the
+ * browser sent, and reading it as omission would hide a malformed response.
+ */
+export function readInputSchema(
+  tool: Pick<RegisteredTool, "name" | "inputSchema">,
+):
+  | { ok: true; schema: object | undefined }
+  | { ok: false; reason: string } {
+  const raw = tool.inputSchema;
+  if (raw === undefined) {
+    return { ok: true, schema: undefined };
+  }
+
+  let value: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      value = JSON.parse(raw);
+    } catch (err) {
+      return {
+        ok: false,
+        reason: `${tool.name} reported an input schema string that is not JSON: ${describe(err)}`,
+      };
+    }
+  }
+
+  if (!isPlainJsonObject(value)) {
+    return {
+      ok: false,
+      reason: `${tool.name} reported an input schema that is not a JSON object`,
+    };
+  }
+  return { ok: true, schema: value };
+}
+
+/**
+ * Whether a value is a plain data object, judged without same-realm
+ * prototype identity and without trusting anything the value says about
+ * itself.
+ *
+ * A schema is data. `typeof value === "object"` also admits `Date`, `Map`,
+ * `Set`, `RegExp`, and `Error`, whose meaning lives in their prototype and
+ * which lose it on the way through JSON, so accepting them in the direct arm
+ * made a verdict depend on the transport encoding.
+ *
+ * The classification is the depth of the prototype chain. A plain object
+ * reaches `null` in one step, and one built with `Object.create(null)`
+ * reaches it in none. Everything with a constructor prototype, arrays
+ * included, needs at least two. That holds across realms, because no
+ * identity is compared.
+ *
+ * `Object.prototype.toString` was the obvious alternative and is not safe
+ * here. It reads `Symbol.toStringTag`, so a value can name itself
+ * `[object Object]`, and a throwing tag getter escapes this function's
+ * structured-result contract entirely. Nothing below reads a property of the
+ * value.
+ *
+ * The walk is guarded because a `Proxy` can throw from a `getPrototypeOf`
+ * trap. Such a value is refused rather than allowed to propagate. A proxy
+ * that lies without throwing still passes, which is the residual limit of
+ * classifying a value you did not construct.
+ */
+function isPlainJsonObject(value: unknown): value is object {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  try {
+    let depth = 0;
+    let proto: unknown = Object.getPrototypeOf(value);
+    while (proto !== null) {
+      depth += 1;
+      if (depth > 1) {
+        return false;
+      }
+      proto = Object.getPrototypeOf(proto as object);
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
