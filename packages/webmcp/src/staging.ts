@@ -458,6 +458,18 @@ export type Unreconciled = {
  * detached, deeply frozen copies, because this is the evidence a human
  * reconciles against and a caller that could edit it could rewrite what the
  * runtime says happened.
+ *
+ * In-memory, and this one does not survive a restart in the way the others
+ * do. The records themselves are reconstructible from the audit stream,
+ * which carries `execution_indeterminate` and `staged_cleanup_failed` with
+ * their record ids and detail. The artifact is not: it is a live object the
+ * adapter made, so after a process or page restart a human can still learn
+ * that a write may have landed but can no longer call `reconcile` on it.
+ *
+ * That is a real limitation of an embedded runtime with no backend, and it
+ * is the work an application has to do before this is production-stable.
+ * An adapter whose artifacts are addressable by a durable key, rather than
+ * by object identity, can rehydrate them and close the gap.
  */
 export class UnreconciledStore {
   private readonly entries: Array<{

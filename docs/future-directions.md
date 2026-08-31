@@ -92,3 +92,20 @@ realistic paths, best first:
    governance layer should not have. Not recommended.
 
 Options 2 and 3 are the credible products.
+
+## Before this is production-stable
+
+One limitation is known and accepted for the hackathon, recorded in
+`docs/reviews/2026-08-31-accepted-unreconciled-records-are-not-durable.md`.
+
+A staged commit that throws after it may have written leaves an unreconciled
+record and a retained adapter artifact. The records survive a restart if an
+application persists the audit stream, because
+`execution_indeterminate` and `staged_cleanup_failed` carry their ids. The
+artifact does not, because it is a live object held by identity, and
+`reconcile` needs it.
+
+Closing that means an adapter whose artifacts are addressable by a durable
+key: `fork` records enough to rebuild one, and `reconcile` accepts the key
+rather than the object. It is an adapter contract change plus whatever store
+the adopting application already runs, which is why it is not in the demo.
