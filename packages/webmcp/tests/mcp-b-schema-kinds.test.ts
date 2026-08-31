@@ -105,8 +105,8 @@ describe("the plain-object check cannot be spoofed or made to throw", () => {
     expect(verdict(disguised).ok).toBe(false);
   });
 
-  it("refuses rather than throwing when the class tag getter throws", () => {
-    const hostile = {};
+  it("ignores a throwing class-tag getter and accepts the plain object", () => {
+    const hostile = { type: "object" };
     Object.defineProperty(hostile, Symbol.toStringTag, {
       get() {
         throw new Error("tag getter exploded");
@@ -114,11 +114,12 @@ describe("the plain-object check cannot be spoofed or made to throw", () => {
       configurable: true,
     });
 
-    // The contract is a structured result. An exception here would escape it
-    // in the middle of tool discovery.
+    // The value is a plain object, so the answer is yes. What matters is that
+    // reaching it never reads the tag: a predicate that did would throw out
+    // of a function whose contract is a structured result.
     const result = verdict(hostile);
 
-    expect(result.ok).toBe(true);
+    expect(result).toEqual({ ok: true, schema: hostile });
   });
 
   it("refuses a Map that claims to be an Object", () => {
