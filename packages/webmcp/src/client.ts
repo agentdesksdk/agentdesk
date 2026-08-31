@@ -216,8 +216,12 @@ function describe(err: unknown): string {
  * the field, and a bare `JSON.parse` on the string arm turns a malformed
  * schema into a thrown exception in the middle of tool discovery.
  *
- * Absent is reported as absent rather than as an error, because the member
- * is optional and a tool taking no arguments legitimately omits it.
+ * Both arms are judged by the same check, because a schema that is invalid
+ * as an object is invalid serialized too. Validity that depended on the
+ * transport encoding would defeat the point of normalizing the generations.
+ *
+ * Only an omitted member is absence. An explicit `null` is a value the
+ * browser sent, and reading it as omission would hide a malformed response.
  */
 export function readInputSchema(
   tool: Pick<RegisteredTool, "name" | "inputSchema">,
@@ -225,32 +229,27 @@ export function readInputSchema(
   | { ok: true; schema: object | undefined }
   | { ok: false; reason: string } {
   const raw = tool.inputSchema;
-  if (raw === undefined || raw === null) {
+  if (raw === undefined) {
     return { ok: true, schema: undefined };
   }
-  if (typeof raw === "object") {
-    return { ok: true, schema: raw };
+
+  let value: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      value = JSON.parse(raw);
+    } catch (err) {
+      return {
+        ok: false,
+        reason: `${tool.name} reported an input schema string that is not JSON: ${describe(err)}`,
+      };
+    }
   }
-  if (typeof raw !== "string") {
+
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return {
       ok: false,
-      reason: `${tool.name} reported an input schema that is neither an object nor a string`,
+      reason: `${tool.name} reported an input schema that is not a JSON object`,
     };
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
-    return {
-      ok: false,
-      reason: `${tool.name} reported an input schema string that is not JSON: ${describe(err)}`,
-    };
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return {
-      ok: false,
-      reason: `${tool.name} reported an input schema string that is not a JSON object`,
-    };
-  }
-  return { ok: true, schema: parsed };
+  return { ok: true, schema: value };
 }

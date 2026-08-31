@@ -85,4 +85,9 @@ and executed under plain Node, and the design doc check passed.
 | P2 | RESOLVED | [Normalized routing relationships retain mutable aliases](2026-08-31-p2-routing-relationships-retain-mutable-aliases.md) |
 | P2 | RESOLVED | [Routing result types allow false scorer provenance](2026-08-31-p2-routing-result-allows-false-provenance.md) |
 
+| P2 | RESOLVED | [The object schema arm accepts arrays and erases null](2026-09-01-p2-read-input-schema-accepts-array-objects.md) |
+| P2 | RESOLVED | [The MCP-B types are installed but never form a conformance lane](2026-09-01-p2-mcp-b-types-are-not-a-conformance-lane.md) |
+| P2 | RESOLVED | [The MCP-B dependency footprint and Node floor are understated](2026-09-01-p2-mcp-b-dependency-footprint-is-understated.md) |
+| P2 | RESOLVED | [The extension message boundary forbids the request channel it needs](2026-09-01-p2-extension-message-boundary-is-overstated.md) |
+
 Delete this directory only after every open item has either a validated fix or an explicit accepted-risk decision.

@@ -50,7 +50,13 @@ export type WebMcpFeatures = {
 };
 
 /**
- * Mirrors the spec's `RegisteredTool` dictionary.
+ * AgentDesk's projection of the spec's `RegisteredTool` dictionary.
+ *
+ * A projection rather than a mirror. Members the browser sends are readable
+ * here, and members AgentDesk never constructs are optional so a caller can
+ * build a descriptor without inventing a `Window`. `window` is present
+ * because a consumer filtering by `fromOrigins` needs the owning window and
+ * should not have to cast the type away to reach it.
  *
  * `inputSchema` is a union because two generations are in the field at once.
  * webmcp#241 made it a JSON Schema object, rolling out from Chrome 154; every
@@ -68,6 +74,8 @@ export type RegisteredTool = {
   description: string;
   inputSchema?: object | string;
   origin: string;
+  /** The document that registered the tool. Every browser sends it. */
+  window?: Window;
   annotations?: {
     readOnlyHint?: boolean;
     untrustedContentHint?: boolean;
