@@ -3,6 +3,7 @@ import { defineCapability } from "../src/capability.ts";
 import { receipt } from "../src/results.ts";
 import { createAgentDeskRuntime } from "../src/runtime.ts";
 import type { Actor, HumanActor, OperationPlan } from "../src/plan.ts";
+import type { AuditEvent } from "../src/audit.ts";
 import type { StoredReceipt } from "../src/receipts.ts";
 import { createMockModelContext } from "./mock-model-context.ts";
 
@@ -115,5 +116,34 @@ describe("human-only record fields reject an agent at compile time", () => {
     expect(badReceipt).toBeDefined();
     expect(goodPlan.approvedBy?.kind).toBe("human");
     expect(goodReceipt.reviewedBy?.kind).toBe("human");
+  });
+});
+
+describe("reconciliation records reject an agent at compile time", () => {
+  it("types reconciledBy and the audit event as human", () => {
+    const agent: Actor = AGENT;
+    const human: HumanActor = { id: "operator-1", kind: "human" };
+
+    const badReceipt: Pick<StoredReceipt, "reconciledBy"> = {
+      // @ts-expect-error an agent cannot reconcile an indeterminate rollback
+      reconciledBy: agent,
+    };
+    const badEvent = {
+      kind: "rollback_reconciled",
+      capability: "set_value",
+      receiptId: "RCPT-1",
+      outcome: "compensated",
+      // @ts-expect-error the reconciler on the audit event is human-only
+      actor: agent,
+      at: 1,
+    } satisfies Extract<AuditEvent, { kind: "rollback_reconciled" }>;
+
+    const goodReceipt: Pick<StoredReceipt, "reconciledBy"> = {
+      reconciledBy: human,
+    };
+
+    expect(badReceipt).toBeDefined();
+    expect(badEvent).toBeDefined();
+    expect(goodReceipt.reconciledBy?.kind).toBe("human");
   });
 });

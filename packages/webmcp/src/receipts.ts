@@ -58,7 +58,7 @@ export type StoredReceipt = {
   rollbackFailure?: string;
   /** Who established what an indeterminate rollback actually did. */
   reconciledAt?: number;
-  reconciledBy?: Actor;
+  reconciledBy?: HumanActor;
   /**
    * Review state sits beside the receipt, never inside it. Marking
    * something reviewed does not change what occurred.
@@ -152,11 +152,17 @@ export class ReceiptStore {
    * the compensating write landed, so the receipt is spent. `untouched` means
    * they confirmed it did not, so undo is safe to attempt again.
    */
+  /**
+   * `by` is a required `HumanActor` because the caller has already parsed
+   * one. Accepting an optional `Actor` here would let an agent-authored
+   * reconciliation be constructed internally, which no runtime path does but
+   * which the type permitted.
+   */
   reconcile(
     id: string,
     outcome: ReconciliationOutcome,
     at: number,
-    by?: Actor,
+    by: HumanActor,
   ): boolean {
     return this.moveRollback(
       id,
@@ -164,7 +170,7 @@ export class ReceiptStore {
       outcome === "compensated" ? "ROLLED_BACK" : "READY",
       {
         reconciledAt: at,
-        ...(by ? { reconciledBy: structuredClone(by) } : {}),
+        reconciledBy: by,
         ...(outcome === "compensated" ? { rolledBackAt: at } : {}),
       },
     );

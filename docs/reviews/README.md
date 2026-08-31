@@ -49,5 +49,6 @@ and executed under plain Node, and the design doc check passed.
 | P1 | RESOLVED | [Stop strands an interrupted rollback in progress](2026-08-30-p1-stop-strands-rollback-in-progress.md) |
 | P1 | RESOLVED | [Recordability preflight discards the input snapshot](2026-08-31-p1-recordability-preflight-discards-input-snapshot.md) |
 | P1 | RESOLVED | [Approval rejects a valid actor without an optional name](2026-08-31-p1-approval-requires-optional-actor-name.md) |
+| P2 | RESOLVED | [Reconciler fields remain typed as generic actors](2026-08-31-p2-reconciler-fields-remain-generic-actors.md) |
 
 Delete this directory only after every open item has either a validated fix or an explicit accepted-risk decision.

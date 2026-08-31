@@ -145,7 +145,7 @@ export type AuditEvent =
       receiptId: string;
       outcome: "compensated" | "untouched";
       /** The human who checked. Required, because the claim is theirs. */
-      actor: Actor;
+      actor: HumanActor;
       at: number;
     }
   | {
