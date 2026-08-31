@@ -1,6 +1,6 @@
 # P1: a custom scorer can bypass eligibility
 
-Status: **OPEN**
+Status: **RESOLVED**
 
 Reviewed worktree: `crisp-grove`, commit `efb5553` (PR #12)
 
