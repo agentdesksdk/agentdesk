@@ -5,8 +5,8 @@ import {
   receipt,
   StagedProposalStore,
   type Capability,
-  type Change,
   type StagedProposal,
+  type StagingAdapter,
   type StagingScope,
 } from "../src/index.ts";
 
@@ -16,16 +16,69 @@ const HUMAN = { id: "operator-1", name: "Amein", kind: "human" as const };
  * A store the staged handlers fork. Small enough to reason about, and it
  * makes "did this reach live state" a single readable assertion.
  */
+type Doc = Record<string, string>;
+
 function makeStore() {
-  let live: Record<string, string> = { status: "processing" };
-  let open: Record<string, string> | null = null;
-  const handed: Array<StagedProposal & { settled: boolean }> = [];
+  let live: Doc = { status: "processing" };
+  let open: Doc | null = null;
+
+  type Artifact = { name: string; before: Doc; head: Doc; settled: boolean };
+  const artifacts: Artifact[] = [];
+
+  const adapter: StagingAdapter<Artifact> = {
+    fork(capability, write) {
+      const outermost = open === null;
+      if (open === null) {
+        open = { ...live };
+      }
+      const before = { ...open };
+      const result = write();
+      const artifact: Artifact = {
+        name: capability,
+        before,
+        head: { ...open },
+        settled: false,
+      };
+      if (outermost) {
+        open = null;
+      }
+      artifacts.push(artifact);
+      return { staged: artifact, result };
+    },
+    diff: (artifact) =>
+      Object.keys(artifact.head)
+        .filter((key) => artifact.before[key] !== artifact.head[key])
+        .map((key) => ({
+          field: key,
+          before: artifact.before[key] ?? null,
+          after: artifact.head[key],
+        })),
+    commit: (artifact) => {
+      artifact.settled = true;
+      live = { ...live, ...artifact.head };
+      return receipt({
+        entity: artifact.name,
+        changes: adapter.diff(artifact),
+        undoable: false,
+        result: { ...artifact.head },
+      });
+    },
+    release: (artifact) => {
+      artifact.settled = true;
+    },
+  };
 
   return {
-    handed,
-    /** The proposal most recently handed to the runtime. */
-    last: () => handed[handed.length - 1]!,
-    read: () => ({ ...live }),
+    adapter,
+    artifacts,
+    last: () => artifacts[artifacts.length - 1]!,
+    handed: artifacts,
+    draft: (): Doc => {
+      if (open === null) {
+        throw new Error("no fork is open");
+      }
+      return open;
+    },
     committed: () => ({ ...live }),
     scope: (<T,>(run: () => T): T => {
       const outermost = open === null;
@@ -40,46 +93,6 @@ function makeStore() {
         }
       }
     }) as StagingScope,
-    /** Stages `write` on a fork and hands back the proposal that lands it. */
-    propose(name: string, write: (draft: Record<string, string>) => void) {
-      const outermost = open === null;
-      if (open === null) {
-        open = { ...live };
-      }
-      const before = { ...open };
-      write(open);
-      const head = { ...open };
-      if (outermost) {
-        open = null;
-      }
-      const changes: Change[] = Object.keys(head)
-        .filter((key) => before[key] !== head[key])
-        .map((key) => ({
-          field: key,
-          before: before[key] ?? null,
-          after: head[key],
-        }));
-      let settled = false;
-      const proposal: StagedProposal = {
-        changes,
-        commit: () => {
-          settled = true;
-          live = { ...live, ...head };
-          return receipt({
-            entity: name,
-            changes,
-            undoable: false,
-            result: { ...head },
-          });
-        },
-        discard: () => {
-          settled = true;
-        },
-      };
-      Object.defineProperty(proposal, "settled", { get: () => settled });
-      handed.push(proposal as StagedProposal & { settled: boolean });
-      return proposal;
-    },
   };
 }
 
@@ -94,7 +107,12 @@ function stagedCapability(
     name,
     description: `Stages ${name} for approval.`,
     risk: "CONSEQUENTIAL",
-    stage: () => store.propose(name, write),
+    staging: {
+      adapter: store.adapter,
+      write: () => {
+        write(store.draft());
+      },
+    },
   });
 }
 
@@ -133,9 +151,7 @@ describe("derived evidence cannot be self-attested", () => {
         name: "stage_and_preview",
         description: "Declares both a staged run and a hand-written preview.",
         risk: "CONSEQUENTIAL",
-        stage: () => store.propose("stage_and_preview", (d) => {
-          d.status = "cancelled";
-        }),
+        staging: { adapter: store.adapter, write: () => undefined },
         previewChanges: () => [],
       } as never),
     ).toThrow(/previewChanges or approvalEvidence/);
@@ -148,9 +164,7 @@ describe("derived evidence cannot be self-attested", () => {
         name: "stage_and_execute",
         description: "Declares both a staged run and a direct handler.",
         risk: "CONSEQUENTIAL",
-        stage: () => store.propose("stage_and_execute", (d) => {
-          d.status = "cancelled";
-        }),
+        staging: { adapter: store.adapter, write: () => undefined },
         execute: () => ({ ok: true }),
       } as never),
     ).toThrow(/both stage and execute/);
@@ -174,29 +188,35 @@ describe("derived evidence cannot be self-attested", () => {
 });
 
 describe("a staged handler must be synchronous", () => {
-  it("refuses an async stage handler at definition", () => {
+  it("refuses an async staged handler at definition", () => {
     const store = makeStore();
     expect(() =>
       defineCapability({
         name: "async_stage",
         description: "Stages asynchronously.",
         risk: "CONSEQUENTIAL",
-        stage: async () =>
-          store.propose("async_stage", (d) => {
-            d.status = "cancelled";
-          }),
-      } as never),
-    ).toThrow(/async stage handler/);
+        staging: {
+          adapter: store.adapter,
+          write: async () => {
+            store.draft().status = "cancelled";
+          },
+        },
+      }),
+    ).toThrow(/async staged handler/);
   });
 
   it("refuses a plain handler that hands back a promise", async () => {
+    const store = makeStore();
     const capability = defineCapability({
       name: "thenable_stage",
       description: "Returns a promise from a non-async function.",
       risk: "CONSEQUENTIAL",
-      stage: () => Promise.resolve({ changes: [], commit: () => ({}), discard: () => {} }) as never,
+      staging: {
+        adapter: store.adapter,
+        write: () => Promise.resolve({ done: true }),
+      },
     });
-    const runtime = startRuntime([capability]);
+    const runtime = startRuntime([capability], store);
     await runtime.start();
     const result = await runtime.invoke("thenable_stage", {});
     expect(result.code).toBe("PREVIEW_UNAVAILABLE");

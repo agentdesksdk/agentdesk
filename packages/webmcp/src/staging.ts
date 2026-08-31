@@ -1,13 +1,41 @@
 import type { Change, ExecutionContext } from "./capability.ts";
 
 /**
- * A capability's proposed write, produced by running that capability's own
- * handler against a fork of application state.
+ * How an application forks, diffs, and lands its own state.
  *
- * The runtime owns the artifact from the moment it is created until it is
- * committed or discarded. Preview and commit are one execution rather than
- * two descriptions of one, so the diff a human approved and the change that
- * lands cannot disagree.
+ * One adapter per application, not one per capability. The capability author
+ * writes only the handler; the changes a human approves and the commit that
+ * lands them are both derived by the runtime from the single opaque `S` this
+ * adapter produced, so a capability cannot display one diff and perform a
+ * different write. `S` is never inspected by the runtime.
+ */
+export type StagingAdapter<S> = {
+  /**
+   * Runs `write` against a fork of live state. `previous` is the artifact of
+   * an earlier run of the same operation, so an adapter that pins a clock or
+   * a seed can reproduce it rather than drift.
+   */
+  fork: (
+    capability: string,
+    write: () => unknown,
+    previous?: S,
+  ) => { staged: S; result: unknown };
+  /** What this staged run did. The only source of a `derived` diff. */
+  diff: (staged: S) => Change[];
+  /**
+   * Lands the staged run. `restage` re-runs the same write on a fresh fork
+   * for an adapter that must re-derive against current state. Throwing
+   * refuses the commit and lands nothing.
+   */
+  commit: (staged: S, restage: () => { staged: S; result: unknown }) => unknown;
+  /** Releases a staged run that will never land. Called at most once. */
+  release: (staged: S) => void;
+};
+
+/**
+ * A capability's proposed write. Built by the runtime from one staged
+ * artifact, never assembled by a capability author, which is what entitles
+ * it to `approvalEvidence: "derived"`.
  */
 export type StagedProposal = {
   /** What the staged run did, read off the fork. */
@@ -18,19 +46,21 @@ export type StagedProposal = {
   readonly discard: () => void;
 };
 
-/**
- * Produces a proposal without touching live state.
- *
- * Synchronous by contract. A handler that suspends resumes after the fork
- * has closed, and its remaining writes would land on live state before
- * anyone approved them. `defineCapability` refuses an async function and
- * `runStage` refuses a thenable, because a check after the fact cannot undo
- * a continuation that already escaped.
- */
+/** Internal. Produced only by `buildStageHandler`. */
 export type StageHandler = (
   input: Record<string, unknown>,
   ctx: ExecutionContext,
 ) => StagedProposal;
+
+/**
+ * The handler a capability author writes. Synchronous by contract, because a
+ * handler that suspends resumes after its fork has closed and its remaining
+ * writes would reach live state before anyone approved them.
+ */
+export type StagedWrite = (
+  input: Record<string, unknown>,
+  ctx: ExecutionContext,
+) => unknown;
 
 /**
  * Runs a sequence of stagings so each derives against its predecessor's
@@ -49,34 +79,72 @@ export class StagedProposalError extends Error {
   }
 }
 
-/**
- * Calls a stage handler and refuses a result that is not a finished
- * proposal. An async handler is rejected at definition time; this catches a
- * plain function that hands back a promise anyway.
- */
-export function runStage(
-  name: string,
-  stage: StageHandler,
-  input: Record<string, unknown>,
-  ctx: ExecutionContext,
-): StagedProposal {
-  const proposal = stage(input, ctx) as StagedProposal | PromiseLike<unknown>;
-  if (proposal !== null && typeof (proposal as PromiseLike<unknown>)?.then === "function") {
+function refuseThenable(name: string, value: unknown): void {
+  if (
+    value !== null &&
+    typeof (value as PromiseLike<unknown> | null)?.then === "function"
+  ) {
+    (value as Promise<unknown>).catch?.(() => {});
     throw new StagedProposalError(
       `${name} staged asynchronously. A staged handler must finish before it returns, because its writes go to a fork that closes when it does.`,
     );
   }
-  const candidate = proposal as StagedProposal;
-  if (
-    typeof candidate?.commit !== "function" ||
-    typeof candidate?.discard !== "function" ||
-    !Array.isArray(candidate?.changes)
-  ) {
-    throw new StagedProposalError(
-      `${name} did not return a staged proposal with changes, commit, and discard.`,
-    );
-  }
-  return candidate;
+}
+
+/**
+ * Turns an application adapter and a capability's write into the staged
+ * proposal the runtime owns.
+ *
+ * The author supplies neither `changes` nor `commit`. Both are derived here
+ * from the same `staged` artifact, so the diff on the approval card and the
+ * change that lands cannot come from two different places.
+ */
+export function buildStageHandler<S>(
+  name: string,
+  adapter: StagingAdapter<S>,
+  write: StagedWrite,
+): StageHandler {
+  const stageOnce = (
+    input: Record<string, unknown>,
+    ctx: ExecutionContext,
+    previous?: S,
+  ) => {
+    const forked = adapter.fork(name, () => write(input, ctx), previous);
+    refuseThenable(name, forked?.result);
+    return forked;
+  };
+
+  return (input, ctx) => {
+    const forked = stageOnce(input, ctx);
+    const changes = adapter.diff(forked.staged);
+    if (!Array.isArray(changes)) {
+      throw new StagedProposalError(
+        `${name} staged a change the adapter could not describe.`,
+      );
+    }
+    let settled = false;
+    return {
+      changes,
+      commit: () => {
+        if (settled) {
+          throw new StagedProposalError(
+            `${name} staged a change that was already settled`,
+          );
+        }
+        settled = true;
+        return adapter.commit(forked.staged, () =>
+          stageOnce(input, ctx, forked.staged),
+        );
+      },
+      discard: () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        adapter.release(forked.staged);
+      },
+    };
+  };
 }
 
 /**

@@ -59,7 +59,6 @@ import {
   type ToolResult,
 } from "./results.ts";
 import {
-  runStage,
   StagedProposalStore,
   type StagedProposal,
   type StagingScope,
@@ -723,6 +722,24 @@ export function createAgentDeskRuntime(options: {
         capability.approvalEvidence,
       );
     }
+    // Ownership of the idempotency slot is settled before anything is
+    // staged. A replay or a refusal that staged first would leave behind a
+    // proposal that neither commits nor is discarded, because only the
+    // winner reaches the disposal paths below.
+    const claim = claimIdempotency(capability, input, idempotencyKey);
+    if (claim.kind === "refused") {
+      return claim.result;
+    }
+    if (claim.kind === "replay") {
+      return await claim.result;
+    }
+    const settle = (result: ToolResult): ToolResult => {
+      if (claim.kind === "won") {
+        claim.settle(result);
+      }
+      return result;
+    };
+
     // A staged capability has no runnable handler. On the unapproved path
     // it stages and lands in one step, so the same artifact still produces
     // both the change and the record of it.
@@ -735,12 +752,13 @@ export function createAgentDeskRuntime(options: {
         at: now(),
       });
       emit();
-      return previewUnavailable(capability.name, direct.error);
+      return settle(previewUnavailable(capability.name, direct.error));
     }
     const outcome = await executeNow(capability, input, {
       actor: invocationActor,
       signal,
       idempotencyKey,
+      claim,
       ...(direct.proposal ? { commit: direct.proposal.commit } : {}),
     });
     if (!outcome.ok) {
@@ -766,7 +784,7 @@ export function createAgentDeskRuntime(options: {
     }
     const linked = linkSignals(signal, epochController.signal);
     try {
-      const proposal = runStage(capability.name, capability.stage, input, {
+      const proposal = capability.stage(input, {
         route: context.route,
         state: context.state,
         signal: linked.signal,
@@ -839,6 +857,12 @@ export function createAgentDeskRuntime(options: {
     signal?: AbortSignal | undefined;
     idempotencyKey?: string | undefined;
     planId?: string | undefined;
+    /**
+     * An idempotency slot the caller already claimed. Present when the
+     * caller had to know it owned this execution before doing work that
+     * needs disposing, which staging does.
+     */
+    claim?: IdempotencyClaim | undefined;
     /**
      * Lands an already-staged proposal instead of calling the capability's
      * handler. A staged capability has no runnable handler, so this is the
@@ -950,46 +974,88 @@ export function createAgentDeskRuntime(options: {
     };
   }
 
+  /**
+   * Who owns this execution of an idempotency key.
+   *
+   * Resolved synchronously, before anything else happens, because staging
+   * comes after it. A duplicate that staged first and then discovered it had
+   * lost would have built a proposal nobody commits or discards.
+   */
+  type IdempotencyClaim =
+    | { kind: "none" }
+    | { kind: "won"; settle: (result: ToolResult) => void }
+    | { kind: "replay"; result: Promise<ToolResult> }
+    | { kind: "refused"; result: ToolResult };
+
+  /**
+   * Claims or joins the slot for `idempotencyKey`. Synchronous, so a
+   * duplicate arriving in the same tick sees the winner's entry rather than
+   * racing it.
+   */
+  function claimIdempotency(
+    capability: Capability,
+    input: Record<string, unknown>,
+    idempotencyKey: string | undefined,
+  ): IdempotencyClaim {
+    if (idempotencyKey === undefined) {
+      return { kind: "none" };
+    }
+    const slot = `${capability.name}:${idempotencyKey}`;
+    const fingerprint = fingerprintInput(input);
+    const previous = idempotency.get(slot);
+    if (previous) {
+      if (previous.fingerprint !== fingerprint) {
+        return {
+          kind: "refused",
+          result: idempotencyConflict(capability.name, idempotencyKey),
+        };
+      }
+      return { kind: "replay", result: previous.inFlight };
+    }
+    if (!reserveIdempotencySlot()) {
+      return {
+        kind: "refused",
+        result: idempotencyCapacity(capability.name, IDEMPOTENCY_LIMIT),
+      };
+    }
+    let resolve: (result: ToolResult) => void = () => {};
+    const entry: IdempotencyEntry = {
+      fingerprint,
+      inFlight: new Promise<ToolResult>((settled) => {
+        resolve = settled;
+      }),
+      settled: false,
+    };
+    idempotency.set(slot, entry);
+    return {
+      kind: "won",
+      settle: (result) => {
+        if (entry.settled) {
+          return;
+        }
+        entry.settled = true;
+        resolve(result);
+      },
+    };
+  }
+
   async function executeNow(
     capability: Capability,
     input: Record<string, unknown>,
     opts: ExecutionOptions,
   ): Promise<ExecutionOutcome> {
-    const { idempotencyKey } = opts;
-    if (idempotencyKey !== undefined) {
-      const slot = `${capability.name}:${idempotencyKey}`;
-      const fingerprint = fingerprintInput(input);
-      const previous = idempotency.get(slot);
-      if (previous) {
-        if (previous.fingerprint !== fingerprint) {
-          return {
-            ok: false,
-            result: idempotencyConflict(capability.name, idempotencyKey),
-          };
-        }
-        return { ok: true, value: undefined, result: await previous.inFlight };
-      }
-      if (!reserveIdempotencySlot()) {
-        return {
-          ok: false,
-          result: idempotencyCapacity(capability.name, IDEMPOTENCY_LIMIT),
-        };
-      }
-      let settle: (result: ToolResult) => void = () => {};
-      const entry: IdempotencyEntry = {
-        fingerprint,
-        inFlight: new Promise<ToolResult>((resolve) => {
-          settle = resolve;
-        }),
-        settled: false,
-      };
-      idempotency.set(slot, entry);
-      const outcome = await runExecution(capability, input, opts);
-      entry.settled = true;
-      settle(outcome.result);
-      return outcome;
+    const claim = opts.claim ?? claimIdempotency(capability, input, opts.idempotencyKey);
+    if (claim.kind === "refused") {
+      return { ok: false, result: claim.result };
     }
-    return runExecution(capability, input, opts);
+    if (claim.kind === "replay") {
+      return { ok: true, value: undefined, result: await claim.result };
+    }
+    const outcome = await runExecution(capability, input, opts);
+    if (claim.kind === "won") {
+      claim.settle(outcome.result);
+    }
+    return outcome;
   }
 
   async function runExecution(
@@ -1664,11 +1730,14 @@ export function createAgentDeskRuntime(options: {
     },
 
     rejectPlan(planId) {
-      proposals.discardPlan(planId);
+      // Claimed first. Discarding before the transition let a refused
+      // rejection destroy the artifacts an approved plan still needs, so a
+      // command that reports failure changed state anyway.
       const plan = plans.transition(planId, "DRAFT", "REJECTED");
       if (!plan) {
         return { ok: false, reason: `plan ${planId} is not awaiting approval` };
       }
+      proposals.discardPlan(planId);
       plans.resolve(planId, { resolvedAt: now() });
       audit.append({ kind: "plan_rejected", planId, at: now() });
       emit();
@@ -1702,6 +1771,10 @@ export function createAgentDeskRuntime(options: {
         claimed.expectedRevision !== undefined &&
         observedRevision !== claimed.expectedRevision
       ) {
+        // Terminal, so the staged changes can never be committed. Released
+        // here rather than left reachable, because every terminal path
+        // either commits its artifacts or disposes them.
+        proposals.discardPlan(planId);
         plans.resolve(planId, {
           status: "DRIFTED",
           resolvedAt: now(),

@@ -31,7 +31,12 @@ export type ExecutionContext = AppContext & {
 
 import type { FocusPolicy } from "./presentation.ts";
 import type { VerificationResult } from "./plan.ts";
-import type { StageHandler } from "./staging.ts";
+import {
+  buildStageHandler,
+  type StageHandler,
+  type StagingAdapter,
+  type StagedWrite,
+} from "./staging.ts";
 
 export type RiskLevel = "READ" | "WRITE" | "CONSEQUENTIAL";
 
@@ -322,21 +327,35 @@ export type DirectCapabilitySpec = CapabilitySpecBase & {
  * neither the preview callback nor the evidence label is separately
  * selectable here.
  */
-export type StagedCapabilitySpec = CapabilitySpecBase & {
-  stage: StageHandler;
+export type StagedCapabilitySpec<S = unknown> = CapabilitySpecBase & {
+  /**
+   * The application adapter and this capability's write. The author never
+   * builds the diff or the commit; the runtime derives both from the single
+   * artifact `adapter.fork` produced, which is what `derived` evidence
+   * asserts. There is no way to hand over a preview unrelated to the write.
+   */
+  staging: {
+    adapter: StagingAdapter<S>;
+    write: StagedWrite;
+  };
   execute?: undefined;
   previewChanges?: undefined;
   approvalEvidence?: undefined;
+  stage?: undefined;
 };
 
-export type CapabilitySpec = DirectCapabilitySpec | StagedCapabilitySpec;
+export type CapabilitySpec =
+  | DirectCapabilitySpec
+  | StagedCapabilitySpec<unknown>;
 
 /** `Omit` over a union, which would otherwise collapse to the shared keys. */
 export type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
   ? Omit<T, K>
   : never;
 
-export function defineCapability(spec: CapabilitySpec): Capability {
+export function defineCapability<S = unknown>(
+  spec: DirectCapabilitySpec | StagedCapabilitySpec<S>,
+): Capability {
   if (spec.description.trim() === "") {
     throw new Error("capability description must be non-empty");
   }
@@ -361,7 +380,14 @@ export function defineCapability(spec: CapabilitySpec): Capability {
 
   // A JavaScript caller can hand over an object the union rejects, so the
   // two shapes are separated again here rather than trusted from the type.
-  const staged = typeof spec.stage === "function";
+  // `S` is erased here on purpose. The runtime never inspects a staged
+  // artifact; only the adapter that produced it does.
+  const staging = (spec as { staging?: StagedCapabilitySpec<S>["staging"] })
+    .staging;
+  const staged =
+    typeof staging === "object" &&
+    staging !== null &&
+    typeof staging.write === "function";
   if (staged) {
     if (typeof spec.execute === "function") {
       throw new Error(
@@ -370,15 +396,27 @@ export function defineCapability(spec: CapabilitySpec): Capability {
     }
     if (spec.previewChanges !== undefined || spec.approvalEvidence !== undefined) {
       throw new Error(
-        `${name} declares stage alongside previewChanges or approvalEvidence. Derived evidence means the staged run is the preview; a second one could disagree with it.`,
+        `${name} declares staging alongside previewChanges or approvalEvidence. Derived evidence means the staged run is the preview; a second one could disagree with it.`,
       );
+    }
+    if ((spec as { stage?: unknown }).stage !== undefined) {
+      throw new Error(
+        `${name} supplies a stage handler directly. A staged proposal is built by the runtime from the adapter, so an author-assembled one cannot claim derived evidence.`,
+      );
+    }
+    for (const hook of ["fork", "diff", "commit", "release"] as const) {
+      if (typeof staging.adapter?.[hook] !== "function") {
+        throw new Error(
+          `${name} declares staging without a complete adapter; ${hook} is missing.`,
+        );
+      }
     }
     // Prevention, not detection. A staged async handler resumes after its
     // fork has closed, and by the time a returned promise could be
     // inspected the continuation is already scheduled against live state.
-    if (spec.stage!.constructor?.name === "AsyncFunction") {
+    if (staging.write.constructor?.name === "AsyncFunction") {
       throw new Error(
-        `${name} declares an async stage handler. Staging must finish before it returns, because its writes go to a fork that closes when it does.`,
+        `${name} declares an async staged handler. Staging must finish before it returns, because its writes go to a fork that closes when it does.`,
       );
     }
   } else {
@@ -443,7 +481,7 @@ export function defineCapability(spec: CapabilitySpec): Capability {
       : spec.execute!,
   };
   if (staged) {
-    capability.stage = spec.stage!;
+    capability.stage = buildStageHandler(name, staging.adapter, staging.write);
   }
   if (spec.domain !== undefined) {
     capability.domain = spec.domain;

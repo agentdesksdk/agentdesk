@@ -279,18 +279,27 @@ read a diff the handler produced, a diff the author wrote, or a sentence.
 
 ### Staged proposals
 
-A staged capability produces a `StagedProposal`: the changes it would make,
-a `commit` that lands them, and a `discard` that throws them away. The
-runtime owns it, keyed by the pending action's id or by a plan id and
-operation index. Nothing is keyed by business input, so two approvals of the
+A staged capability declares `staging: { adapter, write }`. The runtime calls
+`adapter.fork`, then derives the proposal from the single opaque artifact it
+returns: `changes` from `adapter.diff`, `commit` from `adapter.commit` over
+the same artifact. The author supplies neither, so a capability cannot show
+one diff and perform a different write, and supplying a `stage` handler
+directly is refused. The runtime owns the resulting proposal, keyed by the
+pending action's id or by a plan id and operation index. Nothing is keyed by business input, so two approvals of the
 same capability and input hold two artifacts and neither can consume the
 other. A repeated identical request keeps the artifact behind the preview
 already shown.
 
 Disposal covers rejection, policy denial, unavailability, an unknown
 capability, a throw during the approval checks, a failed execution, an
-expired session, `stop`, `reset`, plan rejection, plan interruption, and a
-successful commit. `defineCapability` gives a staged capability a handler
+expired session, `stop`, `reset`, plan rejection, plan drift, plan
+interruption, and a successful commit. A refused plan rejection disposes
+nothing, because the transition is claimed before the disposal rather than
+after.
+
+Idempotency is claimed before staging, not inside the execution. A replay or
+a refusal that staged first would build a proposal no path commits or
+discards, since only the winning execution reaches disposal. `defineCapability` gives a staged capability a handler
 that throws, so a lost artifact produces `STAGED_PROPOSAL_MISSING` rather
 than a write outside what the human reviewed.
 

@@ -56,7 +56,7 @@ describe("an async staged handler never reaches live state", () => {
           });
         }) as never,
       }),
-    ).toThrow(/async handler/);
+    ).toThrow(/async staged handler/);
   });
 
   it("leaves the order untouched when a handler suspends mid-stage", () => {

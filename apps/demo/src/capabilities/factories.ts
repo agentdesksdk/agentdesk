@@ -4,8 +4,14 @@ import {
   type CapabilitySpec,
   type DirectCapabilitySpec,
   type DistributiveOmit,
+  type StagedWrite,
 } from "@agentdesk/webmcp";
-import { stagedHandler, type CommitMode, type StagedExecute } from "./staged.ts";
+import {
+  setCommitMode,
+  stagingAdapter,
+  type CommitMode,
+  type StagedBranch,
+} from "./staged.ts";
 
 type FactorySpec = DistributiveOmit<CapabilitySpec, "risk" | "policy">;
 
@@ -23,24 +29,20 @@ type WriteSpec = Omit<
  * Every write stages, whatever its risk.
  *
  * A write that skips staging has no derived diff, and a plan containing one
- * shows the human a combined preview that is missing part of what will
- * happen. An unapproved write stages and commits in the same call, so the
- * uniformity costs a fork and buys a complete preview.
+ * shows the human a combined preview missing part of what will happen. An
+ * unapproved write stages and commits in the same call, so the uniformity
+ * costs a fork and buys a complete preview.
  */
 function staged(
-  spec: WriteSpec & { execute: StagedExecute; commitMode?: CommitMode },
+  spec: WriteSpec & { execute: StagedWrite; commitMode?: CommitMode },
   risk: "WRITE" | "CONSEQUENTIAL",
 ): Capability {
   const { execute, commitMode, ...rest } = spec;
-  if (execute.constructor?.name === "AsyncFunction") {
-    throw new Error(
-      `${spec.name} declares an async handler. A staged write must finish before it returns, because its writes go to a fork that closes when it does.`,
-    );
-  }
-  return defineCapability({
+  setCommitMode(spec.name, commitMode ?? "merge");
+  return defineCapability<StagedBranch>({
     ...rest,
     risk,
-    stage: stagedHandler(spec.name, execute, commitMode),
+    staging: { adapter: stagingAdapter, write: execute },
   });
 }
 
@@ -53,7 +55,7 @@ export function createReadCapability(spec: FactorySpec): Capability {
 }
 
 export function createUpdateCapability(
-  spec: WriteSpec & { execute: StagedExecute },
+  spec: WriteSpec & { execute: StagedWrite },
 ): Capability {
   return staged(spec, "WRITE");
 }
@@ -67,7 +69,7 @@ export function createStateTransitionCapability(
   spec: WriteSpec & {
     consequential?: boolean;
     commitMode?: CommitMode;
-    execute: StagedExecute;
+    execute: StagedWrite;
   },
 ): Capability {
   const { consequential, ...rest } = spec;

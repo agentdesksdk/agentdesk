@@ -26,7 +26,8 @@ export {
   StagedProposalError,
   StagedProposalStore,
   type StagedProposal,
-  type StageHandler,
+  type StagedWrite,
+  type StagingAdapter,
   type StagingScope,
 } from "./staging.ts";
 export {

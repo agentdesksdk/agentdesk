@@ -140,19 +140,25 @@ capability has no runnable handler, so an approval whose artifact is gone
 fails closed with `STAGED_PROPOSAL_MISSING` rather than running the write
 outside what was reviewed.
 
-`approvalEvidence: "derived"` is not selectable. `CapabilitySpec` is a union,
-and the staged variant that earns the label cannot also supply a preview
-callback or an evidence string:
+`approvalEvidence: "derived"` is not selectable, and neither is the proposal.
+A capability declares an application adapter and a write; the runtime builds
+the artifact and derives both the diff and the commit from it, so an author
+has nothing to fabricate:
 
 ```ts
 defineCapability({
   name: "refund_shipping",
   risk: "CONSEQUENTIAL",
-  // No execute, no previewChanges, no approvalEvidence. The staged run is
-  // the preview, and it is the change.
-  stage: (input, ctx) => stagedHandler("refund_shipping", refund)(input, ctx),
+  // No execute, no previewChanges, no approvalEvidence, no proposal. The
+  // staged run is the preview, and it is the change.
+  staging: { adapter: stagingAdapter, write: refundShipping },
 });
 ```
+
+The adapter is one per application and supplies `fork`, `diff`, `commit`, and
+`release`. A capability author cannot fabricate evidence at all. The adapter
+author still could, since those four are their code, but that is one audited
+integration point rather than per-capability code.
 
 Staging is synchronous by contract. A handler that suspends resumes after its
 fork closed, so `defineCapability` refuses an async handler, `runStage`

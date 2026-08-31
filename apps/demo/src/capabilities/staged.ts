@@ -2,9 +2,7 @@ import {
   CapabilityUnavailableError,
   unavailable,
   type Change,
-  type ExecutionContext,
-  type StagedProposal,
-  type StageHandler,
+  type StagingAdapter,
 } from "@agentdesk/webmcp";
 import {
   deriveChanges,
@@ -30,42 +28,45 @@ import type { Branch } from "../data/types.ts";
  */
 export type CommitMode = "merge" | "rederive";
 
-/** A handler that stages. Synchronous by contract, checked at definition. */
-export type StagedExecute = (
-  input: Record<string, unknown>,
-  ctx: ExecutionContext,
-) => unknown;
+/**
+ * One staged run of one capability.
+ *
+ * Opaque to the runtime, which never reads it. The changes on the approval
+ * card and the write that lands are both derived from this single object, so
+ * a capability cannot show one diff and perform another.
+ */
+export type StagedBranch = {
+  readonly capability: string;
+  readonly mode: CommitMode;
+  readonly branch: Branch;
+  /** What the handler returned, carried so the commit hands back its receipt. */
+  readonly result: unknown;
+  settled: boolean;
+};
 
 /**
- * Proposals that exist right now.
+ * Branches that exist right now.
  *
- * A proposal joins on creation and leaves on commit or discard, and the
- * runtime owns both ends, so this set is exactly the set of changes a human
- * could still approve. Rejecting an action removes its ghost because the
- * runtime discarded the artifact, not because the UI remembered to.
+ * A branch joins on fork and leaves on commit or release, and the runtime
+ * owns both ends, so this set is exactly the set of changes a human could
+ * still approve. Rejecting an action removes its ghost because the runtime
+ * released the artifact, not because the UI remembered to.
  */
-const live = new Set<DemoProposal>();
+const live = new Set<StagedBranch>();
 
 onReset(() => {
-  for (const proposal of [...live]) {
-    proposal.discard();
+  for (const staged of [...live]) {
+    staged.settled = true;
+    live.delete(staged);
   }
 });
 
-type DemoProposal = StagedProposal & {
-  readonly capability: string;
-  readonly branch: Branch;
-};
-
-/** What the open proposals would change for one entity. */
+/** What the open branches propose for one entity. */
 export function stagedChangesFor(collection: string, key: string): Change[] {
   const entity = `${collection}:${key}`;
   const changes: Change[] = [];
-  for (const proposal of live) {
-    for (const entry of deriveEntries(
-      proposal.branch.base,
-      proposal.branch.head,
-    )) {
+  for (const staged of live) {
+    for (const entry of deriveEntries(staged.branch.base, staged.branch.head)) {
       if (entry.entity === entity) {
         changes.push(entry.change);
       }
@@ -77,10 +78,10 @@ export function stagedChangesFor(collection: string, key: string): Change[] {
 /** Conflicts a commit would hit right now, for a card to show before approval. */
 export function projectedConflicts(capability: string): MergeConflict[] {
   const conflicts: MergeConflict[] = [];
-  for (const proposal of live) {
-    if (proposal.capability === capability) {
+  for (const staged of live) {
+    if (staged.capability === capability) {
       conflicts.push(
-        ...mergeBranch(proposal.branch, getCommittedState()).conflicts,
+        ...mergeBranch(staged.branch, getCommittedState()).conflicts,
       );
     }
   }
@@ -101,75 +102,74 @@ function stale(capability: string, detail: string): never {
   );
 }
 
-/**
- * Turns a write handler into a staged one.
- *
- * The handler runs against a fork, the diff is read off that fork, and the
- * same fork is what lands. The human approves the operation rather than a
- * description of it, and the two cannot drift because there is only one.
- */
-export function stagedHandler(
-  name: string,
-  execute: StagedExecute,
-  mode: CommitMode = "merge",
-): StageHandler {
-  const run = (
-    input: Record<string, unknown>,
-    ctx: ExecutionContext,
-    at?: number,
-  ) => stage(name, () => execute(input, ctx), at);
-
-  return (input, ctx) => {
-    const { result, branch } = run(input, ctx);
-    const changes = deriveChanges(branch.base, branch.head);
-    let settled = false;
-
-    const proposal: DemoProposal = {
-      capability: name,
-      branch,
-      changes,
-      commit: () => {
-        if (settled) {
-          throw new Error(`${name} staged a change that was already settled`);
-        }
-        settled = true;
-        live.delete(proposal);
-
-        if (mode === "rederive") {
-          const fresh = run(input, ctx, branch.at);
-          const rederived = deriveChanges(
-            fresh.branch.base,
-            fresh.branch.head,
-          );
-          if (JSON.stringify(rederived) !== JSON.stringify(changes)) {
-            stale(
-              name,
-              "Re-running this action against current state produces a different change than the one that was approved.",
-            );
-          }
-          land(mergeBranch(fresh.branch, getCommittedState()).state);
-          return fresh.result;
-        }
-
-        const { state, conflicts } = mergeBranch(branch, getCommittedState());
-        if (conflicts.length > 0) {
-          stale(
-            name,
-            `You changed ${conflicts
-              .map((c) => `${c.collection} ${c.key} ${c.field}`)
-              .join(", ")} after this was proposed, so approving it would apply part of the reviewed change and drop the rest.`,
-          );
-        }
-        land(state);
-        return result;
-      },
-      discard: () => {
-        settled = true;
-        live.delete(proposal);
-      },
-    };
-
-    live.add(proposal);
-    return proposal;
-  };
+function release(staged: StagedBranch): void {
+  staged.settled = true;
+  live.delete(staged);
 }
+
+const modes = new Map<string, CommitMode>();
+
+/** Declared by the capability factory when the capability is defined. */
+export function setCommitMode(capability: string, mode: CommitMode): void {
+  modes.set(capability, mode);
+}
+
+/**
+ * The one place this application forks, describes, and lands its own state.
+ *
+ * A capability author writes only a handler. It never sees the diff and never
+ * decides what commit does, so the evidence a human approves is derived here
+ * from the same branch that lands.
+ */
+export const stagingAdapter: StagingAdapter<StagedBranch> = {
+  fork(capability, write, previous) {
+    const { result, branch } = stage(capability, write, previous?.branch.at);
+    const staged: StagedBranch = {
+      capability,
+      mode: modes.get(capability) ?? "merge",
+      branch,
+      result,
+      settled: false,
+    };
+    live.add(staged);
+    return { staged, result };
+  },
+
+  diff: (staged) => deriveChanges(staged.branch.base, staged.branch.head),
+
+  commit(staged, restage) {
+    const approved = deriveChanges(staged.branch.base, staged.branch.head);
+    release(staged);
+
+    if (staged.mode === "rederive") {
+      const fresh = restage();
+      const rederived = deriveChanges(
+        fresh.staged.branch.base,
+        fresh.staged.branch.head,
+      );
+      release(fresh.staged);
+      if (JSON.stringify(rederived) !== JSON.stringify(approved)) {
+        stale(
+          staged.capability,
+          "Re-running this action against current state produces a different change than the one that was approved.",
+        );
+      }
+      land(mergeBranch(fresh.staged.branch, getCommittedState()).state);
+      return fresh.result;
+    }
+
+    const { state, conflicts } = mergeBranch(staged.branch, getCommittedState());
+    if (conflicts.length > 0) {
+      stale(
+        staged.capability,
+        `You changed ${conflicts
+          .map((c) => `${c.collection} ${c.key} ${c.field}`)
+          .join(", ")} after this was proposed, so approving it would apply part of the reviewed change and drop the rest.`,
+      );
+    }
+    land(state);
+    return staged.result;
+  },
+
+  release,
+};
