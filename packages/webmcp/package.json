@@ -51,6 +51,8 @@
     "pack:smoke": "node scripts/pack-smoke.mjs"
   },
   "devDependencies": {
+    "@mcp-b/webmcp-polyfill": "5.1.0",
+    "@mcp-b/webmcp-types": "5.1.0",
     "@types/node": "^24.3.0",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4",

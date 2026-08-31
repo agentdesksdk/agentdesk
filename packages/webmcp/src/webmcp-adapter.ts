@@ -49,12 +49,24 @@ export type WebMcpFeatures = {
   toolChangeEvent: boolean;
 };
 
-/** Mirrors the spec's `RegisteredTool` dictionary. */
+/**
+ * Mirrors the spec's `RegisteredTool` dictionary.
+ *
+ * `inputSchema` is a union because two generations are in the field at once.
+ * webmcp#241 made it a JSON Schema object, rolling out from Chrome 154; every
+ * earlier build, and 154's same-document tools, still return the serialized
+ * JSON string it replaced. Read it with `readInputSchema` rather than
+ * assuming either arm.
+ *
+ * `title` is not a safe `??` fallback. The spec defaults it to the empty
+ * string when a tool registers no title, and `""` does not fall through, so
+ * a display name is `tool.title || tool.name`.
+ */
 export type RegisteredTool = {
   name: string;
   title?: string;
   description: string;
-  inputSchema?: object;
+  inputSchema?: object | string;
   origin: string;
   annotations?: {
     readOnlyHint?: boolean;
@@ -65,11 +77,16 @@ export type RegisteredTool = {
 export type ModelContextLike = EventTarget & {
   registerTool: RegisterToolFn;
   getTools?: (options?: { fromOrigins?: string[] }) => Promise<RegisteredTool[]>;
+  /**
+   * A Chromium extension rather than a member of the standard
+   * `ModelContext`, so it is feature-detected everywhere it is used. It
+   * resolves `null` when a tool produces no textual output.
+   */
   executeTool?: (
     tool: RegisteredTool,
     inputObject?: object | string,
     options?: { signal?: AbortSignal },
-  ) => Promise<string>;
+  ) => Promise<string | null>;
 };
 
 type ModelContextHost = {

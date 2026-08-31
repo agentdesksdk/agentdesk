@@ -64,7 +64,9 @@ export type WebMcpClient = {
     tool: RegisteredTool,
     input?: object | string,
     options?: { signal?: AbortSignal },
-  ) => Promise<{ ok: true; output: string } | { ok: false; reason: string }>;
+  ) => Promise<
+    { ok: true; output: string | null } | { ok: false; reason: string }
+  >;
   onToolChange: (listener: () => void) => () => void;
 };
 
@@ -203,4 +205,52 @@ export function createWebMcpClient(
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Reads a registered tool's input schema across both generations.
+ *
+ * Chrome 149 through 153, and 154's same-document tools, return the schema
+ * as a serialized JSON string; webmcp#241 replaced that with an object from
+ * 154 onward. A consumer that assumes either arm breaks on the other half of
+ * the field, and a bare `JSON.parse` on the string arm turns a malformed
+ * schema into a thrown exception in the middle of tool discovery.
+ *
+ * Absent is reported as absent rather than as an error, because the member
+ * is optional and a tool taking no arguments legitimately omits it.
+ */
+export function readInputSchema(
+  tool: Pick<RegisteredTool, "name" | "inputSchema">,
+):
+  | { ok: true; schema: object | undefined }
+  | { ok: false; reason: string } {
+  const raw = tool.inputSchema;
+  if (raw === undefined || raw === null) {
+    return { ok: true, schema: undefined };
+  }
+  if (typeof raw === "object") {
+    return { ok: true, schema: raw };
+  }
+  if (typeof raw !== "string") {
+    return {
+      ok: false,
+      reason: `${tool.name} reported an input schema that is neither an object nor a string`,
+    };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `${tool.name} reported an input schema string that is not JSON: ${describe(err)}`,
+    };
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return {
+      ok: false,
+      reason: `${tool.name} reported an input schema string that is not a JSON object`,
+    };
+  }
+  return { ok: true, schema: parsed };
 }

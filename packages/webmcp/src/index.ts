@@ -100,6 +100,7 @@ export {
 } from "./webmcp-adapter.ts";
 export {
   createWebMcpClient,
+  readInputSchema,
   type InputEncoding,
   type NegotiationRequest,
   type WebMcpClient,
