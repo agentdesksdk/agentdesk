@@ -51,4 +51,10 @@ and executed under plain Node, and the design doc check passed.
 | P1 | RESOLVED | [Approval rejects a valid actor without an optional name](2026-08-31-p1-approval-requires-optional-actor-name.md) |
 | P2 | RESOLVED | [Reconciler fields remain typed as generic actors](2026-08-31-p2-reconciler-fields-remain-generic-actors.md) |
 
+| P1 | RESOLVED | [An async dry run writes live state before approval](2026-08-31-p1-async-dry-run-writes-live-state-before-approval.md) |
+| P1 | RESOLVED | [The merge drops row deletion and array removal](2026-08-31-p1-merge-drops-row-and-array-removals.md) |
+| P1 | RESOLVED | [Staged proposals are not bound to approval lifecycle](2026-08-31-p1-staged-proposal-is-not-bound-to-approval-lifecycle.md) |
+| P1 | RESOLVED | [Dependent plan previews use the wrong base](2026-08-31-p1-dependent-plan-previews-use-the-wrong-base.md) |
+| P1 | RESOLVED | [Derived approval evidence is self-attested](2026-08-31-p1-derived-evidence-is-self-attested.md) |
+
 Delete this directory only after every open item has either a validated fix or an explicit accepted-risk decision.
