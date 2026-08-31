@@ -256,16 +256,107 @@ denying while the action sits pending blocks it.
 ### Approval evidence is an explicit choice
 
 Every consequential capability declares what the human sees before
-approving. `previewChanges` implies `approvalEvidence: "diff"`. A
-capability with no enumerable change set must opt in to
-`approvalEvidence: "summary"` by hand. `defineCapability` throws when a
+approving, and the three levels are ordered by how much that approval is
+worth.
+
+`derived` is not selectable. `CapabilitySpec` is a union of
+`DirectCapabilitySpec` and `StagedCapabilitySpec`; only the staged variant
+reaches the label, and it forbids `execute`, `previewChanges`, and
+`approvalEvidence`, so the stronger claim cannot be paired with an unrelated
+preview callback. `defineCapability` also refuses the string from a
+JavaScript caller that supplies it without a `stage` handler.
+
+`diff` requires `previewChanges` and is an author's enumeration, which can
+drift from what `execute` does. A capability with no enumerable change set
+must opt in to `summary` by hand. `defineCapability` throws when a
 consequential capability declares neither, so a missing preview can never
 quietly degrade into an empty diff, which is the failure the contract
 exists to prevent.
 
 The chosen mode rides on the `APPROVAL_REQUIRED` payload as
 `approvalEvidence`, so a caller can tell whether "approved" meant a human
-read a field-level diff or only a sentence.
+read a diff the handler produced, a diff the author wrote, or a sentence.
+
+### Staged proposals
+
+A staged capability declares `staging: { operation }`, a name and nothing
+else. The adapter is bound once at `createAgentDeskRuntime` and owns the
+operations as well as the artifact, so a capability supplies no executable
+code and cannot reach live state outside the fork. `start` refuses a
+capability naming an operation the adapter does not own. The runtime calls
+`adapter.fork`, then derives the proposal from the single opaque
+artifact it returns: `changes` from `adapter.diff`, `commit` from `adapter.commit` over
+the same artifact. The author supplies neither, so a capability cannot show
+one diff and perform a different write, and supplying a `stage` handler
+directly is refused, as is a capability that supplies its own adapter. The
+runtime owns the resulting proposal, keyed by the pending action's id or by a
+plan id and operation index. Once `fork` has produced an artifact, every path
+that does not reach a successful commit releases it exactly once, including a
+throwing `diff`, a malformed diff, a suspended write, and a throwing
+`commit`; a failing `release` never replaces the error that caused it, and is
+recorded as a cleanup failure that keeps the artifact listed for a human,
+because invoking a hook that throws disposes nothing.
+
+A commit that throws is indeterminate rather than failed. The exception says
+the adapter did not return, not that nothing was written, so the approval
+resolves `INDETERMINATE`, the artifact is retained rather than released, and
+the approved diff stays available through `listUnreconciled` until a human
+records what happened with `reconcile`. A plan reports the same fact the same
+way: the operation and the plan both resolve `INDETERMINATE`, the record
+carries the plan id and the operation index, and later operations are skipped
+rather than written on top of a change nobody can confirm.
+
+All three entry points report an unknown commit the same way. A direct
+execution returns `EXECUTION_INDETERMINATE` with the record id and the
+approved changes, and a later invocation of the same capability and input is
+refused while that record is open, because a repeat could apply a change that
+already landed. An indeterminate plan emits `plan_indeterminate` rather than
+`plan_failed`, so a consumer reading the discriminant is not told the opposite
+of the plan's terminal state.
+
+Derived evidence is cloned and frozen at the staging boundary, before any
+commit runs, so a diff that cannot become durable evidence is refused rather
+than discovered after a write may have landed. Recording an unknown outcome
+cannot itself throw.
+
+`reconcile` is an adapter boundary, not a bookkeeping call. It hands the
+retained artifact back with a `StagedResolution` of `commit_applied`,
+`commit_not_applied`, or `cleanup_disposed`, parsed and checked against the
+record's own kind first, so a cleanup resolution cannot settle an unknown
+commit. Only the adapter's successful return settles the record. A throwing recovery leaves the record and its evidence in
+place. Reset does not clear these records, because a reset cannot close an
+artifact still open in the application and deleting the record would lose the
+only thing that could find it. The evidence itself is cloned and deep-frozen
+at the store boundary, so a caller cannot rewrite what the runtime says
+happened. `StagedCommitRefused` and
+`CapabilityUnavailableError` are the two ways an adapter states that nothing
+was dispatched, and both stay ordinary refusals. Nothing is keyed by business input, so two approvals of the
+same capability and input hold two artifacts and neither can consume the
+other. A repeated identical request keeps the artifact behind the preview
+already shown.
+
+Disposal covers rejection, policy denial, unavailability, an unknown
+capability, a throw during the approval checks, a failed execution, an
+expired session, `stop`, `reset`, plan rejection, plan drift, plan
+interruption, and a successful commit. A refused plan rejection disposes
+nothing, because the transition is claimed before the disposal rather than
+after.
+
+Idempotency is claimed before staging, not inside the execution. A replay or
+a refusal that staged first would build a proposal no path commits or
+discards, since only the winning execution reaches disposal. `defineCapability` gives a staged capability a handler
+that throws, so a lost artifact produces `STAGED_PROPOSAL_MISSING` rather
+than a write outside what the human reviewed.
+
+Staging is synchronous by contract, because a handler that suspends resumes
+after its fork has closed. `defineCapability` refuses an `AsyncFunction`,
+`runStage` refuses a returned thenable, and a host store can refuse later
+writes once a staged handler has escaped.
+
+Plan preparation runs every staging inside one `adapter.scope`, so each
+operation derives against its predecessor's staged head. Commit consumes the
+same artifacts by index and refuses the whole plan if any is missing, rather
+than landing an earlier operation and failing a later one.
 
 A capability that declares `previewChanges` and throws is refused with
 `PREVIEW_UNAVAILABLE` instead of being queued, because approving blind is
@@ -275,19 +366,23 @@ worse than failing. A WRITE with a broken preview still executes.
 
 Two distinct artifacts, deliberately not merged:
 
-- **Preview** (`previewChanges`) is evaluated before execution and answers
-  "what would this do". It rides on `APPROVAL_REQUIRED` as `will_change`
-  and renders as a diff on the approval card. It is advisory; a throwing
-  preview is logged and the approval proceeds without one.
+- **Preview** (`previewChanges`, or the changes on a staged proposal) is
+  evaluated before execution and answers "what would this do". It rides on
+  `APPROVAL_REQUIRED` as `will_change` and renders as a diff on the approval
+  card. At `diff` level it is advisory, and a throwing preview is logged
+  while the approval proceeds without one. At `derived` level it is evidence,
+  because the run that produced it is the run that will land.
 - **Receipt** (the `receipt()` result helper) is produced by the handler
   and answers "what did this actually do". It is attached to the tool
   result, the `execution_completed` audit event, and the resolved approval
   record, so `get_action_status` can serve it later.
 
 The receipt is authoritative because only the handler observed both states.
-The preview can be wrong if state changes between rendering and approval,
-which is exactly why approval re-checks availability and input before
-executing.
+An author-written preview can also be wrong about its own operation, which is
+what `derived` removes. Either way a preview can go stale if state changes
+between rendering and approval, which is why approval re-checks availability
+and input before executing, and why a staged commit refuses when the document
+moved under a reviewed change.
 
 ## Plans, verification, and provenance
 

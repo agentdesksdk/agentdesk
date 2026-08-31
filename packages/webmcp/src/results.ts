@@ -9,7 +9,8 @@ export type ToolCode =
   | "IDEMPOTENCY_CONFLICT"
   | "IDEMPOTENCY_CAPACITY"
   | "PREVIEW_UNAVAILABLE"
-  | "EXECUTION_CANCELLED";
+  | "EXECUTION_CANCELLED"
+  | "EXECUTION_INDETERMINATE";
 
 export type ToolResult = {
   content: Array<{ type: string; text: string }>;
@@ -74,7 +75,7 @@ export function approvalRequired(
   risk: RiskLevel,
   summary: string,
   preview: Change[] = [],
-  approvalEvidence: "diff" | "summary" = "summary",
+  approvalEvidence: "derived" | "diff" | "summary" = "summary",
 ): ToolResult {
   const data: Record<string, unknown> = {
     status: "APPROVAL_REQUIRED",
@@ -215,6 +216,31 @@ export function idempotencyCapacity(
       next: "Retry once earlier work settles, or call without an idempotency_key to execute without deduplication.",
     },
     true,
+  );
+}
+
+/**
+ * A write whose outcome nobody can establish. Not an error, because an error
+ * invites a retry, and a retry here can apply the change a second time.
+ */
+export function executionIndeterminate(
+  capability: string,
+  recordId: string,
+  detail: string,
+  changes: readonly Change[],
+): ToolResult {
+  return coded(
+    "EXECUTION_INDETERMINATE",
+    {
+      status: "INDETERMINATE",
+      code: "EXECUTION_INDETERMINATE",
+      capability,
+      record_id: recordId,
+      detail,
+      changes,
+      hint: "The write may or may not have landed. Do not retry. Check the application, then have a human reconcile this record.",
+    },
+    false,
   );
 }
 

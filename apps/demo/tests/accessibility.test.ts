@@ -6,6 +6,7 @@ import {
   type PresentationEvent,
 } from "@agentdesk/webmcp";
 import { capabilities } from "../src/capabilities/index.ts";
+import { stagingAdapter } from "../src/capabilities/staged.ts";
 import {
   reviewedAnnouncement,
   rollbackRefusedAnnouncement,
@@ -24,6 +25,7 @@ async function startRuntime() {
   const runtime = createAgentDeskRuntime({
     capabilities,
     registerTool: async () => {},
+    staging: stagingAdapter,
     actor: { id: "human-7", name: "Amein", kind: "human" },
   });
   await runtime.start();

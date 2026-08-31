@@ -9,6 +9,9 @@ export {
   type Capability,
   type CapabilityName,
   type CapabilitySpec,
+  type DirectCapabilitySpec,
+  type DistributiveOmit,
+  type StagedCapabilitySpec,
   type Change,
   type ExecutionContext,
   type InputSchema,
@@ -19,6 +22,16 @@ export {
   type Unavailability,
 } from "./capability.ts";
 export { CapabilityCatalog } from "./catalog.ts";
+export {
+  StagedCommitIndeterminate,
+  StagedCommitRefused,
+  StagedProposalError,
+  StagedProposalStore,
+  type StagedProposal,
+  type StagedResolution,
+  type StagingAdapter,
+  type Unreconciled,
+} from "./staging.ts";
 export {
   highestRisk,
   isHumanActor,
@@ -112,6 +125,7 @@ export {
   executionCancelled,
   idempotencyCapacity,
   idempotencyConflict,
+  isReceiptEnvelope,
   policyDenied,
   previewUnavailable,
   receipt,

@@ -13,5 +13,5 @@
     "allowImportingTsExtensions": true,
     "types": ["vitest/globals", "node", "webmcp-types"]
   },
-  "include": ["src", "tests"]
+  "include": ["src", "tests", "examples"]
 }

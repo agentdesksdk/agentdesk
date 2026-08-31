@@ -134,6 +134,53 @@ export type AuditEvent =
       at: number;
     }
   | {
+      kind: "staged_reconciled";
+      capability: string;
+      recordId: string;
+      resolution: "commit_applied" | "commit_not_applied" | "cleanup_disposed";
+      /** Only a human can go and find out what happened. */
+      actor: HumanActor;
+      at: number;
+    }
+  | {
+      /**
+       * An operation's result became unknown. Distinct from `plan_failed`,
+       * because a consumer that reads this as a failure will offer a retry
+       * that can apply the change twice.
+       */
+      kind: "plan_indeterminate";
+      planId: string;
+      outcomes: Array<{
+        capability: string;
+        status: string;
+        verification: string;
+      }>;
+      at: number;
+    }
+  | {
+      kind: "staged_reconcile_failed";
+      capability: string;
+      recordId: string;
+      detail: string;
+      at: number;
+    }
+  | {
+      kind: "staged_cleanup_failed";
+      capability: string;
+      recordId: string;
+      detail: string;
+      at: number;
+    }
+  | {
+      kind: "execution_indeterminate";
+      capability: string;
+      executionId: string;
+      recordId: string;
+      detail: string;
+      actor?: Actor;
+      at: number;
+    }
+  | {
       kind: "rollback_indeterminate";
       capability: string;
       receiptId: string;

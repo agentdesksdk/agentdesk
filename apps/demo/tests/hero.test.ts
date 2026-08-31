@@ -5,6 +5,7 @@ import {
   type ToolResult,
 } from "@agentdesk/webmcp";
 import { capabilities } from "../src/capabilities/index.ts";
+import { stagingAdapter } from "../src/capabilities/staged.ts";
 import { getState, resetStore } from "../src/data/store.ts";
 
 function mockModel() {
@@ -64,6 +65,7 @@ describe("hero scenario", () => {
     const runtime = createAgentDeskRuntime({
       capabilities,
       registerTool: model.registerTool,
+      staging: stagingAdapter,
     });
     await runtime.start();
     expect(model.tools.size).toBe(4);
@@ -87,6 +89,7 @@ describe("hero scenario", () => {
     const runtime = createAgentDeskRuntime({
       capabilities,
       registerTool: model.registerTool,
+      staging: stagingAdapter,
     });
     await runtime.start();
     await model.execute("find_capabilities", { query: HERO_QUERY });
@@ -152,6 +155,7 @@ describe("hero scenario", () => {
     const runtime = createAgentDeskRuntime({
       capabilities,
       registerTool: model.registerTool,
+      staging: stagingAdapter,
     });
     await runtime.start();
     await runtime.invoke("refund_shipping", { order_id: "10428" });
@@ -176,6 +180,7 @@ describe("hero scenario", () => {
     const flat = createAgentDeskRuntime({
       capabilities,
       registerTool: flatModel.registerTool,
+      staging: stagingAdapter,
       exposure: "flat",
     });
     await flat.start();
@@ -189,6 +194,7 @@ describe("hero scenario", () => {
     const routed = createAgentDeskRuntime({
       capabilities,
       registerTool: routedModel.registerTool,
+      staging: stagingAdapter,
     });
     await routed.start();
     const viaInvoke = await routedModel.execute("invoke_capability", {

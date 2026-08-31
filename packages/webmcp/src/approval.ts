@@ -25,6 +25,18 @@ export type ActionRecord =
   | { status: "REJECTED"; action: PendingAction; resolvedAt: number }
   | { status: "FAILED"; action: PendingAction; error: string; resolvedAt: number }
   | {
+      /**
+       * The commit threw after it may already have written. Nothing here
+       * says the change did not land, which is exactly why it is not
+       * FAILED, and the approved diff is retained for reconciliation.
+       */
+      status: "INDETERMINATE";
+      action: PendingAction;
+      detail: string;
+      recordId: string;
+      resolvedAt: number;
+    }
+  | {
       status: "FAILED_UNAVAILABLE";
       action: PendingAction;
       reasonCode: string;

@@ -243,6 +243,54 @@ function collapse(events: readonly AuditEvent[]): Rendered[] {
           meta: event.reason,
         });
         break;
+      case "plan_indeterminate":
+        out.push({
+          key,
+          at: event.at,
+          head: "Plan outcome unknown",
+          cap: event.planId,
+          meta: `${
+            event.outcomes.find((o) => o.status === "INDETERMINATE")
+              ?.capability ?? "an operation"
+          } may or may not have landed; reconcile before retrying`,
+        });
+        break;
+      case "execution_indeterminate":
+        out.push({
+          key,
+          at: event.at,
+          head: "Outcome unknown",
+          cap: event.capability,
+          meta: `${event.detail} · ${event.recordId} awaits reconciliation`,
+        });
+        break;
+      case "staged_cleanup_failed":
+        out.push({
+          key,
+          at: event.at,
+          head: "Cleanup failed",
+          cap: event.capability,
+          meta: `${event.detail} · ${event.recordId} left open`,
+        });
+        break;
+      case "staged_reconciled":
+        out.push({
+          key,
+          at: event.at,
+          head: "Reconciled",
+          cap: event.capability,
+          meta: `${event.resolution} · ${event.recordId} closed by ${event.actor.name ?? event.actor.id}`,
+        });
+        break;
+      case "staged_reconcile_failed":
+        out.push({
+          key,
+          at: event.at,
+          head: "Reconciliation failed",
+          cap: event.capability,
+          meta: `${event.detail} · ${event.recordId} still open`,
+        });
+        break;
       // A new audit kind has to get a case above; this stops it compiling
       // rather than letting it vanish from the panel.
       default: {

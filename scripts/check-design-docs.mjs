@@ -19,6 +19,54 @@ const ANCHORED_DIRS = [
 const ANCHOR_BLOCK = /<!--\s*code-anchors\s*\n([\s\S]*?)-->/g;
 
 /**
+ * Onboarding examples the compiler owns.
+ *
+ * The README taught `staging: { adapter, write }` for a release after the
+ * runtime started rejecting it, because prose can describe an API that no
+ * longer exists. Each entry names a real source file that `pnpm typecheck`
+ * compiles, and the region between its markers has to appear in the document
+ * verbatim.
+ */
+const COMPILED_EXAMPLES = [
+  {
+    doc: "README.md",
+    source: join(root, "packages", "webmcp", "examples", "staged-capability.ts"),
+    region: "readme",
+    why: "the staged-capability example must be the shape the runtime accepts",
+  },
+];
+
+function checkCompiledExamples() {
+  const failures = [];
+  for (const { doc, source, region, why } of COMPILED_EXAMPLES) {
+    if (!existsSync(source)) {
+      failures.push(`${doc}: missing compiled example ${source} (${why})`);
+      continue;
+    }
+    // Carriage returns are stripped first, because a CRLF checkout must not
+    // fail a check that is about the text.
+    const lf = (value) => value.replaceAll("\r", "");
+    const text = lf(readFileSync(source, "utf8"));
+    const open = `// #region ${region}
+`;
+    const start = text.indexOf(open);
+    const end = text.indexOf(`// #endregion ${region}`);
+    if (start === -1 || end === -1) {
+      failures.push(`${source}: no #region ${region} markers`);
+      continue;
+    }
+    const snippet = text.slice(start + open.length, end).trimEnd();
+    if (!lf(readFileSync(join(root, doc), "utf8")).includes(snippet)) {
+      failures.push(
+        `${doc}: the ${region} example has drifted from ${source} (${why})`,
+      );
+    }
+  }
+  return failures;
+}
+
+
+/**
  * Each row is one claim a design document has to keep making, or one stale
  * claim it must never make again. The review that produced this table cited
  * three code locations that had already moved, which is why anchors below
@@ -139,6 +187,14 @@ if (anchorCount === 0) {
 if (failures.length > 0) {
   console.error(`design doc check FAILED (${failures.length})`);
   for (const f of failures) console.error(`  ${f}`);
+  process.exit(1);
+}
+
+const exampleFailures = checkCompiledExamples();
+if (exampleFailures.length > 0) {
+  for (const failure of exampleFailures) {
+    console.error(`FAIL ${failure}`);
+  }
   process.exit(1);
 }
 

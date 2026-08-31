@@ -5,7 +5,7 @@ import {
   unavailable,
   type Capability,
 } from "@agentdesk/webmcp";
-import { getState, mutate } from "../data/store.ts";
+import { getState, mutate, nowIso } from "../data/store.ts";
 import { orderTotal } from "../data/types.ts";
 import {
   createReadCapability,
@@ -378,26 +378,6 @@ export const orderCapabilities: Capability[] = [
     },
     describeApproval: (input) =>
       `Cancel order #${String(input.order_id)}. Inventory is released and the invoice is voided.`,
-    previewChanges: (input) => {
-      const id = String(input.order_id ?? "").replace(/^#/, "");
-      const order = getState().orders.find((o) => o.id === id);
-      if (!order) {
-        return [];
-      }
-      const invoice = getState().invoices.find((inv) => inv.orderId === order.id);
-      return [
-        { field: `Order #${order.id} status`, before: order.status, after: "cancelled" },
-        ...(invoice
-          ? [
-              {
-                field: `Invoice ${invoice.id} status`,
-                before: invoice.status,
-                after: "void",
-              },
-            ]
-          : []),
-      ];
-    },
     execute: (input) => {
       const order = requireOrder(input);
       if (order.status === "shipped" || order.status === "delivered") {
@@ -463,7 +443,7 @@ export const orderCapabilities: Capability[] = [
         draft.orders.push({
           ...order,
           id: newId,
-          placedAt: new Date().toISOString(),
+          placedAt: nowIso(),
           status: "processing",
           shippingRefunded: false,
           carrier: "unassigned",
