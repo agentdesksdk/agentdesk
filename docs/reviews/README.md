@@ -70,5 +70,10 @@ and executed under plain Node, and the design doc check passed.
 | P1 | RESOLVED | [Reconcile drops the record without settling the artifact](2026-08-31-p1-reconcile-drops-record-without-settling-artifact.md) |
 | P1 | RESOLVED | [Unreconciled evidence is mutable through the public API](2026-08-31-p1-unreconciled-evidence-is-mutable.md) |
 | P2 | RESOLVED | [The staged reconciler event is typed as a generic actor](2026-08-31-p2-staged-reconciler-event-is-generic-actor.md) |
+| P1 | RESOLVED | [A direct staged write can repeat an indeterminate commit](2026-08-31-p1-direct-staged-write-can-repeat-indeterminate-commit.md) |
+| P1 | RESOLVED | [Uncloneable indeterminate evidence loses the write record](2026-08-31-p1-uncloneable-indeterminate-evidence-loses-write.md) |
+| P1 | RESOLVED | [Reconciliation accepts a contradictory resolution](2026-08-31-p1-reconcile-accepts-contradictory-resolution.md) |
+| P1 | RESOLVED | [The audit and UI call an indeterminate plan failed](2026-08-31-p1-indeterminate-plan-audit-says-failed.md) |
+| P2 | RESOLVED | [Start does not validate the required reconciliation hook](2026-08-31-p2-start-does-not-validate-reconcile-hook.md) |
 
 Delete this directory only after every open item has either a validated fix or an explicit accepted-risk decision.
