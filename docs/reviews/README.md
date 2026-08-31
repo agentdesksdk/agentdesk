@@ -2,10 +2,10 @@
 
 Review target: AgentDesk SDK and Meridian Ops demo
 
-Validated against commits `6a1745e`, `812e5b9`, `2f1f332`, `2bc6f6a`, and
-`d7a4911`.
+Validated against commits `6a1745e`, `812e5b9`, `2f1f332`, `2bc6f6a`,
+`d7a4911`, and `0c4f2fa`.
 
-Four of those five are pre-merge branch commits and are not reachable from
+Five of those six are pre-merge branch commits and are not reachable from
 `main`, because their pull requests were squash-merged or their branch is
 still open. They are recorded here so the findings below stay resolvable
 after the branches are pruned.
@@ -17,6 +17,7 @@ after the branches are pruned.
 | `2f1f332` | no | `81bc7af` (#5) |
 | `2bc6f6a` | no | unmerged on `fix/acting-identity` |
 | `d7a4911` | no | unmerged on `fix/acting-identity` |
+| `0c4f2fa` | no | unmerged on `fix/staged-proposals` (#11) |
 
 Current gates on `bf079ca`: 368 tests passed across 241 SDK, 4 P0, and 123 demo, all three TypeScript projects typechecked, SDK and both applications built, the packed SDK imported and executed under plain Node, and the design doc check passed at 32 claims and 28 anchors.
 
@@ -56,5 +57,8 @@ and executed under plain Node, and the design doc check passed.
 | P1 | RESOLVED | [Staged proposals are not bound to approval lifecycle](2026-08-31-p1-staged-proposal-is-not-bound-to-approval-lifecycle.md) |
 | P1 | RESOLVED | [Dependent plan previews use the wrong base](2026-08-31-p1-dependent-plan-previews-use-the-wrong-base.md) |
 | P1 | RESOLVED | [Derived approval evidence is self-attested](2026-08-31-p1-derived-evidence-is-self-attested.md) |
+| P1 | RESOLVED | [Staged idempotency replay leaks a proposal](2026-08-31-p1-staged-idempotency-replay-leaks-proposal.md) |
+| P1 | RESOLVED | [Invalid plan rejection destroys approved staged work](2026-08-31-p1-invalid-plan-rejection-discards-proposal.md) |
+| P1 | RESOLVED | [Revision drift leaves staged proposals alive](2026-08-31-p1-plan-drift-leaks-staged-proposal.md) |
 
 Delete this directory only after every open item has either a validated fix or an explicit accepted-risk decision.
