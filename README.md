@@ -113,29 +113,77 @@ There is deliberately no simulated cursor. Every motion in guided mode
 reflects state the agent actually touched, rather than pantomiming an
 input device it never used.
 
-## Verifiable changes, not just results
+## The human approves the operation, not a description of it
 
-A consequential capability declares what it *would* change before it runs,
-and returns application-authored evidence of what it *did* change:
+An author-written preview is a second description of an operation, and two
+descriptions drift. If they drift, the human consented to something that did
+not happen the way it was described, which is the failure this runtime exists
+to prevent.
 
-```ts
-previewChanges: () => [
-  { field: "Order #10428 shipping refunded", before: false, after: true },
-  { field: "Invoice INV-3021 status", before: "due", after: "partially_refunded" },
-],
-execute: () => receipt({
-  entity: "Order #10428",
-  changes: [...],
-  undoable: false,
-  result: { order_id: "10428", shipping_refunded: true, amount: 18 },
-}),
+So a capability that writes does not describe its change. It declares `stage`
+instead of `execute`, runs on a fork of application state, and the diff is
+read off that fork:
+
+```text
+agent calls refund_shipping
+  → the capability stages on a fork; live state is untouched
+  → diff(fork) → will_change on APPROVAL_REQUIRED, ghosted in the UI
+  → human approves → the runtime commits that same fork
 ```
 
-The preview rides on the `APPROVAL_REQUIRED` response as `will_change` and
-renders as a diff on the approval card, so the human authorizes a specific
-change rather than a sentence. The receipt rides on the completed tool
-result, the audit timeline, and `get_action_status`, so the agent and the
-human can both verify the outcome afterward without re-reading state.
+The runtime owns the proposal from the moment it is created until it is
+committed or discarded, and disposes it on rejection, denial, unavailability,
+reset, stop, a failed commit, and a successful one. It is keyed by the
+pending action's id, or by a plan id and operation index, never by business
+input, so two approvals never share or overwrite an artifact. A staged
+capability has no runnable handler, so an approval whose artifact is gone
+fails closed with `STAGED_PROPOSAL_MISSING` rather than running the write
+outside what was reviewed.
+
+`approvalEvidence: "derived"` is not selectable. `CapabilitySpec` is a union,
+and the staged variant that earns the label cannot also supply a preview
+callback or an evidence string:
+
+```ts
+defineCapability({
+  name: "refund_shipping",
+  risk: "CONSEQUENTIAL",
+  // No execute, no previewChanges, no approvalEvidence. The staged run is
+  // the preview, and it is the change.
+  stage: (input, ctx) => stagedHandler("refund_shipping", refund)(input, ctx),
+});
+```
+
+Staging is synchronous by contract. A handler that suspends resumes after its
+fork closed, so `defineCapability` refuses an async handler, `runStage`
+refuses a returned promise, and the demo store refuses every later write once
+a staged handler has suspended.
+
+Forking is the application's job, since only it knows its data layer. The SDK
+owns the artifact's identity and lifecycle and stays out of the store.
+Meridian Ops forks in `apps/demo/src/data/store.ts`, derives and merges in
+`apps/demo/src/data/branch.ts`, and stages in
+`apps/demo/src/capabilities/staged.ts`.
+
+## The human keeps working while an approval is pending
+
+Because the agent writes to a fork, nothing is locked. The human can edit the
+same order the agent is proposing against, and on approval a three-way merge
+lands both.
+
+Row presence is decided explicitly, so a row the agent deleted is deleted and
+a cleared array stays cleared. A field they both wrote is a real conflict, and
+the runtime refuses it rather than resolving it. The card warns as soon as the
+document moves, and approving anyway fails closed with `APPROVAL_STALE`
+instead of applying part of a reviewed change. A capability whose output
+depends on state the human might move declares `commitMode: "rederive"`,
+which re-runs the handler at approval and refuses if the result no longer
+matches what was approved.
+
+A plan stages every operation inside one scope, so the second operation
+derives against what the first one staged rather than against state the first
+is about to change. Commit consumes those same artifacts in order, and a plan
+that has lost one fails whole rather than landing part of itself.
 
 ## Approval is a state machine, not a modal
 

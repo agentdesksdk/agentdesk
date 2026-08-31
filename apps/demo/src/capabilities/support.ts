@@ -4,7 +4,7 @@ import {
   unavailable,
   type Capability,
 } from "@agentdesk/webmcp";
-import { getState, mutate } from "../data/store.ts";
+import { getState, mutate, nowIso } from "../data/store.ts";
 import {
   createReadCapability,
   createSearchCapability,
@@ -116,9 +116,9 @@ export const supportCapabilities: Capability[] = [
           status: "open",
           priority:
             priority === "low" || priority === "high" ? priority : "normal",
-          createdAt: new Date().toISOString(),
+          createdAt: nowIso(),
           messages: [
-            { from: "customer", text: subject, at: new Date().toISOString() },
+            { from: "customer", text: subject, at: nowIso() },
           ],
         });
       });
@@ -145,7 +145,7 @@ export const supportCapabilities: Capability[] = [
           ?.messages.push({
             from: "agent",
             text: message,
-            at: new Date().toISOString(),
+            at: nowIso(),
           });
       });
       return { ticket_id: ticket.id, replied: true };
@@ -171,7 +171,7 @@ export const supportCapabilities: Capability[] = [
           ?.messages.push({
             from: "agent",
             text: `[internal] ${note}`,
-            at: new Date().toISOString(),
+            at: nowIso(),
           });
       });
       return { ticket_id: ticket.id, note_added: true };

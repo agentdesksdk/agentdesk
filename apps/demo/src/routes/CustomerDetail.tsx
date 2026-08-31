@@ -1,5 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 import { Pill, fmtDate, fmtMoney } from "../components/bits.tsx";
+import { Ghost } from "../components/Ghost.tsx";
 import { useDemoStore } from "../components/hooks.ts";
 import { orderTotal } from "../data/types.ts";
 
@@ -36,6 +37,7 @@ export function CustomerDetail() {
       <p className="page-sub">
         {customer.email} · {customer.phone} · {customer.city}, {customer.country}
       </p>
+      <Ghost collection="customers" id={customer.id} />
       <div className="grid-2">
         <div
           className="panel"

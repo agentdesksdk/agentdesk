@@ -1,12 +1,32 @@
 import { buildSeed } from "./seed.ts";
-import type { DemoState } from "./types.ts";
+import type { Branch, DemoState } from "./types.ts";
 
 type Listener = () => void;
 
 let state: DemoState = buildSeed();
 const listeners = new Set<Listener>();
 
+/**
+ * The open agent branch, if any. While it is set, `getState` and `mutate`
+ * address it instead of the live document, so a capability handler stages
+ * its write without touching what the human is looking at.
+ */
+let open: { head: DemoState; at: number } | null = null;
+
+/**
+ * Set when a staged handler suspended. Its continuation will resume after
+ * the fork closed and would otherwise write live state before anyone
+ * approved it, and nothing at the call site can tell that write apart from
+ * a legitimate one. Writes stop until the store is reset.
+ */
+let escaped: string | null = null;
+
 export function getState(): DemoState {
+  return open ? open.head : state;
+}
+
+/** Live state, ignoring any open branch. What the human is looking at. */
+export function getCommittedState(): DemoState {
   return state;
 }
 
@@ -17,33 +37,116 @@ export function subscribe(listener: Listener): () => void {
   };
 }
 
-export function mutate(fn: (draft: DemoState) => void): void {
-  const next: DemoState = {
-    customers: state.customers.map((c) => ({ ...c, tags: [...c.tags], notes: [...c.notes] })),
-    orders: state.orders.map((o) => ({
-      ...o,
-      items: o.items.map((item) => ({ ...item })),
-      notes: [...o.notes],
-      tags: [...o.tags],
-    })),
-    products: state.products.map((p) => ({ ...p })),
-    tickets: state.tickets.map((t) => ({
-      ...t,
-      messages: t.messages.map((m) => ({ ...m })),
-    })),
-    credits: state.credits.map((c) => ({ ...c })),
-    invoices: state.invoices.map((i) => ({ ...i })),
-  };
-  fn(next);
-  state = next;
+function notify(): void {
   for (const listener of listeners) {
     listener();
   }
 }
 
-export function resetStore(): void {
-  state = buildSeed();
-  for (const listener of listeners) {
-    listener();
+export function mutate(fn: (draft: DemoState) => void): void {
+  if (escaped !== null) {
+    throw new Error(
+      `refusing to write: ${escaped} suspended during staging, so this write cannot be attributed to a reviewed change. Reset the store.`,
+    );
   }
+  const next = structuredClone(getState());
+  fn(next);
+  if (open) {
+    open.head = next;
+    return;
+  }
+  state = next;
+  notify();
+}
+
+/**
+ * Timestamp a handler must use instead of reading the wall clock. Frozen for
+ * the life of a branch, so the dry run that produced an approved diff and the
+ * commit that lands it cannot disagree about when they happened.
+ */
+export function nowIso(): string {
+  return new Date(open ? open.at : Date.now()).toISOString();
+}
+
+/**
+ * Runs `fn` against a fork of current state and returns what changed without
+ * touching the live document. Nested calls share one branch, so a sequence of
+ * staged operations composes and each one sees its predecessor's writes.
+ *
+ * `at` pins the branch clock. Re-running a staged operation later passes the
+ * original branch's clock so the two runs cannot differ by timestamp alone.
+ */
+export function stage<T>(
+  name: string,
+  fn: () => T,
+  at?: number,
+): { result: T; branch: Branch } {
+  const outermost = open === null;
+  if (open === null) {
+    open = { head: structuredClone(state), at: at ?? Date.now() };
+  }
+  const base = open.head;
+  try {
+    const result = fn();
+    const pending = result as PromiseLike<unknown> & {
+      catch?: (onRejected: () => void) => unknown;
+    };
+    if (typeof pending?.then === "function") {
+      escaped = name;
+      // The continuation is already scheduled and will reject when its next
+      // write is refused. Observing it here keeps that refusal from
+      // surfacing as an unhandled rejection somewhere unrelated.
+      pending.catch?.(() => {});
+      throw new Error(
+        `${name} staged asynchronously. Its remaining writes would land on live state after the fork closed, so the store is now refusing writes.`,
+      );
+    }
+    return { result, branch: { base, head: open.head, at: open.at } };
+  } finally {
+    if (outermost) {
+      open = null;
+    }
+  }
+}
+
+/**
+ * Opens one branch for the duration of `run` so a sequence of stagings
+ * composes. Plan preparation uses this; each operation derives against its
+ * predecessor's staged head rather than against live state.
+ */
+export function stagingScope<T>(run: () => T): T {
+  const outermost = open === null;
+  if (open === null) {
+    open = { head: structuredClone(state), at: Date.now() };
+  }
+  try {
+    return run();
+  } finally {
+    if (outermost) {
+      open = null;
+    }
+  }
+}
+
+/** Replaces live state with an already-merged document. */
+export function land(next: DemoState): void {
+  state = next;
+  notify();
+}
+
+const resetHooks = new Set<Listener>();
+
+/** Invalidation point for anything holding a reference into the document. */
+export function onReset(hook: Listener): void {
+  resetHooks.add(hook);
+}
+
+export function resetStore(): void {
+  open = null;
+  escaped = null;
+  state = buildSeed();
+  for (const hook of resetHooks) {
+    hook();
+  }
+  notify();
 }

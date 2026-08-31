@@ -6,7 +6,7 @@ import {
   type RuntimeSnapshot,
 } from "@agentdesk/webmcp";
 import { capabilities } from "../capabilities/index.ts";
-import { getState } from "../data/store.ts";
+import { getState, stagingScope } from "../data/store.ts";
 
 type ModelContextHost = { modelContext?: { registerTool?: unknown } };
 
@@ -34,6 +34,9 @@ export const agentdesk = createAgentDeskRuntime({
   capabilities,
   ...(webmcpNative ? {} : { registerTool: async () => {} }),
   actor: { id: "agent", name: "Agent", kind: "agent" },
+  // Plan preparation derives every operation inside one branch, so the
+  // second operation previews against what the first one staged.
+  stagingScope,
   // Cheap revision over the mutable parts of the store. A plan approved
   // against one revision refuses to commit against another.
   revision: () => {

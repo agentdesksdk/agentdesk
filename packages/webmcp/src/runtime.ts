@@ -58,6 +58,12 @@ import {
   validationFailed,
   type ToolResult,
 } from "./results.ts";
+import {
+  runStage,
+  StagedProposalStore,
+  type StagedProposal,
+  type StagingScope,
+} from "./staging.ts";
 import { ToolSurfaceManager } from "./tool-surface.ts";
 import {
   assertSafeOrigins,
@@ -249,6 +255,13 @@ export function createAgentDeskRuntime(options: {
    * against state that has since moved.
    */
   revision?: (ctx: AppContext) => string;
+  /**
+   * Runs a sequence of stagings so each derives against its predecessor's
+   * staged head. Required before a staged capability can appear in a plan,
+   * because otherwise operation two previews against state operation one is
+   * about to change and the human reviews a plan that will not happen.
+   */
+  stagingScope?: StagingScope;
   /** Who is acting. Recorded on audit events, receipts, and presentation. */
   actor?: Actor;
 }): AgentDeskRuntime {
@@ -257,6 +270,10 @@ export function createAgentDeskRuntime(options: {
   const presentation = new PresentationBus();
   const plans = new PlanStore();
   const receipts = new ReceiptStore();
+  // Staged proposals live here, keyed by the runtime identity that owns
+  // each one, never by business input. Disposal is this store's job on
+  // every path that resolves an owner without committing it.
+  const proposals = new StagedProposalStore();
   // Detached and frozen on the way in, so a caller mutating the object it
   // handed over cannot retroactively rewrite provenance already recorded,
   // and so a getter-backed property is read exactly once. The clone failure
@@ -635,8 +652,22 @@ export function createAgentDeskRuntime(options: {
         capability.describeApproval?.(input, context) ??
         capability.title ??
         capability.name;
-      const preview = safePreview(capability, input, context);
+      const staged = stageFor(capability, input, signal);
+      if (!staged.ok) {
+        audit.append({
+          kind: "capability_unavailable",
+          capability: capability.name,
+          reasonCode: "PREVIEW_UNAVAILABLE",
+          at: now(),
+        });
+        emit();
+        return previewUnavailable(capability.name, staged.error);
+      }
+      const preview = staged.proposal
+        ? { ok: true as const, changes: [...staged.proposal.changes] }
+        : safePreview(capability, input, context);
       if (!preview.ok && capability.risk === "CONSEQUENTIAL") {
+        staged.proposal?.discard();
         audit.append({
           kind: "capability_unavailable",
           capability: capability.name,
@@ -646,14 +677,33 @@ export function createAgentDeskRuntime(options: {
         emit();
         return previewUnavailable(capability.name, preview.error);
       }
-      const action = approvals.request(
-        capability.name,
-        input,
-        capability.risk,
-        summary,
-        preview.changes,
-        now(),
-      );
+      let action;
+      try {
+        action = approvals.request(
+          capability.name,
+          input,
+          capability.risk,
+          summary,
+          preview.changes,
+          now(),
+        );
+      } catch (err) {
+        // Nothing owns the proposal yet, so a failure to record the pending
+        // action would otherwise strand the fork with no way to reach it.
+        staged.proposal?.discard();
+        throw err;
+      }
+      if (staged.proposal) {
+        // An identical pending request returns the action that already
+        // exists, whose preview came from the proposal held for it.
+        // Replacing that artifact would let a human approve one diff and
+        // land another, so the newer staging is thrown away instead.
+        if (proposals.has(action.id)) {
+          staged.proposal.discard();
+        } else {
+          proposals.put(action.id, staged.proposal);
+        }
+      }
       audit.append({
         kind: "approval_requested",
         capability: capability.name,
@@ -673,12 +723,64 @@ export function createAgentDeskRuntime(options: {
         capability.approvalEvidence,
       );
     }
+    // A staged capability has no runnable handler. On the unapproved path
+    // it stages and lands in one step, so the same artifact still produces
+    // both the change and the record of it.
+    const direct = stageFor(capability, input, signal);
+    if (!direct.ok) {
+      audit.append({
+        kind: "capability_unavailable",
+        capability: capability.name,
+        reasonCode: "PREVIEW_UNAVAILABLE",
+        at: now(),
+      });
+      emit();
+      return previewUnavailable(capability.name, direct.error);
+    }
     const outcome = await executeNow(capability, input, {
       actor: invocationActor,
       signal,
       idempotencyKey,
+      ...(direct.proposal ? { commit: direct.proposal.commit } : {}),
     });
+    if (!outcome.ok) {
+      direct.proposal?.discard();
+    }
     return outcome.result;
+  }
+
+  /**
+   * Produces the staged proposal for a capability that declares one. A
+   * capability with no `stage` returns no proposal and keeps whatever
+   * preview it declared.
+   */
+  function stageFor(
+    capability: Capability,
+    input: Record<string, unknown>,
+    signal?: AbortSignal,
+  ):
+    | { ok: true; proposal?: StagedProposal }
+    | { ok: false; error: string } {
+    if (!capability.stage) {
+      return { ok: true };
+    }
+    const linked = linkSignals(signal, epochController.signal);
+    try {
+      const proposal = runStage(capability.name, capability.stage, input, {
+        route: context.route,
+        state: context.state,
+        signal: linked.signal,
+        executionId: `STAGE-${++executionCounter}`,
+      });
+      return { ok: true, proposal };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    } finally {
+      linked.dispose();
+    }
   }
 
   async function dispatchInvoke(
@@ -737,6 +839,12 @@ export function createAgentDeskRuntime(options: {
     signal?: AbortSignal | undefined;
     idempotencyKey?: string | undefined;
     planId?: string | undefined;
+    /**
+     * Lands an already-staged proposal instead of calling the capability's
+     * handler. A staged capability has no runnable handler, so this is the
+     * only way its write reaches live state.
+     */
+    commit?: (() => unknown) | undefined;
     /**
      * Only `approve` sets this. A UI may hand keyboard focus to an
      * execution a human authorized and to no other, so an agent working in
@@ -936,7 +1044,9 @@ export function createAgentDeskRuntime(options: {
       at: now(),
     });
     try {
-      const value = await capability.execute(input, execContext);
+      const value = opts.commit
+        ? opts.commit()
+        : await capability.execute(input, execContext);
       if (session.expired()) {
         return {
           ok: false,
@@ -1073,6 +1183,7 @@ export function createAgentDeskRuntime(options: {
   async function commitOperation(
     planId: string,
     operation: PlannedOperation,
+    index: number,
     executor: Actor | undefined,
   ): Promise<OperationOutcome> {
     const routed = routeCapability(catalog, operation.capability);
@@ -1116,10 +1227,22 @@ export function createAgentDeskRuntime(options: {
         );
       }
 
+      const proposal = proposals.take(
+        StagedProposalStore.planKey(planId, index),
+      );
+      if (routed.stage && !proposal) {
+        return blocked(
+          "STAGED_PROPOSAL_MISSING: the staged change reviewed for this operation is no longer held by the runtime",
+        );
+      }
       const outcome = await executeNow(routed, operation.input, {
         planId,
         actor: executor,
+        ...(proposal ? { commit: proposal.commit } : {}),
       });
+      if (!outcome.ok) {
+        proposal?.discard();
+      }
       const correlation =
         outcome.executionId !== undefined
           ? { executionId: outcome.executionId }
@@ -1326,6 +1449,7 @@ export function createAgentDeskRuntime(options: {
     async stop() {
       started = false;
       endEpoch();
+      proposals.discardAll();
       approvals.clear();
       await surface.clear();
       emit();
@@ -1371,6 +1495,7 @@ export function createAgentDeskRuntime(options: {
     },
     async reset() {
       endEpoch();
+      proposals.discardAll();
       approvals.clear();
       idempotency.clear();
       plans.clear();
@@ -1418,23 +1543,56 @@ export function createAgentDeskRuntime(options: {
       // the requester is resolved before it runs rather than after.
       const requester = actor;
       const operations: PlannedOperation[] = [];
-      for (const requested of request.operations) {
+      const staged: Array<StagedProposal | undefined> = [];
+      const routedOperations = request.operations.map((requested) => {
         const routed = routeCapability(catalog, requested.capability);
         if (isRouteError(routed)) {
           throw new Error(`unknown capability: ${requested.capability}`);
         }
-        const input = requested.input ?? {};
-        const preview = safePreview(routed, input, context);
-        if (!preview.ok && routed.risk === "CONSEQUENTIAL") {
-          throw new Error(
-            `${routed.name} declares a change preview and it failed: ${preview.error}`,
-          );
-        }
-        operations.push({
-          capability: routed.name,
-          input: structuredClone(input),
-          preview: preview.changes,
+        return { routed, input: requested.input ?? {} };
+      });
+      // Every operation derives inside one scope, so operation two sees what
+      // operation one staged. Without it the human reviews previews computed
+      // against a state the earlier operations are about to change.
+      if (
+        routedOperations.some(({ routed }) => routed.stage) &&
+        !options.stagingScope
+      ) {
+        throw new Error(
+          "this plan contains a staged capability and the runtime has no stagingScope, so its operations would each preview against live state rather than against their predecessors",
+        );
+      }
+      const scope: StagingScope = options.stagingScope ?? ((run) => run());
+      try {
+        scope(() => {
+          for (const { routed, input } of routedOperations) {
+            const proposal = stageFor(routed, input);
+            if (!proposal.ok) {
+              throw new Error(
+                `${routed.name} could not stage its change: ${proposal.error}`,
+              );
+            }
+            staged.push(proposal.proposal);
+            const preview = proposal.proposal
+              ? { ok: true as const, changes: [...proposal.proposal.changes] }
+              : safePreview(routed, input, context);
+            if (!preview.ok && routed.risk === "CONSEQUENTIAL") {
+              throw new Error(
+                `${routed.name} declares a change preview and it failed: ${preview.error}`,
+              );
+            }
+            operations.push({
+              capability: routed.name,
+              input: structuredClone(input),
+              preview: preview.changes,
+            });
+          }
         });
+      } catch (err) {
+        for (const proposal of staged) {
+          proposal?.discard();
+        }
+        throw err;
       }
 
       const risk = highestRisk(
@@ -1444,6 +1602,9 @@ export function createAgentDeskRuntime(options: {
       );
       const revision = options.revision?.(context);
       if (session.expired()) {
+        for (const proposal of staged) {
+          proposal?.discard();
+        }
         throw new Error(
           "the runtime was reset while this plan was being prepared, so it was not created",
         );
@@ -1455,6 +1616,11 @@ export function createAgentDeskRuntime(options: {
         createdAt: now(),
         ...(revision !== undefined ? { expectedRevision: revision } : {}),
         ...(requester !== undefined ? { requestedBy: requester } : {}),
+      });
+      staged.forEach((proposal, index) => {
+        if (proposal) {
+          proposals.put(StagedProposalStore.planKey(plan.id, index), proposal);
+        }
       });
       audit.append({
         kind: "plan_prepared",
@@ -1498,6 +1664,7 @@ export function createAgentDeskRuntime(options: {
     },
 
     rejectPlan(planId) {
+      proposals.discardPlan(planId);
       const plan = plans.transition(planId, "DRAFT", "REJECTED");
       if (!plan) {
         return { ok: false, reason: `plan ${planId} is not awaiting approval` };
@@ -1555,17 +1722,57 @@ export function createAgentDeskRuntime(options: {
         };
       }
 
+      // Checked for the whole plan before the first operation runs. A plan
+      // that would lose a staged artifact halfway leaves the application
+      // half-changed against a review that covered all of it.
+      const missing = claimed.operations
+        .map((operation, index) => ({ operation, index }))
+        .filter(({ operation, index }) => {
+          const routed = routeCapability(catalog, operation.capability);
+          return (
+            !isRouteError(routed) &&
+            routed.stage &&
+            !proposals.has(StagedProposalStore.planKey(planId, index))
+          );
+        });
+      if (missing.length > 0) {
+        proposals.discardPlan(planId);
+        const reason = `the staged changes behind ${missing
+          .map(({ operation }) => operation.capability)
+          .join(", ")} are no longer held by the runtime, so nothing was committed`;
+        plans.resolve(planId, {
+          status: "FAILED",
+          resolvedAt: now(),
+          ...(observedRevision !== undefined ? { observedRevision } : {}),
+        });
+        audit.append({
+          kind: "plan_failed",
+          planId,
+          outcomes: missing.map(({ operation }) => ({
+            capability: operation.capability,
+            status: "SKIPPED" as const,
+            verification: "UNSUPPORTED" as const,
+          })),
+          at: now(),
+        });
+        emit();
+        return { ok: false, reason, plan: plans.get(planId)! };
+      }
+
       const outcomes: OperationOutcome[] = [];
-      for (const operation of claimed.operations) {
+      for (const [index, operation] of claimed.operations.entries()) {
         // Before each operation, not after all of them. Checking only at the
         // end let the operation after an interrupted one start, and it then
         // claimed the new session and committed into it.
         if (session.expired()) {
+          proposals.discardPlan(planId);
           return settleInterrupted(planId, claimed, outcomes);
         }
-        outcomes.push(await commitOperation(planId, operation, executor));
+        outcomes.push(await commitOperation(planId, operation, index, executor));
       }
+      proposals.discardPlan(planId);
       if (session.expired()) {
+        proposals.discardPlan(planId);
         return settleInterrupted(planId, claimed, outcomes);
       }
 
@@ -1908,6 +2115,7 @@ export function createAgentDeskRuntime(options: {
       }
       const routed = routeCapability(catalog, action.capability);
       if (isRouteError(routed)) {
+        proposals.discard(actionId);
         approvals.resolve(actionId, {
           status: "FAILED",
           action,
@@ -1925,6 +2133,7 @@ export function createAgentDeskRuntime(options: {
         context,
       });
       if (decision.kind === "deny") {
+        proposals.discard(actionId);
         approvals.resolve(actionId, {
           status: "FAILED",
           action,
@@ -1951,6 +2160,7 @@ export function createAgentDeskRuntime(options: {
           ? inputCheck
           : null;
       if (blocker) {
+        proposals.discard(actionId);
         approvals.resolve(actionId, {
           status: "FAILED_UNAVAILABLE",
           action,
@@ -1967,6 +2177,31 @@ export function createAgentDeskRuntime(options: {
         emit();
         return capabilityUnavailable(action.capability, blocker);
       }
+      // The staged artifact is the only thing that may land for a staged
+      // capability. Missing it is a fail-closed refusal, never a fallback
+      // to running the handler outside the fork the human reviewed.
+      const proposal = proposals.take(actionId);
+      if (routed.stage && !proposal) {
+        const missing = unavailable(
+          "STAGED_PROPOSAL_MISSING",
+          `The staged change behind ${actionId} is no longer held by the runtime, so approving it would run a write nobody reviewed. Request the action again.`,
+        );
+        approvals.resolve(actionId, {
+          status: "FAILED_UNAVAILABLE",
+          action,
+          reasonCode: missing.reasonCode,
+          reason: missing.reason,
+          resolvedAt: now(),
+        });
+        audit.append({
+          kind: "capability_unavailable",
+          capability: action.capability,
+          reasonCode: missing.reasonCode,
+          at: now(),
+        });
+        emit();
+        return capabilityUnavailable(action.capability, missing);
+      }
       audit.append({
         kind: "approval_approved",
         actionId,
@@ -1977,10 +2212,12 @@ export function createAgentDeskRuntime(options: {
       const outcome = await executeNow(routed, action.input, {
         actor: actingActor,
         humanInitiated: true,
+        ...(proposal ? { commit: proposal.commit } : {}),
       });
       // approvals.resolve inserts, so resolving after a reset put the cleared
       // action back into the fresh session. Nothing here belongs to it.
       if (session.expired()) {
+        proposal?.discard();
         return executionCancelled(action.capability);
       }
       if (outcome.ok) {
@@ -1991,6 +2228,7 @@ export function createAgentDeskRuntime(options: {
           resolvedAt: now(),
         });
       } else {
+        proposal?.discard();
         approvals.resolve(actionId, {
           status: "FAILED",
           action,
@@ -2003,6 +2241,7 @@ export function createAgentDeskRuntime(options: {
       } catch (err) {
         // The action is already claimed, so a throw anywhere in these
         // checks would otherwise strand it in EXECUTING with no retry.
+        proposals.discard(actionId);
         const message = err instanceof Error ? err.message : String(err);
         approvals.resolve(actionId, {
           status: "FAILED",
@@ -2033,6 +2272,7 @@ export function createAgentDeskRuntime(options: {
       if (!action) {
         return errorResult(`unknown pending action: ${actionId}`);
       }
+      proposals.discard(actionId);
       approvals.resolve(actionId, {
         status: "REJECTED",
         action,

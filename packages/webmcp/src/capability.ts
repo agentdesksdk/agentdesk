@@ -31,6 +31,7 @@ export type ExecutionContext = AppContext & {
 
 import type { FocusPolicy } from "./presentation.ts";
 import type { VerificationResult } from "./plan.ts";
+import type { StageHandler } from "./staging.ts";
 
 export type RiskLevel = "READ" | "WRITE" | "CONSEQUENTIAL";
 
@@ -160,12 +161,24 @@ export type Capability = {
     ctx: AppContext,
   ) => Change[];
   /**
-   * What the human is shown before approving. `diff` requires
-   * `previewChanges`; `summary` is an explicit opt-out for actions with no
-   * enumerable change set. A consequential capability must pick one, so a
-   * missing preview can never silently degrade into an empty diff.
+   * What the human is shown before approving, ordered by how much the
+   * approval is worth.
+   *
+   * `derived` is not selectable. The runtime sets it only for a capability
+   * that declared `stage`, where the diff is read off a fork the same run
+   * will land, so the label cannot be claimed alongside an unrelated
+   * preview callback. `diff` requires `previewChanges` and is an author's
+   * enumeration, which can drift from what `execute` does. `summary` is an
+   * explicit opt-out for actions with no enumerable change set. A
+   * consequential capability must have one, so a missing preview can never
+   * silently degrade into an empty diff.
    */
-  approvalEvidence: "diff" | "summary";
+  approvalEvidence: "derived" | "diff" | "summary";
+  /**
+   * Present exactly when `approvalEvidence` is `derived`. Produces the
+   * proposal the runtime owns until it is committed or discarded.
+   */
+  stage?: StageHandler;
   /**
    * Reads state back after execution and reports whether it matches what
    * the change was supposed to do. This is the difference between a
@@ -212,6 +225,12 @@ export type Capability = {
     ctx: AppContext,
     changes: readonly Change[],
   ) => unknown | Promise<unknown>;
+  /**
+   * Never called for a staged capability. `defineCapability` substitutes a
+   * handler that throws, so a caller that loses the staged proposal fails
+   * closed instead of running the write outside the artifact that was
+   * approved.
+   */
   execute: (
     input: Record<string, unknown>,
     ctx: ExecutionContext,
@@ -231,7 +250,8 @@ export function isCapabilityName(value: string): value is CapabilityName {
   return NAME_RE.test(value);
 }
 
-export type CapabilitySpec = {
+/** Everything that does not depend on how the capability produces its write. */
+type CapabilitySpecBase = {
   name: string;
   description: string;
   id?: string;
@@ -259,12 +279,6 @@ export type CapabilitySpec = {
     input: Record<string, unknown>,
     ctx: AppContext,
   ) => string;
-  previewChanges?: (
-    input: Record<string, unknown>,
-    ctx: AppContext,
-  ) => Change[];
-  /** Required for a consequential capability with no `previewChanges`. */
-  approvalEvidence?: "diff" | "summary";
   verify?: (
     input: Record<string, unknown>,
     ctx: AppContext,
@@ -281,11 +295,46 @@ export type CapabilitySpec = {
     ctx: AppContext,
     changes: readonly Change[],
   ) => unknown | Promise<unknown>;
+};
+
+/**
+ * A capability that writes when it executes. Its preview, if it has one, is
+ * a second description of the operation written by hand, so it is labelled
+ * `diff` and can drift from what `execute` does.
+ */
+export type DirectCapabilitySpec = CapabilitySpecBase & {
   execute: (
     input: Record<string, unknown>,
     ctx: ExecutionContext,
   ) => Promise<unknown> | unknown;
+  previewChanges?: (
+    input: Record<string, unknown>,
+    ctx: AppContext,
+  ) => Change[];
+  /** Required for a consequential capability with no `previewChanges`. */
+  approvalEvidence?: "diff" | "summary";
+  stage?: undefined;
 };
+
+/**
+ * A capability that stages its write instead of performing it. The diff and
+ * the change are one execution, which is what `derived` evidence means, so
+ * neither the preview callback nor the evidence label is separately
+ * selectable here.
+ */
+export type StagedCapabilitySpec = CapabilitySpecBase & {
+  stage: StageHandler;
+  execute?: undefined;
+  previewChanges?: undefined;
+  approvalEvidence?: undefined;
+};
+
+export type CapabilitySpec = DirectCapabilitySpec | StagedCapabilitySpec;
+
+/** `Omit` over a union, which would otherwise collapse to the shared keys. */
+export type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
+  ? Omit<T, K>
+  : never;
 
 export function defineCapability(spec: CapabilitySpec): Capability {
   if (spec.description.trim() === "") {
@@ -310,9 +359,46 @@ export function defineCapability(spec: CapabilitySpec): Capability {
               )
       : (): Availability => AVAILABLE);
 
-  const approvalEvidence =
-    spec.approvalEvidence ?? (spec.previewChanges ? "diff" : "summary");
-  if (risk === "CONSEQUENTIAL") {
+  // A JavaScript caller can hand over an object the union rejects, so the
+  // two shapes are separated again here rather than trusted from the type.
+  const staged = typeof spec.stage === "function";
+  if (staged) {
+    if (typeof spec.execute === "function") {
+      throw new Error(
+        `${name} declares both stage and execute. A staged capability lands through its proposal, so there is no second handler to run.`,
+      );
+    }
+    if (spec.previewChanges !== undefined || spec.approvalEvidence !== undefined) {
+      throw new Error(
+        `${name} declares stage alongside previewChanges or approvalEvidence. Derived evidence means the staged run is the preview; a second one could disagree with it.`,
+      );
+    }
+    // Prevention, not detection. A staged async handler resumes after its
+    // fork has closed, and by the time a returned promise could be
+    // inspected the continuation is already scheduled against live state.
+    if (spec.stage!.constructor?.name === "AsyncFunction") {
+      throw new Error(
+        `${name} declares an async stage handler. Staging must finish before it returns, because its writes go to a fork that closes when it does.`,
+      );
+    }
+  } else {
+    if (typeof spec.execute !== "function") {
+      throw new Error(`${name} must declare either execute or stage`);
+    }
+    // The public spec type has no "derived" member, so reaching this means a
+    // JavaScript caller supplied the stronger label without the staged run
+    // that is the only thing entitled to it.
+    if ((spec.approvalEvidence as string) === "derived") {
+      throw new Error(
+        `${name} claims approvalEvidence "derived" without a stage handler. Derived evidence means the preview came from the run that will land, which a preview callback cannot provide.`,
+      );
+    }
+  }
+
+  const approvalEvidence: Capability["approvalEvidence"] = staged
+    ? "derived"
+    : (spec.approvalEvidence ?? (spec.previewChanges ? "diff" : "summary"));
+  if (risk === "CONSEQUENTIAL" && !staged) {
     if (approvalEvidence === "diff" && !spec.previewChanges) {
       throw new Error(
         `${name} declares approvalEvidence "diff" but has no previewChanges`,
@@ -348,8 +434,17 @@ export function defineCapability(spec: CapabilitySpec): Capability {
     availability,
     policy,
     approvalEvidence,
-    execute: spec.execute,
+    execute: staged
+      ? () => {
+          throw new Error(
+            `${name} is staged and must be committed through the proposal the runtime holds for its approval. Executing it directly would run a write no one approved.`,
+          );
+        }
+      : spec.execute!,
   };
+  if (staged) {
+    capability.stage = spec.stage!;
+  }
   if (spec.domain !== undefined) {
     capability.domain = spec.domain;
   }
