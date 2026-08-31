@@ -29,6 +29,7 @@ function fixture(ledger: Ledger) {
               expected: changes[0]?.after,
               observed: ledger.refunded,
             },
+      rollbackEvidence: "handler",
       rollback: () => {
         ledger.refunded = false;
         ledger.revision += 1;
@@ -405,6 +406,7 @@ describe("rollback is optional and honest about it", () => {
           name: "refund_shipping",
           description: "Refunds",
           risk: "WRITE",
+          rollbackEvidence: "handler",
           rollback: (input) => {
             seen.push(input);
             return { restored: true };

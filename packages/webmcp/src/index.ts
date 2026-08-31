@@ -34,6 +34,8 @@ export {
 } from "./plan.ts";
 export {
   type ReceiptQuery,
+  type ReconciliationOutcome,
+  type RollbackState,
   type StoredReceipt,
 } from "./receipts.ts";
 export {

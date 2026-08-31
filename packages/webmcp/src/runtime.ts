@@ -37,7 +37,12 @@ import {
   type PlannedOperation,
   type VerificationResult,
 } from "./plan.ts";
-import { ReceiptStore, type ReceiptQuery, type StoredReceipt } from "./receipts.ts";
+import {
+  ReceiptStore,
+  type ReceiptQuery,
+  type ReconciliationOutcome,
+  type StoredReceipt,
+} from "./receipts.ts";
 import { isRouteError, rankCapabilities, routeCapability } from "./router.ts";
 import {
   approvalRequired,
@@ -74,6 +79,19 @@ const BUILTIN_NAMES = new Set([
 ]);
 
 export type Exposure = "routed" | "flat";
+
+/**
+ * Why a rollback may or may not be recorded, kept separate from the
+ * `VerificationResult` it carries.
+ *
+ * Collapsing these onto the status was the earlier bug. `UNSUPPORTED` meant
+ * both "a declared verifier could not check" and "the capability accepts the
+ * handler's word", and only the second one is evidence.
+ */
+type RollbackProof =
+  | { kind: "proven"; verification: VerificationResult }
+  | { kind: "accepted"; verification: VerificationResult }
+  | { kind: "unreconciled"; verification: VerificationResult; detail: string };
 
 export type RoutedMatch = {
   name: string;
@@ -189,10 +207,28 @@ export type AgentDeskRuntime = {
    * A capability with no verifier gets no such protection. The runtime
    * cannot detect drift it has no way to read, so the rollback proceeds
    * and may overwrite state that moved after the receipt.
+   *
+   * Success is not the handler's to declare. Where a verifier exists it runs
+   * again afterwards, and finding the original change still in place means
+   * nothing was undone, so the receipt goes to INDETERMINATE rather than
+   * ROLLED_BACK. A handler that throws after dispatch also lands there, and
+   * only `reconcileRollback` leaves it.
    */
   rollback: (
     receiptId: string,
   ) => Promise<{ ok: true; result: unknown } | { ok: false; reason: string }>;
+
+  /**
+   * Settles a rollback the runtime could not. The caller has established
+   * whether the compensating write landed, by reading the application rather
+   * than by inference, and says which. `compensated` spends the receipt,
+   * `untouched` makes undo available again.
+   */
+  reconcileRollback: (
+    receiptId: string,
+    outcome: ReconciliationOutcome,
+    by?: Actor,
+  ) => { ok: true; receipt: StoredReceipt } | { ok: false; reason: string };
 };
 
 export function createAgentDeskRuntime(options: {
@@ -730,6 +766,80 @@ export function createAgentDeskRuntime(options: {
         note: `verifier failed: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
+  }
+
+  /**
+   * How well an undo was proven, which is a different question from whether
+   * the original write is still visible.
+   *
+   * `verifyRollback` answers it directly and is authoritative. `verify` only
+   * detects a no-op, because its MISMATCH says state moved without saying
+   * where to, and an undo landing on a third value is not a rollback. A
+   * verifier that failed proves nothing at all, so PARTIAL is not a pass.
+   */
+  async function proveRollback(
+    capability: Capability,
+    input: Record<string, unknown>,
+    changes: readonly Change[],
+  ): Promise<RollbackProof> {
+    if (capability.verifyRollback) {
+      let result: VerificationResult;
+      try {
+        result = await capability.verifyRollback(input, context, changes);
+      } catch (err) {
+        result = {
+          status: "PARTIAL",
+          unverified: changes.map((change) => change.field),
+          note: `rollback verifier failed: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+      // Only VERIFIED. A declared verifier answering UNSUPPORTED is saying it
+      // could not check, which is not the same fact as a capability declaring
+      // that the handler's word is the evidence.
+      return result.status === "VERIFIED"
+        ? { kind: "proven", verification: result }
+        : {
+            kind: "unreconciled",
+            verification: result,
+            detail:
+              "the rollback verifier did not confirm the recorded before-state is back",
+          };
+    }
+    // No rollback verifier. `verify` still detects the one failure it can
+    // see, a handler that returned while its change is untouched, and that
+    // is a disproof rather than a proof, so it outranks the opt-out.
+    if (capability.verify) {
+      const seen = await runVerification(capability, input, changes);
+      if (seen.status === "VERIFIED") {
+        return {
+          kind: "unreconciled",
+          verification: {
+            status: "MISMATCH",
+            field: changes[0]?.field ?? "",
+            expected: changes[0]?.before,
+            observed: changes[0]?.after,
+          },
+          detail:
+            "the handler reported success while the original change was still in place",
+        };
+      }
+    }
+    if (capability.rollbackEvidence === "handler") {
+      return {
+        kind: "accepted",
+        verification: { status: "UNSUPPORTED" },
+      };
+    }
+    return {
+      kind: "unreconciled",
+      verification: {
+        status: "PARTIAL",
+        unverified: changes.map((change) => change.field),
+        note: "no rollback evidence",
+      },
+      detail:
+        "nothing proves the recorded before-state is back. Declare verifyRollback, or rollbackEvidence: \"handler\" to accept the handler's word",
+    };
   }
 
   async function executeNow(
@@ -1593,12 +1703,15 @@ export function createAgentDeskRuntime(options: {
       // undos cannot both reach the compensating action.
       const session = claimSession();
       if (!receipts.claimRollback(receiptId)) {
+        const state = receipts.get(receiptId)?.rollbackState;
         return {
           ok: false,
           reason:
-            receipts.get(receiptId)?.rollbackState === "ROLLED_BACK"
+            state === "ROLLED_BACK"
               ? `${receiptId} was already rolled back`
-              : `${receiptId} is already being rolled back`,
+              : state === "INDETERMINATE"
+                ? `rollback of ${receiptId} is indeterminate and will not be retried automatically, because a compensating action that failed after dispatch may already have changed the application`
+                : `${receiptId} is already being rolled back`,
         };
       }
       // Same capture rule as an execution: the undo belongs to whoever
@@ -1631,16 +1744,45 @@ export function createAgentDeskRuntime(options: {
           context,
           stored.receipt.changes,
         );
-        // The compensating action completed. Returning without settling the
-        // receipt left it ROLLING_BACK, and stop() keeps receipts, so every
-        // later undo of it was refused as already running.
-        receipts.markRolledBack(receiptId, now());
+        const restored = await proveRollback(
+          routed,
+          stored.input,
+          stored.receipt.changes,
+        );
+        // The session ended while the undo was running, so nothing can be
+        // written into it. The receipt must not claim an outcome the audit
+        // cannot support, and the compensating action was already
+        // dispatched, so unreconciled is the only honest state.
         if (session.expired()) {
+          receipts.markIndeterminate(
+            receiptId,
+            now(),
+            "the session ended while the compensating action was running",
+          );
           return {
             ok: false,
-            reason: `${receiptId} belongs to a session that ended while the undo was running`,
+            reason: `${receiptId} belongs to a session that ended while the undo was running, so it is unreconciled rather than rolled back`,
           };
         }
+        // A rollback is recorded when it was proven, or when the capability
+        // deliberately declared that the handler word is the evidence.
+        // Anything else is an unreconciled receipt rather than a claim
+        // nobody checked.
+        if (restored.kind === "unreconciled") {
+          receipts.markIndeterminate(receiptId, now(), restored.detail);
+          audit.append({
+            kind: "rollback_indeterminate",
+            capability: stored.capability,
+            receiptId,
+            at: now(),
+          });
+          emit();
+          return {
+            ok: false,
+            reason: `rollback of ${receiptId} is unreconciled: ${restored.detail}`,
+          };
+        }
+        receipts.markRolledBack(receiptId, now(), restored.verification);
         audit.append({
           kind: "rollback_performed",
           capability: stored.capability,
@@ -1651,18 +1793,79 @@ export function createAgentDeskRuntime(options: {
         emit();
         return { ok: true, result };
       } catch (err) {
-        receipts.releaseRollback(receiptId);
+        const detail = err instanceof Error ? err.message : String(err);
+        // Dispatched and then threw, so it may have written. Nothing the
+        // runtime can observe settles that, so it does not guess.
+        receipts.markIndeterminate(
+          receiptId,
+          now(),
+          session.expired()
+            ? `${detail} (the session ended while the undo was running)`
+            : detail,
+        );
         if (session.expired()) {
           return {
             ok: false,
-            reason: `${receiptId} belongs to a session that ended while the undo was running`,
+            reason: `${receiptId} belongs to a session that ended while the undo was running, so it is unreconciled rather than retryable`,
           };
         }
+        audit.append({
+          kind: "rollback_indeterminate",
+          capability: stored.capability,
+          receiptId,
+          at: now(),
+        });
+        emit();
         return {
           ok: false,
-          reason: err instanceof Error ? err.message : String(err),
+          reason: `rollback of ${receiptId} is indeterminate: the compensating action failed after dispatch, so whether it changed anything is unknown until someone reconciles it with reconcileRollback. Original failure: ${detail}`,
         };
       }
+    },
+
+    reconcileRollback(receiptId, outcome, by) {
+      const stored = receipts.get(receiptId);
+      if (!stored) {
+        return { ok: false, reason: `unknown receipt: ${receiptId}` };
+      }
+      // Anything unrecognised must not fall through to `untouched`, which is
+      // the value that makes the compensating action runnable again.
+      if (outcome !== "compensated" && outcome !== "untouched") {
+        return {
+          ok: false,
+          reason: `unknown reconciliation outcome: ${String(outcome)}. Pass "compensated" or "untouched"`,
+        };
+      }
+      // Reconciling is a claim about what someone went and observed. The
+      // ambient actor is usually the agent whose compensation failed, and
+      // letting it clear its own indeterminate receipt is the one thing this
+      // record exists to prevent. Same snapshot-parse-then-check path as an
+      // approval or a review, so all three refuse an unrecordable identity
+      // identically rather than each inventing its own rule.
+      const owned = resolveHumanActor(
+        by,
+        "reconciling a rollback must name a human who checked the application; pass one to reconcileRollback rather than relying on the acting actor",
+      );
+      if (!owned.ok) {
+        return { ok: false, reason: owned.reason };
+      }
+      const reconciler = owned.actor;
+      if (!receipts.reconcile(receiptId, outcome, now(), reconciler)) {
+        return {
+          ok: false,
+          reason: `${receiptId} is ${stored.rollbackState}, and only an indeterminate rollback can be reconciled`,
+        };
+      }
+      audit.append({
+        kind: "rollback_reconciled",
+        capability: stored.capability,
+        receiptId,
+        outcome,
+        actor: reconciler,
+        at: now(),
+      });
+      emit();
+      return { ok: true, receipt: receipts.get(receiptId)! };
     },
     async invoke(name, input = {}) {
       if (!started) {

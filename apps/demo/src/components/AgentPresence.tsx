@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type { PresentationEvent } from "@agentdesk/webmcp";
 import { agentdesk } from "../runtime/agentdesk.ts";
+import { useAnnouncer } from "./announcer.ts";
 import { revealTarget, shouldHandOffFocus } from "./reveal.ts";
 
 export type PresenceMode = "fast" | "guided";
@@ -16,11 +17,12 @@ export function AgentPresence({ mode }: { mode: PresenceMode }) {
   const navigate = useNavigate();
   const { mode: routeMode } = useParams();
   const [narration, setNarration] = useState<string | null>(null);
-  const [announcement, setAnnouncement] = useState("");
+  const { announcement, announce } = useAnnouncer(NARRATION_MS);
   const [risk, setRisk] = useState<string | null>(null);
   const narrationTimer = useRef<number | undefined>(undefined);
-  const announceTimer = useRef<number | undefined>(undefined);
   const revealTimer = useRef<number | undefined>(undefined);
+  const announceRef = useRef(announce);
+  announceRef.current = announce;
   // One slot, because the runtime emits capability_completed exactly once
   // per execution, so no earlier id can come back around.
   const focusedExecution = useRef<string | undefined>(undefined);
@@ -54,12 +56,7 @@ export function AgentPresence({ mode }: { mode: PresenceMode }) {
           focusedExecution.current = event.executionId;
         }
         if (event.announce && event.phase === "capability_completed") {
-          setAnnouncement(event.announce);
-          window.clearTimeout(announceTimer.current);
-          announceTimer.current = window.setTimeout(
-            () => setAnnouncement(""),
-            NARRATION_MS,
-          );
+          announceRef.current(event.announce);
         }
         if (guided && event.message) {
           setNarration(event.message);
@@ -84,7 +81,6 @@ export function AgentPresence({ mode }: { mode: PresenceMode }) {
     return () => {
       unsubscribe();
       window.clearTimeout(narrationTimer.current);
-      window.clearTimeout(announceTimer.current);
       window.clearTimeout(revealTimer.current);
     };
   }, []);

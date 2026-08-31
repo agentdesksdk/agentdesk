@@ -134,6 +134,21 @@ export type AuditEvent =
       at: number;
     }
   | {
+      kind: "rollback_indeterminate";
+      capability: string;
+      receiptId: string;
+      at: number;
+    }
+  | {
+      kind: "rollback_reconciled";
+      capability: string;
+      receiptId: string;
+      outcome: "compensated" | "untouched";
+      /** The human who checked. Required, because the claim is theirs. */
+      actor: HumanActor;
+      at: number;
+    }
+  | {
       kind: "receipt_reviewed";
       capability: string;
       receiptId: string;

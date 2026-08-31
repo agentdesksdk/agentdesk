@@ -5,10 +5,31 @@ import type { Receipt } from "./results.ts";
 
 /**
  * READY is undoable, ROLLING_BACK is claimed by an in-flight rollback,
- * ROLLED_BACK is spent. A failed compensating action returns to READY,
- * because a rollback that could not run is a retry, not a dead end.
+ * ROLLED_BACK is spent.
+ *
+ * INDETERMINATE is what a dispatched compensating action leaves behind when
+ * it throws. An exception proves the handler did not return, never that it
+ * did not write, so returning to READY would invite a second compensating
+ * write on top of one that may already have landed.
+ *
+ * Nothing the runtime can observe settles that. An execution verifier
+ * answers whether the original write is still visible, which is a different
+ * question from whether the compensation ran, and the two only coincide when
+ * the compensation is the exact inverse of the write. A compensation that is
+ * itself a forward transaction leaves the original state visible, so
+ * inferring "safe to retry" from a verifier is how a double refund happens.
+ *
+ * Only `ReceiptStore.reconcile` leaves this state, and it takes the answer
+ * from a caller who went and looked.
  */
-export type RollbackState = "READY" | "ROLLING_BACK" | "ROLLED_BACK";
+export type RollbackState =
+  | "READY"
+  | "ROLLING_BACK"
+  | "ROLLED_BACK"
+  | "INDETERMINATE";
+
+/** What a human or an application established about an unreconciled rollback. */
+export type ReconciliationOutcome = "compensated" | "untouched";
 
 export type StoredReceipt = {
   id: string;
@@ -25,6 +46,19 @@ export type StoredReceipt = {
   rollbackState: RollbackState;
   /** Set once a rollback has been performed against this receipt. */
   rolledBackAt?: number;
+  /**
+   * How well the rollback was proven, alongside `verification` for the
+   * execution. UNSUPPORTED means the capability declared no verifier, so
+   * success here rests on the handler's word and nothing else.
+   */
+  rollbackVerification?: VerificationResult;
+  /** When a compensating action was dispatched and then failed. */
+  rollbackAttemptedAt?: number;
+  /** Why it failed, kept so an operator reconciling later can see it. */
+  rollbackFailure?: string;
+  /** Who established what an indeterminate rollback actually did. */
+  reconciledAt?: number;
+  reconciledBy?: HumanActor;
   /**
    * Review state sits beside the receipt, never inside it. Marking
    * something reviewed does not change what occurred.
@@ -86,20 +120,67 @@ export class ReceiptStore {
     return this.moveRollback(id, "READY", "ROLLING_BACK");
   }
 
-  /** Returns a failed rollback to READY so the caller can retry it. */
+  /**
+   * Returns a rollback to READY. Only for a refusal that happened before the
+   * handler was dispatched, where nothing can have run.
+   */
   releaseRollback(id: string): void {
     this.moveRollback(id, "ROLLING_BACK", "READY");
   }
 
-  markRolledBack(id: string, at: number): void {
-    this.moveRollback(id, "ROLLING_BACK", "ROLLED_BACK", at);
+  /** Parks a dispatched rollback whose compensating action may have landed. */
+  markIndeterminate(id: string, at: number, failure: string): void {
+    this.moveRollback(id, "ROLLING_BACK", "INDETERMINATE", {
+      rollbackAttemptedAt: at,
+      rollbackFailure: failure,
+    });
+  }
+
+  markRolledBack(
+    id: string,
+    at: number,
+    rollbackVerification: VerificationResult,
+  ): void {
+    this.moveRollback(id, "ROLLING_BACK", "ROLLED_BACK", {
+      rolledBackAt: at,
+      rollbackVerification,
+    });
+  }
+
+  /**
+   * The only exit from INDETERMINATE. `compensated` means someone confirmed
+   * the compensating write landed, so the receipt is spent. `untouched` means
+   * they confirmed it did not, so undo is safe to attempt again.
+   */
+  /**
+   * `by` is a required `HumanActor` because the caller has already parsed
+   * one. Accepting an optional `Actor` here would let an agent-authored
+   * reconciliation be constructed internally, which no runtime path does but
+   * which the type permitted.
+   */
+  reconcile(
+    id: string,
+    outcome: ReconciliationOutcome,
+    at: number,
+    by: HumanActor,
+  ): boolean {
+    return this.moveRollback(
+      id,
+      "INDETERMINATE",
+      outcome === "compensated" ? "ROLLED_BACK" : "READY",
+      {
+        reconciledAt: at,
+        reconciledBy: by,
+        ...(outcome === "compensated" ? { rolledBackAt: at } : {}),
+      },
+    );
   }
 
   private moveRollback(
     id: string,
     from: RollbackState,
     to: RollbackState,
-    rolledBackAt?: number,
+    fields?: Partial<StoredReceipt>,
   ): boolean {
     const index = this.receipts.findIndex((entry) => entry.id === id);
     const existing = this.receipts[index];
@@ -109,7 +190,7 @@ export class ReceiptStore {
     this.receipts[index] = deepFreeze({
       ...existing,
       rollbackState: to,
-      ...(rolledBackAt !== undefined ? { rolledBackAt } : {}),
+      ...fields,
     });
     return true;
   }

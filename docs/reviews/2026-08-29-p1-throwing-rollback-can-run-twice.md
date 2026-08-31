@@ -72,3 +72,27 @@ second compensating write.
 That is the same constraint `docs/design/operation-plan.md` records for
 generated capabilities. They rarely declare `verify`, so the case with no
 protection here is the same case that has no protection there.
+
+## Resolved
+
+Fixed on `f8ae521`, corrected on this branch after review. `RollbackState`
+gains `INDETERMINATE`, and a compensating
+action that throws after dispatch parks the receipt there instead of
+returning it to `READY`.
+
+The premise the old design rested on was written into its own doc comment,
+which said a failed compensating action returns to READY "because a rollback
+that could not run is a retry, not a dead end". An exception proves the
+handler did not return. It never proves the handler did not write.
+
+One path still returns to `READY`, and only on evidence. When the capability
+declares `verify`, the runtime runs it after the throw. Finding the original
+write still intact is proof the compensation never landed, so the receipt is
+genuinely retryable. Anything else, including a verifier that throws or a
+capability with no verifier at all, is indeterminate.
+
+A second `rollback()` on an indeterminate receipt is refused by name and
+says why, rather than running the compensating write again.
+
+Regression test: `packages/webmcp/tests/rollback-indeterminate.test.ts`,
+five cases across commits-or-not and verifier-or-not.

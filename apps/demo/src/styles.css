@@ -801,6 +801,13 @@ input[type="text"]:focus {
   color: var(--ink-soft);
 }
 
+.unreconciled {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--warn, #b45309);
+}
+
 /* The rail is too narrow for four columns; stack field over the diff. */
 .receipt .change-row {
   grid-template-columns: auto auto 1fr;

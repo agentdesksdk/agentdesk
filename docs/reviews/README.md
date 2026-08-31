@@ -38,16 +38,17 @@ and executed under plain Node, and the design doc check passed.
 | P1 | RESOLVED | [Presentation callback failure corrupts a completed write outcome](2026-08-29-p1-presentation-callback-corrupts-write-outcome.md) |
 | P1 | RESOLVED | [Reset allows in-flight plans and rollbacks to repopulate audit state](2026-08-29-p1-reset-leaks-in-flight-terminal-events.md) |
 | P1 | RESOLVED | [Single-action approval has no approver identity](2026-08-29-p1-single-action-approval-has-no-approver.md) |
-| P1 | OPEN | [A rollback that commits and throws can run twice](2026-08-29-p1-throwing-rollback-can-run-twice.md) |
-| P2 | OPEN | [Repeated live-region announcements are dropped](2026-08-29-p2-identical-live-announcements-are-dropped.md) |
+| P1 | RESOLVED | [A rollback that commits and throws can run twice](2026-08-29-p1-throwing-rollback-can-run-twice.md) |
+| P2 | RESOLVED | [Repeated live-region announcements are dropped](2026-08-29-p2-identical-live-announcements-are-dropped.md) |
 | P1 | RESOLVED | [A presentation listener can change the invocation actor](2026-08-30-p1-presentation-listener-can-change-invocation-actor.md) |
 | P1 | RESOLVED | [A plan changes executor mid-commit](2026-08-30-p1-plan-changes-executor-mid-commit.md) |
 | P1 | RESOLVED | [A caller-supplied human identity is not normalized once](2026-08-30-p1-human-identity-is-not-normalized-once.md) |
 | P2 | RESOLVED | [Audit types do not encode the human-only events](2026-08-30-p2-audit-types-do-not-encode-human-events.md) |
 | P1 | RESOLVED | [Human identity shape is not validated at the JavaScript boundary](2026-08-30-p1-human-identity-shape-is-not-validated.md) |
 | P2 | RESOLVED | [Human-only record fields remain typed as generic actors](2026-08-30-p2-human-only-record-fields-remain-generic.md) |
-| P1 | PARTIALLY FIXED | [Stop strands an interrupted rollback in progress](2026-08-30-p1-stop-strands-rollback-in-progress.md) |
+| P1 | RESOLVED | [Stop strands an interrupted rollback in progress](2026-08-30-p1-stop-strands-rollback-in-progress.md) |
 | P1 | RESOLVED | [Recordability preflight discards the input snapshot](2026-08-31-p1-recordability-preflight-discards-input-snapshot.md) |
 | P1 | RESOLVED | [Approval rejects a valid actor without an optional name](2026-08-31-p1-approval-requires-optional-actor-name.md) |
+| P2 | RESOLVED | [Reconciler fields remain typed as generic actors](2026-08-31-p2-reconciler-fields-remain-generic-actors.md) |
 
 Delete this directory only after every open item has either a validated fix or an explicit accepted-risk decision.

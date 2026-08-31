@@ -178,6 +178,31 @@ export type Capability = {
     changes: readonly Change[],
   ) => VerificationResult | Promise<VerificationResult>;
   /**
+   * Reads state back after a rollback and reports whether the receipt's
+   * `before` values are actually back.
+   *
+   * `verify` cannot answer this. It asks whether the original change is
+   * still visible, so it detects a no-op undo and nothing more. Its MISMATCH
+   * says only that state moved, not that it moved to the right place, and an
+   * undo that lands on a third value is not a rollback.
+   */
+  verifyRollback?: (
+    input: Record<string, unknown>,
+    ctx: AppContext,
+    changes: readonly Change[],
+  ) => VerificationResult | Promise<VerificationResult>;
+  /**
+   * What a receipt may claim after an undo, the twin of `approvalEvidence`.
+   *
+   * `verified` needs `verifyRollback` and records a proven rollback.
+   * `handler` is the explicit opt-out for an application that cannot read
+   * its own state back, and records the undo on the handler's word alone.
+   * Declaring neither leaves the receipt INDETERMINATE for a human to
+   * reconcile, because a governance record should not assert what nobody
+   * checked.
+   */
+  rollbackEvidence?: "verified" | "handler";
+  /**
    * Optional. Most applications cannot undo, and pretending otherwise is
    * worse than admitting it, so a capability without this reports
    * UNSUPPORTED rather than failing.
@@ -245,6 +270,12 @@ export type CapabilitySpec = {
     ctx: AppContext,
     changes: readonly Change[],
   ) => VerificationResult | Promise<VerificationResult>;
+  verifyRollback?: (
+    input: Record<string, unknown>,
+    ctx: AppContext,
+    changes: readonly Change[],
+  ) => VerificationResult | Promise<VerificationResult>;
+  rollbackEvidence?: "verified" | "handler";
   rollback?: (
     input: Record<string, unknown>,
     ctx: AppContext,
@@ -339,6 +370,19 @@ export function defineCapability(spec: CapabilitySpec): Capability {
   }
   if (spec.verify !== undefined) {
     capability.verify = spec.verify;
+  }
+  if (spec.verifyRollback !== undefined) {
+    capability.verifyRollback = spec.verifyRollback;
+  }
+  if (spec.verifyRollback !== undefined && spec.rollbackEvidence === "handler") {
+    throw new Error(
+      `${name} declares verifyRollback and also waives it with rollbackEvidence "handler". Keep the verifier, or drop it and accept the handler's word, but not both.`,
+    );
+  }
+  if (spec.rollbackEvidence !== undefined) {
+    capability.rollbackEvidence = spec.rollbackEvidence;
+  } else if (spec.verifyRollback !== undefined) {
+    capability.rollbackEvidence = "verified";
   }
   if (spec.rollback !== undefined) {
     capability.rollback = spec.rollback;

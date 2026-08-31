@@ -4,6 +4,18 @@ import { join } from "node:path";
 const root = process.cwd();
 const designDir = join(root, "docs", "design");
 
+/**
+ * Anchors are read from every documentation tree, not just `docs/design`.
+ * The rollback state machine grew a fourth state while `docs/architecture.md`
+ * still described three, and this check passed the whole time because it was
+ * only ever pointed at one directory.
+ */
+const ANCHORED_DIRS = [
+  designDir,
+  join(root, "docs"),
+  join(root, "docs", "reviews"),
+];
+
 const ANCHOR_BLOCK = /<!--\s*code-anchors\s*\n([\s\S]*?)-->/g;
 
 /**
@@ -54,12 +66,20 @@ const CLAIMS = [
 
   ["operation-plan.md", /expectedRevision/, "present", "operation plan builds on the shipped plan type"],
   ["operation-plan.md", /docs\/architecture\.md/, "present", "operation plan defers to shipped documentation"],
+
+  ["docs/architecture.md", /INDETERMINATE/, "present", "architecture names the fourth rollback state"],
+  ["docs/architecture.md", /reconcileRollback/, "present", "architecture names the only exit from it"],
+  ["docs/architecture.md", /rollbackVerification/, "present", "architecture says how a rollback was proven"],
+  ["docs/architecture.md", /verifyRollback/, "present", "architecture names the rollback-specific verifier"],
+  ["docs/architecture.md", /rollbackEvidence/, "present", "architecture names the deliberate opt-out"],
+  ["docs/architecture.md", /the receipt returns to READY/, "absent", "a thrown rollback no longer returns to READY"],
+  ["docs/architecture.md", /rollbackState` of READY, ROLLING_BACK, or\s+ROLLED_BACK/, "absent", "the three-state enumeration is stale"],
 ];
 
 const failures = [];
 
 function readDoc(name) {
-  const path = join(designDir, name);
+  const path = name.includes("/") ? join(root, name) : join(designDir, name);
   if (!existsSync(path)) return null;
   return readFileSync(path, "utf8");
 }
@@ -80,8 +100,15 @@ for (const [doc, pattern, mode, why] of CLAIMS) {
 }
 
 let anchorCount = 0;
-for (const file of readdirSync(designDir).filter((f) => f.endsWith(".md"))) {
-  const body = readFileSync(join(designDir, file), "utf8");
+const anchoredFiles = ANCHORED_DIRS.filter((dir) => existsSync(dir)).flatMap(
+  (dir) =>
+    readdirSync(dir)
+      .filter((f) => f.endsWith(".md"))
+      .map((f) => join(dir, f)),
+);
+for (const path of [...new Set(anchoredFiles)]) {
+  const file = path.slice(root.length + 1).replace(/\\/g, "/");
+  const body = readFileSync(path, "utf8");
   for (const [, block] of body.matchAll(ANCHOR_BLOCK)) {
     for (const line of block.split("\n").map((l) => l.trim()).filter(Boolean)) {
       const [relPath, ...symbols] = line.split(/\s+/);

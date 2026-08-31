@@ -63,3 +63,29 @@ transition and misreports `stop()` as `reset()`. Keep this finding open until
 the PR #9 evidence model is composed on rebase: a dispatched rollback whose
 session ends must settle with explicit evidence or an indeterminate state,
 and the audit, receipt, and returned reason must agree.
+
+## Resolved on PR #9, rebased onto `6a2d7f1`
+
+The remaining half was that receipt state, audit evidence, and the returned
+result disagreed. After #10, a compensating action that completed while its
+session was ending marked the receipt `ROLLED_BACK`, wrote no
+`rollback_performed` event because the session could no longer be written
+to, and returned `ok: false`. Three sources, three different answers, and
+the receipt was the one claiming the strongest thing on the least evidence.
+
+A session that ends after dispatch is the same epistemic position as a
+handler that throws after dispatch. The compensating action ran and nothing
+can be recorded about what it did. So it takes the same state. The receipt
+becomes `INDETERMINATE` carrying `rollbackAttemptedAt` and a
+`rollbackFailure` naming the session, no audit event is written because
+none can be, the caller is told the undo is unreconciled rather than failed,
+and `reconcileRollback` is available to settle it once a human has looked.
+
+A throwing rollback interrupted the same way records the underlying failure
+and the session in one `rollbackFailure`, rather than losing the original
+error behind the session message.
+
+Regression test: `packages/webmcp/tests/rollback-session-seam.test.ts`, six
+cases across stop and reset. Two of them fail against the pre-fix behaviour
+with `expected 'ROLLED_BACK' to be 'INDETERMINATE'`; the other four are
+regression guards for properties #10 already satisfied.

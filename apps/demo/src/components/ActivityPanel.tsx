@@ -7,6 +7,7 @@ import type {
   Receipt,
   VerificationResult,
 } from "@agentdesk/webmcp";
+import { useAnnouncer } from "./announcer.ts";
 import { render } from "./ApprovalCards.tsx";
 import { useRuntime } from "./hooks.ts";
 import {
@@ -203,6 +204,27 @@ function collapse(events: readonly AuditEvent[]): Rendered[] {
           meta: event.receiptId,
         });
         break;
+      case "rollback_indeterminate":
+        out.push({
+          key,
+          at: event.at,
+          head: "Undo outcome unknown",
+          cap: event.capability,
+          meta: event.receiptId,
+        });
+        break;
+      case "rollback_reconciled":
+        out.push({
+          key,
+          at: event.at,
+          head:
+            event.outcome === "compensated"
+              ? "Reconciled as undone"
+              : "Reconciled as untouched",
+          cap: event.capability,
+          meta: event.receiptId,
+        });
+        break;
       case "receipt_reviewed":
         out.push({
           key,
@@ -270,7 +292,7 @@ export function ActivityPanel() {
   const navigate = useNavigate();
   const { mode } = useParams();
   const revealTimer = useRef<number | undefined>(undefined);
-  const [announcement, setAnnouncement] = useState("");
+  const { announcement, announce } = useAnnouncer();
   const [pendingFocus, setPendingFocus] = useState<string | null>(null);
   const rows = collapse(snapshot.audit).slice(0, 80);
   const stored = new Map(
@@ -380,7 +402,7 @@ export function ActivityPanel() {
                                     entry.id,
                                     OPERATOR,
                                   );
-                                  setAnnouncement(
+                                  announce(
                                     outcome.ok
                                       ? reviewedAnnouncement(entry)
                                       : reviewRefusedAnnouncement(
@@ -396,6 +418,10 @@ export function ActivityPanel() {
                             )}
                             {entry.rolledBackAt !== undefined ? (
                               <span className="undone">Rolled back</span>
+                            ) : entry.rollbackState === "INDETERMINATE" ? (
+                              <span className="unreconciled">
+                                Undo outcome unknown
+                              </span>
                             ) : entry.receipt.undoable !== true ? null : (
                               <button
                                 type="button"
@@ -403,7 +429,7 @@ export function ActivityPanel() {
                                 aria-label={`Undo ${action}`}
                                 onClick={() => {
                                   void agentdesk.rollback(entry.id).then((outcome) => {
-                                    setAnnouncement(
+                                    announce(
                                       outcome.ok
                                         ? rolledBackAnnouncement(entry)
                                         : rollbackRefusedAnnouncement(
