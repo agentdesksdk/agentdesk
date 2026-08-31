@@ -459,17 +459,24 @@ export type Unreconciled = {
  * reconciles against and a caller that could edit it could rewrite what the
  * runtime says happened.
  *
- * In-memory, and this one does not survive a restart in the way the others
- * do. The records themselves are reconstructible from the audit stream,
- * which carries `execution_indeterminate` and `staged_cleanup_failed` with
- * their record ids and detail. The artifact is not: it is a live object the
- * adapter made, so after a process or page restart a human can still learn
- * that a write may have landed but can no longer call `reconcile` on it.
+ * In-memory, and nothing here survives a restart. A persisted audit stream
+ * proves an incident happened and no more: `execution_indeterminate` and
+ * `staged_cleanup_failed` carry the record id, the capability, the detail,
+ * and the time. They do not carry `changes`, `operationKey`, `actionId`,
+ * `planId`, `operationIndex`, or the artifact, and this store has no method
+ * that accepts a rebuilt entry, so the record cannot be put back.
  *
- * That is a real limitation of an embedded runtime with no backend, and it
- * is the work an application has to do before this is production-stable.
- * An adapter whose artifacts are addressable by a durable key, rather than
- * by object identity, can rehydrate them and close the gap.
+ * Both halves are lost, and they hurt differently. Without the record,
+ * `listUnreconciled` is empty and `operationKey` is gone with it, so the
+ * guard that refuses a repeat is gone too and the same call can be
+ * dispatched again. Without the artifact, `reconcile` has nothing to hand
+ * the adapter, so the incident cannot be closed at all.
+ *
+ * Production durability therefore needs three things, not one: durable
+ * storage for the records, a hydration API that can replay them into this
+ * store, and adapter artifacts addressable by a durable key rather than by
+ * object identity. That is application work an embedded runtime with no
+ * backend cannot do for itself.
  */
 export class UnreconciledStore {
   private readonly entries: Array<{

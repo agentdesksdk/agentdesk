@@ -99,13 +99,22 @@ One limitation is known and accepted for the hackathon, recorded in
 `docs/reviews/2026-08-31-accepted-unreconciled-records-are-not-durable.md`.
 
 A staged commit that throws after it may have written leaves an unreconciled
-record and a retained adapter artifact. The records survive a restart if an
-application persists the audit stream, because
-`execution_indeterminate` and `staged_cleanup_failed` carry their ids. The
-artifact does not, because it is a live object held by identity, and
-`reconcile` needs it.
+record and a retained adapter artifact. Neither survives a restart. A
+persisted audit stream proves an incident occurred and no more:
+`execution_indeterminate` and `staged_cleanup_failed` carry the record id, the
+capability, the detail, and the time, but not the approved `changes`, the
+`operationKey`, the action or plan linkage, the operation index, or the
+artifact. `UnreconciledStore` also has no method that accepts a rebuilt entry.
 
-Closing that means an adapter whose artifacts are addressable by a durable
-key: `fork` records enough to rebuild one, and `reconcile` accepts the key
-rather than the object. It is an adapter contract change plus whatever store
-the adopting application already runs, which is why it is not in the demo.
+The two losses hurt differently. Losing the record empties
+`listUnreconciled` and takes `operationKey` with it, so the guard that refuses
+a repeat is gone and the same call can be dispatched a second time. Losing the
+artifact is worse, because `reconcile` has nothing to hand the adapter and the
+incident cannot be closed at all.
+
+Closing this needs three things. Durable storage for the records. A hydration
+or replay API that can put them back into the runtime. And adapter artifacts
+addressable by a durable key, so `fork` records enough to rebuild one and
+`reconcile` accepts the key rather than the object. All three are application
+concerns that an embedded runtime with no backend cannot supply, which is why
+none of them is in the demo.
