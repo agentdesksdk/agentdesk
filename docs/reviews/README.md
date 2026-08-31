@@ -3,9 +3,9 @@
 Review target: AgentDesk SDK and Meridian Ops demo
 
 Validated against commits `6a1745e`, `812e5b9`, `2f1f332`, `2bc6f6a`,
-`d7a4911`, and `0c4f2fa`.
+`d7a4911`, `0c4f2fa`, and `798c899`.
 
-Five of those six are pre-merge branch commits and are not reachable from
+Six of those seven are pre-merge branch commits and are not reachable from
 `main`, because their pull requests were squash-merged or their branch is
 still open. They are recorded here so the findings below stay resolvable
 after the branches are pruned.
@@ -18,6 +18,7 @@ after the branches are pruned.
 | `2bc6f6a` | no | unmerged on `fix/acting-identity` |
 | `d7a4911` | no | unmerged on `fix/acting-identity` |
 | `0c4f2fa` | no | unmerged on `fix/staged-proposals` (#11) |
+| `798c899` | no | unmerged on `fix/staged-proposals` (#11) |
 
 Current gates on `bf079ca`: 368 tests passed across 241 SDK, 4 P0, and 123 demo, all three TypeScript projects typechecked, SDK and both applications built, the packed SDK imported and executed under plain Node, and the design doc check passed at 32 claims and 28 anchors.
 
@@ -60,5 +61,6 @@ and executed under plain Node, and the design doc check passed.
 | P1 | RESOLVED | [Staged idempotency replay leaks a proposal](2026-08-31-p1-staged-idempotency-replay-leaks-proposal.md) |
 | P1 | RESOLVED | [Invalid plan rejection destroys approved staged work](2026-08-31-p1-invalid-plan-rejection-discards-proposal.md) |
 | P1 | RESOLVED | [Revision drift leaves staged proposals alive](2026-08-31-p1-plan-drift-leaks-staged-proposal.md) |
+| P1 | RESOLVED | [Staging adapter failures leak the artifact](2026-08-31-p1-staging-adapter-failure-leaks-artifact.md) |
 
 Delete this directory only after every open item has either a validated fix or an explicit accepted-risk decision.
