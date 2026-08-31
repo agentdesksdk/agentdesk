@@ -211,4 +211,13 @@ export const stagingAdapter: StagingAdapter<StagedBranch> = {
   },
 
   release,
+
+  /**
+   * A human went and looked. Whatever they found, this branch is finished:
+   * an applied commit already reached the document and a rejected one never
+   * will, so the fork is dropped either way.
+   */
+  reconcile(staged) {
+    release(staged);
+  },
 };

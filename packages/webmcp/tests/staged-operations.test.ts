@@ -82,6 +82,9 @@ function makeAdapter(
       releases += 1;
       artifact.settled = true;
     },
+    reconcile: (artifact) => {
+      artifact.settled = true;
+    },
   };
 
   return {
@@ -267,7 +270,7 @@ describe("a commit that throws after dispatch is indeterminate", () => {
     const actionId = runtime.getSnapshot().pending[0]!.id;
     await runtime.approve(actionId, HUMAN);
 
-    const settled = runtime.reconcile(actionId, "applied", HUMAN);
+    const settled = runtime.reconcile(actionId, { kind: "commit_applied" }, HUMAN);
 
     expect(settled.ok).toBe(true);
     expect(runtime.listUnreconciled()).toHaveLength(0);

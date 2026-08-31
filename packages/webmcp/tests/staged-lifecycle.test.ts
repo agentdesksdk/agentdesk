@@ -93,6 +93,9 @@ function makeStore() {
     release: (artifact) => {
       artifact.settled = true;
     },
+    reconcile: (artifact) => {
+      artifact.settled = true;
+    },
   };
 
   return {

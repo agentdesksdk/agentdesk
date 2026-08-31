@@ -301,7 +301,20 @@ A commit that throws is indeterminate rather than failed. The exception says
 the adapter did not return, not that nothing was written, so the approval
 resolves `INDETERMINATE`, the artifact is retained rather than released, and
 the approved diff stays available through `listUnreconciled` until a human
-records what happened with `reconcile`. `StagedCommitRefused` and
+records what happened with `reconcile`. A plan reports the same fact the same
+way: the operation and the plan both resolve `INDETERMINATE`, the record
+carries the plan id and the operation index, and later operations are skipped
+rather than written on top of a change nobody can confirm.
+
+`reconcile` is an adapter boundary, not a bookkeeping call. It hands the
+retained artifact back with a `StagedResolution` of `commit_applied`,
+`commit_not_applied`, or `cleanup_disposed`, and only a successful return
+settles the record. A throwing recovery leaves the record and its evidence in
+place. Reset does not clear these records, because a reset cannot close an
+artifact still open in the application and deleting the record would lose the
+only thing that could find it. The evidence itself is cloned and deep-frozen
+at the store boundary, so a caller cannot rewrite what the runtime says
+happened. `StagedCommitRefused` and
 `CapabilityUnavailableError` are the two ways an adapter states that nothing
 was dispatched, and both stay ordinary refusals. Nothing is keyed by business input, so two approvals of the
 same capability and input hold two artifacts and neither can consume the

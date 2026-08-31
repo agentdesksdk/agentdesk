@@ -107,7 +107,14 @@ export type VerificationResult =
 export type OperationOutcome = {
   capability: CapabilityName;
   executionId?: string;
-  status: "COMPLETED" | "SKIPPED" | "FAILED";
+  /**
+   * INDETERMINATE means the commit threw after it may already have written.
+   * It is not FAILED, because calling it that invites the retry that would
+   * apply the change twice.
+   */
+  status: "COMPLETED" | "SKIPPED" | "FAILED" | "INDETERMINATE";
+  /** The reconciliation record, when the outcome is INDETERMINATE. */
+  recordId?: string;
   detail?: string;
   verification: VerificationResult;
 };
@@ -130,6 +137,11 @@ export type PlanStatus =
   | "COMMITTED"
   | "PARTIAL"
   | "INTERRUPTED"
+  /**
+   * An operation's result became unknown, so the plan stopped rather than
+   * building later operations on a change nobody can confirm.
+   */
+  | "INDETERMINATE"
   | "REJECTED"
   | "DRIFTED"
   | "FAILED";

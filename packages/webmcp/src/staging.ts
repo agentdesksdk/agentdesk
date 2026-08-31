@@ -1,3 +1,4 @@
+import { deepFreeze } from "./audit.ts";
 import { CapabilityUnavailableError, type Change } from "./capability.ts";
 
 /**
@@ -58,7 +59,31 @@ export type StagingAdapter<S> = {
    * only a successful return establishes disposal.
    */
   release: (staged: S) => void;
+  /**
+   * Settles an artifact a human has gone and looked at.
+   *
+   * Called with the artifact the runtime retained and what the human found.
+   * A successful return is what makes the artifact terminal; throwing leaves
+   * the record open with its evidence, because an unresolved external
+   * condition is not resolved by failing to resolve it.
+   */
+  reconcile: (staged: S, resolution: StagedResolution) => void;
 };
+
+/**
+ * What a human found, and therefore what the adapter should do about it.
+ *
+ * Commit application and cleanup disposal are separate questions. Whether a
+ * write landed says nothing about whether a failed release later succeeded,
+ * so they do not share a vocabulary.
+ */
+export type StagedResolution =
+  /** The write did reach the application. The fork is moot; drop it. */
+  | { kind: "commit_applied" }
+  /** The write never reached the application. The fork is moot; drop it. */
+  | { kind: "commit_not_applied" }
+  /** A disposal that had failed has now succeeded. */
+  | { kind: "cleanup_disposed" };
 
 /**
  * A capability's proposed write. Built by the runtime from one staged
@@ -72,6 +97,12 @@ export type StagedProposal = {
   readonly commit: () => unknown;
   /** Throws the staged write away. Safe to call more than once. */
   readonly discard: () => void;
+  /**
+   * The adapter's own artifact. Opaque to the runtime, which only hands it
+   * back to the adapter, and retained so an artifact left open by a failed
+   * commit or a failed disposal can still be settled later.
+   */
+  readonly artifact: unknown;
 };
 
 /** Internal. Produced only by `buildStageHandler`. */
@@ -106,8 +137,15 @@ export class StagedCommitRefused extends Error {
 export class StagedCommitIndeterminate extends Error {
   readonly changes: readonly Change[];
   readonly reason: unknown;
+  /** The artifact to hand back to the adapter once a human has looked. */
+  readonly artifact: unknown;
 
-  constructor(operation: string, changes: readonly Change[], reason: unknown) {
+  constructor(
+    operation: string,
+    changes: readonly Change[],
+    reason: unknown,
+    artifact: unknown,
+  ) {
     super(
       `${operation} threw while committing, so whether the change landed is unknown: ${
         reason instanceof Error ? reason.message : String(reason)
@@ -116,6 +154,7 @@ export class StagedCommitIndeterminate extends Error {
     this.name = "StagedCommitIndeterminate";
     this.changes = changes;
     this.reason = reason;
+    this.artifact = artifact;
   }
 }
 
@@ -124,7 +163,12 @@ export class StagedCommitIndeterminate extends Error {
  * is an attempted cleanup, not a completed one, so the artifact is still open
  * in the application and has to stay findable.
  */
-export type CleanupFailure = { operation: string; detail: string };
+export type CleanupFailure = {
+  operation: string;
+  detail: string;
+  /** The artifact the failed disposal left open. */
+  artifact: unknown;
+};
 
 export type StageHooks = {
   /** Called when `release` throws, so the runtime records and retains it. */
@@ -157,6 +201,7 @@ export function buildStageHandler<S>(
       hooks.cleanupFailed({
         operation,
         detail: err instanceof Error ? err.message : String(err),
+        artifact: staged,
       });
     }
   };
@@ -204,6 +249,7 @@ export function buildStageHandler<S>(
     let settled = false;
     return {
       changes,
+      artifact: forked.staged,
       commit: () => {
         if (settled) {
           throw new StagedProposalError(
@@ -225,7 +271,12 @@ export function buildStageHandler<S>(
           ) {
             releaseAndRethrow(forked.staged, err);
           }
-          throw new StagedCommitIndeterminate(operation, changes, err);
+          throw new StagedCommitIndeterminate(
+            operation,
+            changes,
+            err,
+            forked.staged,
+          );
         }
       },
       discard: () => {
@@ -314,6 +365,9 @@ export type Unreconciled = {
   id: string;
   /** The approval this belongs to, when it had one. */
   actionId?: string;
+  /** The plan and position this belongs to, when it came from one. */
+  planId?: string;
+  operationIndex?: number;
   capability: string;
   kind: "commit_indeterminate" | "cleanup_failed";
   detail: string;
@@ -322,39 +376,71 @@ export type Unreconciled = {
   at: number;
 };
 
+/**
+ * Staged outcomes nobody can call settled.
+ *
+ * Either a commit threw after it may have written, or a disposal failed and
+ * left the artifact open in the application. Both need a person, so they stay
+ * listed until one goes and looks and the adapter settles the artifact.
+ *
+ * The adapter's artifact is held here and never handed out. Reads return
+ * detached, deeply frozen copies, because this is the evidence a human
+ * reconciles against and a caller that could edit it could rewrite what the
+ * runtime says happened.
+ */
 export class UnreconciledStore {
-  private readonly entries: Unreconciled[] = [];
+  private readonly entries: Array<{
+    record: Unreconciled;
+    artifact: unknown;
+  }> = [];
   private nextId = 1;
 
-  record(entry: Omit<Unreconciled, "id">): Unreconciled {
-    const stored: Unreconciled = { ...entry, id: `UNREC-${this.nextId++}` };
-    this.entries.push(stored);
+  record(entry: Omit<Unreconciled, "id">, artifact: unknown): Unreconciled {
+    const stored = deepFreeze({
+      ...structuredClone({ ...entry, changes: [...entry.changes] }),
+      id: `UNREC-${this.nextId++}`,
+    }) as Unreconciled;
+    this.entries.push({ record: stored, artifact });
     return stored;
   }
 
   list(): Unreconciled[] {
-    return this.entries.map((entry) => ({ ...entry }));
+    return this.entries.map(({ record }) => deepFreeze(structuredClone(record)));
   }
 
   /** Binds a record to the approval it belongs to, once one is known. */
-  attachAction(id: string, actionId: string): void {
-    const entry = this.entries.find((candidate) => candidate.id === id);
-    if (entry) {
-      entry.actionId = actionId;
+  attach(id: string, owner: Partial<Unreconciled>): void {
+    const found = this.entries.find(({ record }) => record.id === id);
+    if (found) {
+      found.record = deepFreeze({ ...found.record, ...owner }) as Unreconciled;
     }
   }
 
   /** The open record for an approval, if it has one. */
   forAction(actionId: string): Unreconciled | undefined {
-    return this.entries.find((entry) => entry.actionId === actionId);
+    const found = this.entries.find(
+      ({ record }) => record.actionId === actionId,
+    );
+    return found ? deepFreeze(structuredClone(found.record)) : undefined;
   }
 
+  /** The record and its artifact, for the runtime to hand to the adapter. */
+  open(id: string): { record: Unreconciled; artifact: unknown } | undefined {
+    const found = this.entries.find(({ record }) => record.id === id);
+    return found ? { record: found.record, artifact: found.artifact } : undefined;
+  }
+
+  /**
+   * Removes a record. Only called once the adapter has settled its artifact,
+   * because deleting the record of an open artifact loses the one thing that
+   * could still find it.
+   */
   settle(id: string): Unreconciled | undefined {
-    const index = this.entries.findIndex((entry) => entry.id === id);
-    return index === -1 ? undefined : this.entries.splice(index, 1)[0];
+    const index = this.entries.findIndex(({ record }) => record.id === id);
+    return index === -1 ? undefined : this.entries.splice(index, 1)[0]!.record;
   }
 
-  clear(): void {
-    this.entries.length = 0;
+  size(): number {
+    return this.entries.length;
   }
 }

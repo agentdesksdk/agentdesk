@@ -83,6 +83,9 @@ function makeStore() {
     release: (artifact) => {
       artifact.settled = true;
     },
+    reconcile: (artifact) => {
+      artifact.settled = true;
+    },
   };
 
   return {
@@ -346,6 +349,7 @@ describe("the proposal store keys on runtime identity", () => {
     let firstDiscarded = false;
     const first: StagedProposal = {
       changes: [],
+      artifact: {},
       commit: () => ({}),
       discard: () => {
         firstDiscarded = true;
@@ -353,6 +357,7 @@ describe("the proposal store keys on runtime identity", () => {
     };
     const second: StagedProposal = {
       changes: [],
+      artifact: {},
       commit: () => ({}),
       discard: () => {},
     };
@@ -371,6 +376,7 @@ describe("the proposal store keys on runtime identity", () => {
     const discarded: string[] = [];
     const proposal = (label: string): StagedProposal => ({
       changes: [],
+      artifact: {},
       commit: () => ({}),
       discard: () => discarded.push(label),
     });

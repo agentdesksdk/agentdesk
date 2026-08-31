@@ -137,8 +137,16 @@ export type AuditEvent =
       kind: "staged_reconciled";
       capability: string;
       recordId: string;
-      outcome: "applied" | "not_applied";
-      actor: Actor;
+      resolution: "commit_applied" | "commit_not_applied" | "cleanup_disposed";
+      /** Only a human can go and find out what happened. */
+      actor: HumanActor;
+      at: number;
+    }
+  | {
+      kind: "staged_reconcile_failed";
+      capability: string;
+      recordId: string;
+      detail: string;
       at: number;
     }
   | {

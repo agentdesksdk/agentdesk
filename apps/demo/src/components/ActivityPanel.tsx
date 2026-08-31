@@ -265,9 +265,18 @@ function collapse(events: readonly AuditEvent[]): Rendered[] {
         out.push({
           key,
           at: event.at,
-          head: event.outcome === "applied" ? "Reconciled as applied" : "Reconciled as not applied",
+          head: "Reconciled",
           cap: event.capability,
-          meta: `${event.recordId} closed by ${event.actor.name ?? event.actor.id}`,
+          meta: `${event.resolution} · ${event.recordId} closed by ${event.actor.name ?? event.actor.id}`,
+        });
+        break;
+      case "staged_reconcile_failed":
+        out.push({
+          key,
+          at: event.at,
+          head: "Reconciliation failed",
+          cap: event.capability,
+          meta: `${event.detail} · ${event.recordId} still open`,
         });
         break;
       // A new audit kind has to get a case above; this stops it compiling

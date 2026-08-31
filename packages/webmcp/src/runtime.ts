@@ -64,6 +64,7 @@ import {
   StagedProposalStore,
   UnreconciledStore,
   type StagedProposal,
+  type StagedResolution,
   type StagingAdapter,
   type Unreconciled,
 } from "./staging.ts";
@@ -181,7 +182,7 @@ export type AgentDeskRuntime = {
    */
   reconcile: (
     target: string,
-    outcome: "applied" | "not_applied",
+    resolution: StagedResolution,
     by?: Actor,
   ) => { ok: true } | { ok: false; reason: string };
 
@@ -819,13 +820,16 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         cleanupFailed: (failure) => {
           // Attempting a hook that throws disposes nothing, so the artifact
           // is still open in the application and has to stay findable.
-          const record = unreconciled.record({
-            capability: capability.name,
-            kind: "cleanup_failed",
-            detail: failure.detail,
-            changes: [],
-            at: now(),
-          });
+          const record = unreconciled.record(
+            {
+              capability: capability.name,
+              kind: "cleanup_failed",
+              detail: failure.detail,
+              changes: [],
+              at: now(),
+            },
+            failure.artifact,
+          );
           audit.append({
             kind: "staged_cleanup_failed",
             capability: capability.name,
@@ -1279,13 +1283,17 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       // A commit that threw may already have written. Recording that as a
       // clean failure would invite a retry that applies the change twice.
       if (err instanceof StagedCommitIndeterminate) {
-        const record = unreconciled.record({
-          capability: capability.name,
-          kind: "commit_indeterminate",
-          detail: message,
-          changes: err.changes,
-          at: now(),
-        });
+        const record = unreconciled.record(
+          {
+            capability: capability.name,
+            kind: "commit_indeterminate",
+            detail: message,
+            changes: err.changes,
+            ...(planId !== undefined ? { planId } : {}),
+            at: now(),
+          },
+          err.artifact,
+        );
         audit.append({
           kind: "execution_indeterminate",
           capability: capability.name,
@@ -1392,7 +1400,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         actor: executor,
         ...(proposal ? { commit: proposal.commit } : {}),
       });
-      if (!outcome.ok) {
+      if (!outcome.ok && !outcome.indeterminate) {
         proposal?.discard();
       }
       const correlation =
@@ -1400,6 +1408,22 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           ? { executionId: outcome.executionId }
           : {};
       if (!outcome.ok) {
+        if (outcome.indeterminate) {
+          // The artifact is retained, not discarded, and the record is bound
+          // to this operation so a human can tell which one it belongs to.
+          unreconciled.attach(outcome.indeterminate.recordId, {
+            planId,
+            operationIndex: index,
+          });
+          return {
+            capability: operation.capability,
+            ...correlation,
+            status: "INDETERMINATE",
+            recordId: outcome.indeterminate.recordId,
+            detail: outcome.indeterminate.detail,
+            verification: { status: "UNSUPPORTED" },
+          };
+        }
         return {
           capability: operation.capability,
           ...correlation,
@@ -1695,8 +1719,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     },
     async reset() {
       endEpoch();
+      // Unreconciled records survive. A reset clears the runtime's own
+      // bookkeeping; it cannot clear an artifact still open in the
+      // application, and deleting the record would lose the only thing that
+      // could still find it. A disposal that fails during this discardAll
+      // records itself and stays for the same reason.
       proposals.discardAll();
-      unreconciled.clear();
       approvals.clear();
       idempotency.clear();
       plans.clear();
@@ -1978,7 +2006,21 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           proposals.discardPlan(planId);
           return settleInterrupted(planId, claimed, outcomes);
         }
-        outcomes.push(await commitOperation(planId, operation, index, executor));
+        const outcome = await commitOperation(planId, operation, index, executor);
+        outcomes.push(outcome);
+        // A later operation would write on top of a change nobody can
+        // confirm, so the plan stops here and the rest are skipped.
+        if (outcome.status === "INDETERMINATE") {
+          for (const skipped of claimed.operations.slice(index + 1)) {
+            outcomes.push({
+              capability: skipped.capability,
+              status: "SKIPPED",
+              detail: `not attempted: ${operation.capability} left an unknown result`,
+              verification: { status: "UNSUPPORTED" },
+            });
+          }
+          break;
+        }
       }
       proposals.discardPlan(planId);
       if (session.expired()) {
@@ -1988,14 +2030,19 @@ export function createAgentDeskRuntime<S = unknown>(options: {
 
       // COMMITTED is a claim that the work happened. An operation that
       // never ran, or one a verifier disproved, does not earn it.
+      const unknown = outcomes.filter(
+        (outcome) => outcome.status === "INDETERMINATE",
+      );
       const broken = outcomes.filter((outcome) => outcome.status === "FAILED");
       const skipped = outcomes.filter((outcome) => outcome.status === "SKIPPED");
       const mismatched = outcomes.filter(
         (outcome) => outcome.verification.status === "MISMATCH",
       );
       const status =
-        broken.length > 0
-          ? "FAILED"
+        unknown.length > 0
+          ? "INDETERMINATE"
+          : broken.length > 0
+            ? "FAILED"
           : skipped.length === 0 && mismatched.length === 0
             ? "COMMITTED"
             : "PARTIAL";
@@ -2008,7 +2055,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       });
       audit.append({
         kind:
-          status === "FAILED"
+          status === "FAILED" || status === "INDETERMINATE"
             ? "plan_failed"
             : status === "PARTIAL"
               ? "plan_partial"
@@ -2023,6 +2070,20 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       });
       emit();
       const settled = plans.get(planId)!;
+      if (status === "INDETERMINATE") {
+        return {
+          ok: false,
+          reason: `${unknown
+            .map(
+              (outcome) =>
+                `${outcome.capability} (${outcome.detail ?? "no detail"})`,
+            )
+            .join("; ")}. The outcome is unknown, so do not retry: check the application, then reconcile ${unknown
+            .map((outcome) => outcome.recordId)
+            .join(", ")}.`,
+          plan: settled,
+        };
+      }
       if (status === "FAILED") {
         return {
           ok: false,
@@ -2440,7 +2501,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       } else if (outcome.indeterminate) {
         // The artifact is deliberately not discarded. It is the evidence a
         // human reconciles against, and nothing here proves it did not land.
-        unreconciled.attachAction(outcome.indeterminate.recordId, actionId);
+        unreconciled.attach(outcome.indeterminate.recordId, { actionId });
         approvals.resolve(actionId, {
           status: "INDETERMINATE",
           action,
@@ -2485,26 +2546,53 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       return unreconciled.list();
     },
 
-    reconcile(target, outcome, by) {
+    reconcile(target, resolution, by) {
       const authorizer = resolveHumanActor(
         by ?? actor,
-        "reconciling a staged outcome must name a human; nobody else can find out what happened",
+        "reconciling a staged outcome must name a human; nobody else can go and find out what happened",
       );
       if (!authorizer.ok) {
         return { ok: false, reason: authorizer.reason };
       }
-      const open =
-        unreconciled.forAction(target) ??
-        unreconciled.list().find((entry) => entry.id === target);
-      if (!open) {
+      if (!options.staging) {
+        return { ok: false, reason: "no staging adapter is bound" };
+      }
+      const byAction = unreconciled.forAction(target);
+      const found = unreconciled.open(byAction?.id ?? target);
+      if (!found) {
         return { ok: false, reason: `nothing unreconciled for ${target}` };
       }
-      unreconciled.settle(open.id);
+      // Only the adapter can make the artifact terminal, and only a
+      // successful return says it did. A throw leaves the record and its
+      // evidence exactly where they were.
+      try {
+        // The artifact came from this adapter's own `fork`, so handing it
+        // back is the one place the erased type is reconstituted.
+        (options.staging as StagingAdapter<unknown>).reconcile(
+          found.artifact,
+          resolution,
+        );
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        audit.append({
+          kind: "staged_reconcile_failed",
+          capability: found.record.capability,
+          recordId: found.record.id,
+          detail,
+          at: now(),
+        });
+        emit();
+        return {
+          ok: false,
+          reason: `${found.record.id} could not be settled: ${detail}`,
+        };
+      }
+      unreconciled.settle(found.record.id);
       audit.append({
         kind: "staged_reconciled",
-        capability: open.capability,
-        recordId: open.id,
-        outcome,
+        capability: found.record.capability,
+        recordId: found.record.id,
+        resolution: resolution.kind,
         actor: authorizer.actor,
         at: now(),
       });

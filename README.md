@@ -172,8 +172,11 @@ starting with no adapter bound at all.
 
 A commit that throws is not treated as a clean failure. The exception proves
 the adapter did not return, not that nothing landed, so the approval resolves
-`INDETERMINATE`, the staged diff is retained, and `listUnreconciled` holds it
-until a human calls `reconcile`. An adapter that knows nothing was dispatched
+`INDETERMINATE`, the staged diff is retained frozen, and `listUnreconciled`
+holds it until a human calls `reconcile`, which hands the artifact back to the
+adapter and only settles when the adapter says it did. A plan reports it the
+same way and stops rather than writing on top of an unknown result. Reset does
+not clear these records. An adapter that knows nothing was dispatched
 says so with `StagedCommitRefused`, which is an ordinary refusal. A `release`
 that throws is an attempted cleanup rather than a completed one, so it is
 recorded and the artifact stays listed.

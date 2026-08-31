@@ -28,6 +28,7 @@ export {
   StagedProposalError,
   StagedProposalStore,
   type StagedProposal,
+  type StagedResolution,
   type StagingAdapter,
   type Unreconciled,
 } from "./staging.ts";
