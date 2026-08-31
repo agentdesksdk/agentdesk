@@ -34,5 +34,10 @@ Node, and the design doc check passed.
 | P1 | OPEN | [Single-action approval has no approver identity](2026-08-29-p1-single-action-approval-has-no-approver.md) |
 | P1 | OPEN | [A rollback that commits and throws can run twice](2026-08-29-p1-throwing-rollback-can-run-twice.md) |
 | P2 | OPEN | [Repeated live-region announcements are dropped](2026-08-29-p2-identical-live-announcements-are-dropped.md) |
+| P1 | OPEN | [An async dry run writes live state before approval](2026-08-31-p1-async-dry-run-writes-live-state-before-approval.md) |
+| P1 | OPEN | [The merge drops row deletion and array removal](2026-08-31-p1-merge-drops-row-and-array-removals.md) |
+| P1 | OPEN | [Staged proposals are not bound to approval lifecycle](2026-08-31-p1-staged-proposal-is-not-bound-to-approval-lifecycle.md) |
+| P1 | OPEN | [Dependent plan previews use the wrong base](2026-08-31-p1-dependent-plan-previews-use-the-wrong-base.md) |
+| P1 | OPEN | [Derived approval evidence is self-attested](2026-08-31-p1-derived-evidence-is-self-attested.md) |
 
 Delete this directory only after every open item has either a validated fix or an explicit accepted-risk decision.
