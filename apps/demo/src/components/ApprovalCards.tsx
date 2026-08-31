@@ -1,7 +1,8 @@
 import { getState } from "../data/store.ts";
 import { agentdesk } from "../runtime/agentdesk.ts";
 import { money } from "../capabilities/helpers.ts";
-import { useRuntime } from "./hooks.ts";
+import { projectedConflicts } from "../capabilities/staged.ts";
+import { useDemoStore, useRuntime } from "./hooks.ts";
 import type { PendingAction } from "@agentdesk/webmcp";
 
 function detailRows(action: PendingAction): Array<[string, string]> {
@@ -43,6 +44,7 @@ function detailRows(action: PendingAction): Array<[string, string]> {
 
 export function ApprovalCards() {
   const snapshot = useRuntime();
+  useDemoStore();
   if (snapshot.pending.length === 0) {
     return null;
   }
@@ -67,6 +69,9 @@ export function ApprovalCards() {
           {action.preview.length > 0 ? (
             <div className="will-change">
               <h4>What will change</h4>
+              <p className="evidence">
+                Read off a dry run of this action, not a description of it.
+              </p>
               {action.preview.map((change) => (
                 <div key={change.field} className="change-row">
                   <span className="field">{change.field}</span>
@@ -77,6 +82,7 @@ export function ApprovalCards() {
               ))}
             </div>
           ) : null}
+          <Conflicts action={action} />
           <div className="actions">
             <button
               onClick={() => {
@@ -108,6 +114,26 @@ export function render(value: unknown): string {
     return value ? "yes" : "no";
   }
   return String(value);
+}
+
+function Conflicts({ action }: { action: PendingAction }) {
+  const conflicts = projectedConflicts(action.capability, action.input);
+  if (conflicts.length === 0) {
+    return null;
+  }
+  return (
+    <div className="conflicts">
+      <h4>You have edited this since the agent proposed it</h4>
+      {conflicts.map((conflict) => (
+        <div key={conflict.key + conflict.field} className="change-row">
+          <span className="field">{`${conflict.key} ${conflict.field}`}</span>
+          <span className="before">{render(conflict.agent)}</span>
+          <span className="arrow">discarded, yours kept</span>
+          <span className="after">{render(conflict.human)}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function FragmentRow({ label, value }: { label: string; value: string }) {

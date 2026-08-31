@@ -107,6 +107,7 @@ export {
   executionCancelled,
   idempotencyCapacity,
   idempotencyConflict,
+  isReceiptEnvelope,
   policyDenied,
   previewUnavailable,
   receipt,

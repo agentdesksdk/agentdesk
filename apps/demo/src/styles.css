@@ -927,3 +927,51 @@ input[type="text"]:focus {
     border-color: var(--accent);
   }
 }
+
+.will-change .evidence {
+  margin: 0 0 6px;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.conflicts {
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 14px;
+  background: var(--warn-soft);
+}
+
+.conflicts h4 {
+  margin: 0 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--warn);
+}
+
+.conflicts .change-row .arrow {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--warn);
+}
+
+.ghost {
+  border: 1px dashed var(--accent);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 14px;
+  background: var(--accent-soft);
+}
+
+.ghost h4 {
+  margin: 0 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+}
+
+.ghost .change-row:first-of-type {
+  border-top: none;
+}

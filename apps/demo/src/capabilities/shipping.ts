@@ -6,7 +6,7 @@ import {
   type Capability,
   type Change,
 } from "@agentdesk/webmcp";
-import { getState, mutate } from "../data/store.ts";
+import { getState, mutate, nowIso } from "../data/store.ts";
 import {
   createReadCapability,
   createSearchCapability,
@@ -105,6 +105,10 @@ export const shippingCapabilities: Capability[] = [
       "Refund the shipping fee for an order where the customer paid shipping. Requires human approval.",
     domain,
     consequential: true,
+    // Mints a credit id from the number of existing credits, so a branch
+    // prepared before the human issued one would mint a duplicate. Re-derive
+    // against current state at approval instead of merging the stale write.
+    commitMode: "rederive",
     intents: ["refund shipping", "refund fee", "refund the shipping fee"],
     keywords: ["refund", "shipping", "fee", "money"],
     entities: ["orderId"],
@@ -151,34 +155,6 @@ export const shippingCapabilities: Capability[] = [
       return order
         ? `Refund ${money(order.shippingFee)} shipping for Order #${order.id} (${customer?.name ?? "unknown customer"}).`
         : `Refund shipping for Order #${id}.`;
-    },
-    previewChanges: (input) => {
-      const id = String(input.order_id ?? "").replace(/^#/, "");
-      const order = getState().orders.find((o) => o.id === id);
-      if (!order) {
-        return [];
-      }
-      const invoice = getState().invoices.find((inv) => inv.orderId === order.id);
-      const changes: Change[] = [
-        {
-          field: `Order #${order.id} shipping refunded`,
-          before: false,
-          after: true,
-        },
-        {
-          field: "Credits issued to customer",
-          before: money(0),
-          after: money(order.shippingFee),
-        },
-      ];
-      if (invoice) {
-        changes.push({
-          field: `Invoice ${invoice.id} status`,
-          before: invoice.status,
-          after: "partially_refunded",
-        });
-      }
-      return changes;
     },
     verify: (input) => {
       const order = orderFromInput(input);
@@ -259,7 +235,7 @@ export const shippingCapabilities: Capability[] = [
           customerId: order.customerId,
           amount: order.shippingFee,
           reason: `Shipping refund for order ${order.id}`,
-          issuedAt: new Date().toISOString(),
+          issuedAt: nowIso(),
         });
       });
       const changes: Change[] = [

@@ -1,5 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 import { Pill, fmtDate, fmtMoney } from "../components/bits.tsx";
+import { Ghost } from "../components/Ghost.tsx";
 import { useDemoStore } from "../components/hooks.ts";
 import { orderTotal, round2 } from "../data/types.ts";
 
@@ -40,6 +41,7 @@ export function OrderDetail() {
           {customer?.name ?? order.customerId}
         </Link>
       </p>
+      <Ghost collection="orders" id={order.id} />
       <div className="grid-2">
         <div
           className="panel"

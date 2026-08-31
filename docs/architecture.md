@@ -237,16 +237,24 @@ denying while the action sits pending blocks it.
 ### Approval evidence is an explicit choice
 
 Every consequential capability declares what the human sees before
-approving. `previewChanges` implies `approvalEvidence: "diff"`. A
-capability with no enumerable change set must opt in to
+approving, and the three levels are ordered by how much that approval is
+worth. `derived` means the diff was read off a dry run of the capability's
+own handler, so it describes the operation itself. `previewChanges` alone
+implies `diff`, an author-enumerated change set that can drift from what
+`execute` does. A capability with no enumerable change set must opt in to
 `approvalEvidence: "summary"` by hand. `defineCapability` throws when a
-consequential capability declares neither, so a missing preview can never
-quietly degrade into an empty diff, which is the failure the contract
-exists to prevent.
+consequential capability declares neither a preview nor `summary`, so a
+missing preview can never quietly degrade into an empty diff, which is the
+failure the contract exists to prevent.
 
 The chosen mode rides on the `APPROVAL_REQUIRED` payload as
 `approvalEvidence`, so a caller can tell whether "approved" meant a human
-read a field-level diff or only a sentence.
+read a diff the handler produced, a diff the author wrote, or a sentence.
+
+Producing a `derived` diff needs a fork of application state, which only
+the application can supply. Meridian Ops does it in
+`apps/demo/src/capabilities/staged.ts`; the SDK stays out of the
+application's data layer and only records which level was used.
 
 A capability that declares `previewChanges` and throws is refused with
 `PREVIEW_UNAVAILABLE` instead of being queued, because approving blind is
@@ -258,17 +266,21 @@ Two distinct artifacts, deliberately not merged:
 
 - **Preview** (`previewChanges`) is evaluated before execution and answers
   "what would this do". It rides on `APPROVAL_REQUIRED` as `will_change`
-  and renders as a diff on the approval card. It is advisory; a throwing
-  preview is logged and the approval proceeds without one.
+  and renders as a diff on the approval card. At `diff` level it is
+  advisory, and a throwing preview is logged while the approval proceeds
+  without one. At `derived` level it is evidence, because the handler
+  produced it.
 - **Receipt** (the `receipt()` result helper) is produced by the handler
   and answers "what did this actually do". It is attached to the tool
   result, the `execution_completed` audit event, and the resolved approval
   record, so `get_action_status` can serve it later.
 
 The receipt is authoritative because only the handler observed both states.
-The preview can be wrong if state changes between rendering and approval,
-which is exactly why approval re-checks availability and input before
-executing.
+An author-written preview can also be wrong about its own operation, which
+is what `derived` removes. Either way a preview can go stale if state
+changes between rendering and approval, which is why approval re-checks
+availability and input before executing, and why the demo's staged commit
+refuses when the document moved under a reviewed change.
 
 ## Plans, verification, and provenance
 

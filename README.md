@@ -113,29 +113,49 @@ There is deliberately no simulated cursor. Every motion in guided mode
 reflects state the agent actually touched, rather than pantomiming an
 input device it never used.
 
-## Verifiable changes, not just results
+## The human approves the operation, not a description of it
 
-A consequential capability declares what it *would* change before it runs,
-and returns application-authored evidence of what it *did* change:
+An author-written preview is a second description of an operation, and two
+descriptions drift. If they drift, the human consented to something that
+did not happen the way it was described, which is the exact failure this
+runtime exists to prevent.
 
-```ts
-previewChanges: () => [
-  { field: "Order #10428 shipping refunded", before: false, after: true },
-  { field: "Invoice INV-3021 status", before: "due", after: "partially_refunded" },
-],
-execute: () => receipt({
-  entity: "Order #10428",
-  changes: [...],
-  undoable: false,
-  result: { order_id: "10428", shipping_refunded: true, amount: 18 },
-}),
+So a consequential capability does not describe its change. It runs on a
+fork of application state, and the diff is read off the fork:
+
+```text
+agent calls refund_shipping
+  → the real handler runs against a fork; live state is untouched
+  → diff(fork) → will_change on APPROVAL_REQUIRED, ghosted in the UI
+  → human approves → the fork lands
 ```
 
-The preview rides on the `APPROVAL_REQUIRED` response as `will_change` and
-renders as a diff on the approval card, so the human authorizes a specific
-change rather than a sentence. The receipt rides on the completed tool
-result, the audit timeline, and `get_action_status`, so the agent and the
-human can both verify the outcome afterward without re-reading state.
+The `APPROVAL_REQUIRED` payload carries `approvalEvidence: "derived"`, so a
+caller can tell that the diff came from the handler rather than from a
+sentence someone wrote next to it. The receipt still rides on the completed
+tool result, the audit timeline, and `get_action_status`, because only the
+handler observed both states.
+
+Forking is the application's job, since only it knows its data layer. The
+runtime records which level of evidence was used and stays out of the
+store. Meridian Ops forks in `apps/demo/src/data/store.ts`, derives and
+merges in `apps/demo/src/data/branch.ts`, and stages in
+`apps/demo/src/capabilities/staged.ts`. Under 400 lines, no new dependency,
+and it deleted the eight hand-written previews it replaced.
+
+## The human keeps working while an approval is pending
+
+Because the agent writes to a fork, nothing is locked. The human can edit
+the same order the agent is proposing against, and on approval a three-way
+merge lands both.
+
+A field they both wrote is a real conflict, and the runtime refuses it
+rather than resolving it. The card warns as soon as the document moves, and
+approving anyway fails closed with `APPROVAL_STALE` instead of applying
+part of a reviewed change. A capability whose output depends on state the
+human might move declares `commitMode: "rederive"`, which re-runs the
+handler at approval and refuses if the result no longer matches what was
+approved.
 
 ## Approval is a state machine, not a modal
 

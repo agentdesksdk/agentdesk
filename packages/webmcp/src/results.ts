@@ -74,7 +74,7 @@ export function approvalRequired(
   risk: RiskLevel,
   summary: string,
   preview: Change[] = [],
-  approvalEvidence: "diff" | "summary" = "summary",
+  approvalEvidence: "derived" | "diff" | "summary" = "summary",
 ): ToolResult {
   const data: Record<string, unknown> = {
     status: "APPROVAL_REQUIRED",

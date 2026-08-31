@@ -3,6 +3,7 @@ import {
   type Capability,
   type CapabilitySpec,
 } from "@agentdesk/webmcp";
+import { stageSpec, type CommitMode } from "./staged.ts";
 
 type FactorySpec = Omit<CapabilitySpec, "risk" | "policy">;
 
@@ -19,12 +20,15 @@ export function createUpdateCapability(spec: FactorySpec): Capability {
 }
 
 export function createStateTransitionCapability(
-  spec: FactorySpec & { consequential?: boolean },
+  spec: FactorySpec & { consequential?: boolean; commitMode?: CommitMode },
 ): Capability {
-  const { consequential, ...rest } = spec;
+  const { consequential, commitMode, ...rest } = spec;
+  if (consequential !== true) {
+    return defineCapability({ ...rest, risk: "WRITE" });
+  }
   return defineCapability({
-    ...rest,
-    risk: consequential === true ? "CONSEQUENTIAL" : "WRITE",
+    ...stageSpec(rest, commitMode),
+    risk: "CONSEQUENTIAL",
   });
 }
 

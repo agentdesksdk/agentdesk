@@ -5,7 +5,7 @@ import {
   type Capability,
   type Unavailability,
 } from "@agentdesk/webmcp";
-import { getState, mutate } from "../data/store.ts";
+import { getState, mutate, nowIso } from "../data/store.ts";
 import {
   createReadCapability,
   createStateTransitionCapability,
@@ -211,6 +211,10 @@ export const billingCapabilities: Capability[] = [
     description: "Issue a goodwill account credit to a customer. Requires human approval.",
     domain,
     consequential: true,
+    // Mints a credit id from the number of existing credits, so a branch
+    // prepared before the human issued one would mint a duplicate. Re-derive
+    // against current state at approval instead of merging the stale write.
+    commitMode: "rederive",
     intents: ["issue credit", "goodwill credit"],
     keywords: ["credit", "goodwill", "compensate"],
     entities: ["customerId"],
@@ -257,21 +261,6 @@ export const billingCapabilities: Capability[] = [
       }
       return AVAILABLE;
     },
-    previewChanges: (input) => {
-      const id = String(input.customer_id ?? "");
-      const amount = Number(input.amount ?? 0);
-      const existing = getState()
-        .credits.filter((c) => c.customerId === id)
-        .reduce((sum, c) => sum + c.amount, 0);
-      return [
-        {
-          field: `Credits held by ${id}`,
-          before: money(existing),
-          after: money(existing + amount),
-        },
-        { field: "New credit", before: null, after: money(amount) },
-      ];
-    },
     describeApproval: (input) =>
       `Issue a ${money(Number(input.amount ?? 0))} credit to customer ${String(input.customer_id)}: ${String(input.reason ?? "")}`,
     execute: (input) => {
@@ -289,7 +278,7 @@ export const billingCapabilities: Capability[] = [
           customerId: customer.id,
           amount,
           reason,
-          issuedAt: new Date().toISOString(),
+          issuedAt: nowIso(),
         });
       });
       return { credit_id: creditId, customer: customer.name, amount };
@@ -302,6 +291,10 @@ export const billingCapabilities: Capability[] = [
       "Refund the remaining collected balance of an order's invoice. Requires human approval.",
     domain,
     consequential: true,
+    // Mints a credit id from the number of existing credits, so a branch
+    // prepared before the human issued one would mint a duplicate. Re-derive
+    // against current state at approval instead of merging the stale write.
+    commitMode: "rederive",
     intents: ["refund payment", "full refund"],
     keywords: ["refund", "payment", "invoice"],
     entities: ["orderId"],
@@ -313,26 +306,6 @@ export const billingCapabilities: Capability[] = [
         `Preparing a payment refund for order #${String(input.order_id ?? "")}`,
     },
     checkInput: (input) => refundPaymentBlocker(input) ?? AVAILABLE,
-    previewChanges: (input) => {
-      const order = orderFromInput(input);
-      const refundable = refundableBalance(input);
-      if (!order || !refundable) {
-        return [];
-      }
-      const invoice = getState().invoices.find((inv) => inv.orderId === order.id);
-      return [
-        {
-          field: `Invoice ${invoice?.id ?? ""} status`,
-          before: invoice?.status ?? "unknown",
-          after: "void",
-        },
-        {
-          field: "Credit issued",
-          before: null,
-          after: money(refundable.amount),
-        },
-      ];
-    },
     describeApproval: (input) => {
       const refundable = refundableBalance(input);
       return refundable
@@ -356,7 +329,7 @@ export const billingCapabilities: Capability[] = [
           customerId: order.customerId,
           amount: refundable.amount,
           reason: `Refund of collected balance for order ${order.id}`,
-          issuedAt: new Date().toISOString(),
+          issuedAt: nowIso(),
         });
       });
       return { order_id: order.id, refunded: true, amount: refundable.amount };
@@ -370,19 +343,6 @@ export const billingCapabilities: Capability[] = [
     consequential: true,
     keywords: ["void", "invoice", "cancel"],
     inputSchema: obj({ invoice_id: s("Invoice id") }, ["invoice_id"]),
-    previewChanges: (input) => {
-      const id = String(input.invoice_id ?? "");
-      const invoice = getState().invoices.find(
-        (inv) => inv.id.toLowerCase() === id.toLowerCase(),
-      );
-      if (!invoice) {
-        return [];
-      }
-      return [
-        { field: `Invoice ${invoice.id} status`, before: invoice.status, after: "void" },
-        { field: "Amount no longer collectable", before: null, after: money(invoice.total) },
-      ];
-    },
     describeApproval: (input) => `Void invoice ${String(input.invoice_id)}.`,
     execute: (input) => {
       const invoice = requireInvoice(input);

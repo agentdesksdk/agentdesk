@@ -106,3 +106,13 @@ export function orderTotal(order: Order): number {
 export function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
+
+/**
+ * A fork of the document plus the state a staged run left it in. `at` is the
+ * clock the run was pinned to, carried so a later commit reproduces it.
+ */
+export type Branch = {
+  base: DemoState;
+  head: DemoState;
+  at: number;
+};

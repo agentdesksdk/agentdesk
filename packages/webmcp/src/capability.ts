@@ -160,12 +160,16 @@ export type Capability = {
     ctx: AppContext,
   ) => Change[];
   /**
-   * What the human is shown before approving. `diff` requires
-   * `previewChanges`; `summary` is an explicit opt-out for actions with no
-   * enumerable change set. A consequential capability must pick one, so a
-   * missing preview can never silently degrade into an empty diff.
+   * What the human is shown before approving, ordered by how much the
+   * approval is worth. `derived` means the diff was read off a dry run of
+   * this capability's own handler, so it describes the operation rather than
+   * a claim about it. `diff` means the author enumerated the changes by hand
+   * and they can drift from what `execute` does. `summary` is an explicit
+   * opt-out for actions with no enumerable change set. A consequential
+   * capability must pick one, so a missing preview can never silently
+   * degrade into an empty diff.
    */
-  approvalEvidence: "diff" | "summary";
+  approvalEvidence: "derived" | "diff" | "summary";
   /**
    * Reads state back after execution and reports whether it matches what
    * the change was supposed to do. This is the difference between a
@@ -239,7 +243,7 @@ export type CapabilitySpec = {
     ctx: AppContext,
   ) => Change[];
   /** Required for a consequential capability with no `previewChanges`. */
-  approvalEvidence?: "diff" | "summary";
+  approvalEvidence?: "derived" | "diff" | "summary";
   verify?: (
     input: Record<string, unknown>,
     ctx: AppContext,
@@ -282,9 +286,9 @@ export function defineCapability(spec: CapabilitySpec): Capability {
   const approvalEvidence =
     spec.approvalEvidence ?? (spec.previewChanges ? "diff" : "summary");
   if (risk === "CONSEQUENTIAL") {
-    if (approvalEvidence === "diff" && !spec.previewChanges) {
+    if (approvalEvidence !== "summary" && !spec.previewChanges) {
       throw new Error(
-        `${name} declares approvalEvidence "diff" but has no previewChanges`,
+        `${name} declares approvalEvidence "${approvalEvidence}" but has no previewChanges`,
       );
     }
     if (spec.approvalEvidence === undefined && !spec.previewChanges) {
