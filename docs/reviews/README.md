@@ -76,4 +76,6 @@ and executed under plain Node, and the design doc check passed.
 | P1 | RESOLVED | [The audit and UI call an indeterminate plan failed](2026-08-31-p1-indeterminate-plan-audit-says-failed.md) |
 | P2 | RESOLVED | [Start does not validate the required reconciliation hook](2026-08-31-p2-start-does-not-validate-reconcile-hook.md) |
 
+| — | ACCEPTED | [Unreconciled records do not survive a restart](2026-08-31-accepted-unreconciled-records-are-not-durable.md) |
+
 Delete this directory only after every open item has either a validated fix or an explicit accepted-risk decision.
