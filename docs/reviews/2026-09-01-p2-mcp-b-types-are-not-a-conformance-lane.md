@@ -121,3 +121,48 @@ and would not satisfy MCP-B.
 
 Verified load-bearing by deleting the options position from
 `ModelContextLike.executeTool`, which fails three assertions in this file.
+
+## Follow-up verification, third pass
+
+The parameter positions now exist, but the abort-options assignability check
+runs in the wrong direction for a caller. `executeToolOptionsMatch` proves
+`ChromeModelContextExecuteToolOptions` fits AgentDesk's options type. AgentDesk
+constructs the value and passes it to MCP-B, so the required proof is the
+reverse: every options value AgentDesk may send must be legal MCP-B input.
+
+The current assertion would keep compiling if MCP-B added a required field to
+its options object. Structural typing permits an object with extra required
+members to extend a smaller shape, while AgentDesk's `{ signal }` would no
+longer satisfy that new requirement at the call boundary. Neither the arity
+assertion nor the separate signal equality catches that change.
+
+Keep the record open until the options position is checked in the caller
+direction, or exactly in both directions if equality is the intended
+contract. Add a compile-time proof that a synthetic upstream options type with
+an added required member is rejected by the chosen relation, so the claimed
+drift guard is demonstrably load-bearing.
+
+## Resolution, third pass
+
+The options assertion ran backwards. AgentDesk constructs the options value
+and hands it to MCP-B, so the proof has to be that everything AgentDesk can
+send is legal upstream. The previous direction proved only that MCP-B's
+options fit where AgentDesk reads them, which keeps compiling when MCP-B adds
+a required member while AgentDesk starts sending an object that no longer
+satisfies the signature.
+
+`ourOptionsAreLegalUpstream` now asserts the direction that matches the data
+flow, and `executeToolOptionsAgreeExactly` pins both directions so a type
+change to `signal` or a required addition on either side fails.
+
+`aNewRequiredOptionWouldBeCaught` makes the guarantee checkable rather than
+asserted. It builds a synthetic upstream options type with an added required
+member and asserts AgentDesk's options do not satisfy it. Inverting that
+assertion to `Conforms` fails to compile, which is the proof that a stricter
+upstream would be caught.
+
+One note on method. An earlier probe widened AgentDesk's options with an
+optional member and expected a failure. It did not fail, correctly: an extra
+optional property is legal input. The failure mode this finding names is a
+required member appearing upstream, and that is what the synthetic type
+models.

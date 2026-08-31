@@ -69,8 +69,11 @@ Anything that is not a plain JSON object is refused, including an array, an
 explicit `null`, and objects whose meaning lives in a prototype such as
 `Date`, `Map`, and `RegExp`, because validity that depended on the transport
 encoding would defeat the point of normalizing the generations. The check
-compares the internal class tag rather than a prototype, so a plain object
-built in another window is still accepted. Only an omitted member is absence.
+walks the prototype chain and accepts only a depth of zero or one, reading no
+property of the value, so a class tag cannot spoof it and a throwing getter
+cannot escape the structured result. A plain object built in another window
+still passes, because no identity is compared. Only an omitted member is
+absence.
 
 The polyfill produces the object arm. The string arm is exercised by
 re-serializing the schema over the same real registrations rather than by
@@ -193,7 +196,11 @@ disagreements as falsifiable assertions.
 
 `executeTool` is pinned position by position rather than by return type
 alone, so a change to the descriptor, the input encoding, or the abort
-options is visible. Three intentional differences are named there: AgentDesk
+options is visible. Each assertion runs in the direction the data flows:
+values AgentDesk receives from `getTools` must fit where it reads them, and
+the options AgentDesk constructs must be legal input upstream. A synthetic
+upstream options type with an added required member proves the second
+direction would catch a stricter MCP-B release. Three intentional differences are named there: AgentDesk
 accepts `object | string` where MCP-B requires `string`, makes the input
 argument optional where MCP-B requires it, and keeps `window` optional on its
 `RegisteredTool` projection. Each carries an assertion that stops compiling if

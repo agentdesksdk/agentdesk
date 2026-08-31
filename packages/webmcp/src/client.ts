@@ -256,22 +256,47 @@ export function readInputSchema(
 
 /**
  * Whether a value is a plain data object, judged without same-realm
- * prototype identity.
+ * prototype identity and without trusting anything the value says about
+ * itself.
  *
  * A schema is data. `typeof value === "object"` also admits `Date`, `Map`,
  * `Set`, `RegExp`, and `Error`, whose meaning lives in their prototype and
  * which lose it on the way through JSON, so accepting them in the direct arm
  * made a verdict depend on the transport encoding.
  *
- * `instanceof Object` and a `=== Object.prototype` comparison would both
- * reject a plain object built in another window, which is exactly what a
- * cross-document tool sends. The internal class tag survives the realm
- * boundary, and reports `[object Object]` for a null-prototype object too.
+ * The classification is the depth of the prototype chain. A plain object
+ * reaches `null` in one step, and one built with `Object.create(null)`
+ * reaches it in none. Everything with a constructor prototype, arrays
+ * included, needs at least two. That holds across realms, because no
+ * identity is compared.
+ *
+ * `Object.prototype.toString` was the obvious alternative and is not safe
+ * here. It reads `Symbol.toStringTag`, so a value can name itself
+ * `[object Object]`, and a throwing tag getter escapes this function's
+ * structured-result contract entirely. Nothing below reads a property of the
+ * value.
+ *
+ * The walk is guarded because a `Proxy` can throw from a `getPrototypeOf`
+ * trap. Such a value is refused rather than allowed to propagate. A proxy
+ * that lies without throwing still passes, which is the residual limit of
+ * classifying a value you did not construct.
  */
 function isPlainJsonObject(value: unknown): value is object {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    Object.prototype.toString.call(value) === "[object Object]"
-  );
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  try {
+    let depth = 0;
+    let proto: unknown = Object.getPrototypeOf(value);
+    while (proto !== null) {
+      depth += 1;
+      if (depth > 1) {
+        return false;
+      }
+      proto = Object.getPrototypeOf(proto as object);
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }

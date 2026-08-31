@@ -91,3 +91,64 @@ describe("only a plain JSON object is a schema", () => {
     expect(verdict(schema).ok).toBe(true);
   });
 });
+
+describe("the plain-object check cannot be spoofed or made to throw", () => {
+  it("refuses a Date that claims to be an Object", () => {
+    // `Object.prototype.toString` reads Symbol.toStringTag, so a class tag is
+    // whatever the value says it is.
+    const disguised = new Date();
+    Object.defineProperty(disguised, Symbol.toStringTag, {
+      value: "Object",
+      configurable: true,
+    });
+
+    expect(verdict(disguised).ok).toBe(false);
+  });
+
+  it("refuses rather than throwing when the class tag getter throws", () => {
+    const hostile = {};
+    Object.defineProperty(hostile, Symbol.toStringTag, {
+      get() {
+        throw new Error("tag getter exploded");
+      },
+      configurable: true,
+    });
+
+    // The contract is a structured result. An exception here would escape it
+    // in the middle of tool discovery.
+    const result = verdict(hostile);
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses a Map that claims to be an Object", () => {
+    const disguised = new Map();
+    Object.defineProperty(disguised, Symbol.toStringTag, {
+      value: "Object",
+      configurable: true,
+    });
+
+    expect(verdict(disguised).ok).toBe(false);
+  });
+});
+
+describe("a hostile prototype chain is refused, not propagated", () => {
+  it("refuses a proxy whose getPrototypeOf trap throws", () => {
+    const hostile = new Proxy(
+      {},
+      {
+        getPrototypeOf() {
+          throw new Error("prototype trap exploded");
+        },
+      },
+    );
+
+    expect(verdict(hostile).ok).toBe(false);
+  });
+
+  it("refuses a proxy wrapping a Date", () => {
+    const wrapped = new Proxy(new Date(), {});
+
+    expect(verdict(wrapped).ok).toBe(false);
+  });
+});

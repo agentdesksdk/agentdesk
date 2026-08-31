@@ -147,14 +147,45 @@ export const executeToolInputStillNarrowerUpstream: StillDiverges<
   McpBExecuteParams[1]
 > = true;
 
-/** Abort options, which is the position a signal change would move. */
-export const executeToolOptionsMatch: Conforms<
-  ChromeModelContextExecuteToolOptions,
-  NonNullable<OurExecuteParams[2]>
+/**
+ * Abort options. AgentDesk constructs this value and hands it to MCP-B, so
+ * the proof has to run in that direction: everything AgentDesk can send must
+ * be legal input upstream.
+ *
+ * The reverse, which this file asserted first, proves only that MCP-B's
+ * options fit where AgentDesk reads them. It keeps compiling when MCP-B adds
+ * a required member, at which point AgentDesk would be sending an object
+ * upstream that no longer satisfies the signature.
+ */
+export const ourOptionsAreLegalUpstream: Conforms<
+  NonNullable<OurExecuteParams[2]>,
+  ChromeModelContextExecuteToolOptions
 > = true;
+
+/** Nothing is lost in the other direction either, so the two agree exactly. */
+export const executeToolOptionsAgreeExactly: Equals<
+  NonNullable<OurExecuteParams[2]>,
+  ChromeModelContextExecuteToolOptions
+> = true;
+
 export const executeToolSignalIsAnAbortSignal: Equals<
   NonNullable<ChromeModelContextExecuteToolOptions["signal"]>,
   AbortSignal
+> = true;
+
+/**
+ * What the reversed direction buys, stated as a check rather than a claim.
+ *
+ * `RequiredMemberAdded` stands in for the next MCP-B release adding a member
+ * with no default. AgentDesk's options do not satisfy it, and the assertion
+ * below is what fails if someone ever writes the weaker direction again.
+ */
+type RequiredMemberAdded = ChromeModelContextExecuteToolOptions & {
+  idempotencyKey: string;
+};
+export const aNewRequiredOptionWouldBeCaught: StillDiverges<
+  NonNullable<OurExecuteParams[2]>,
+  RequiredMemberAdded
 > = true;
 
 /**

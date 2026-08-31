@@ -96,3 +96,49 @@ must be refused "the same way once serialized", which is wrong: a `Map`
 serializes to `{}`, a legal empty schema, so the two arms are being handed
 different values. The suite now pins the genuine asymmetry, which is `Date`,
 and separately asserts that `{}` remains accepted.
+
+## Follow-up verification, third pass
+
+The cross-realm requirement is covered, but the internal class tag is not a
+safe boundary predicate. `Object.prototype.toString.call(value)` reads the
+value's `Symbol.toStringTag`. A caller controls that property, including its
+getter. Two counterexamples reproduce from the built package at `53b3502`:
+
+```text
+object with a throwing Symbol.toStringTag getter
+=> readInputSchema throws "tag getter exploded"
+
+Date with Symbol.toStringTag set to "Object"
+=> { ok: true, schema: Date }
+```
+
+The first escapes a helper whose contract returns a structured refusal. The
+second defeats the exotic-object check outright. Keep the record open until
+classification does not trust a user-controlled class tag, guards reflective
+operations that a Proxy can throw from, and adds regressions for both the
+throwing tag and the spoofed `Date`. The earlier cross-window and
+null-prototype cases must remain accepted.
+
+## Resolution, third pass
+
+`Object.prototype.toString` reads `Symbol.toStringTag`, so the class tag is
+whatever the value says it is. A `Date` tagged `"Object"` passed, and a
+throwing tag getter escaped the structured-result contract entirely.
+
+The predicate no longer reads any property of the value. It walks the
+prototype chain and accepts only a depth of zero or one: a plain object
+reaches `null` in one step, `Object.create(null)` in none, and anything with
+a constructor prototype, arrays included, needs at least two. No identity is
+compared, so a plain object from another realm still passes. The walk is
+guarded, because a `Proxy` can throw from a `getPrototypeOf` trap, and such a
+value is refused rather than allowed to propagate.
+
+The residual limit is stated in the source rather than glossed: a proxy that
+lies without throwing still passes. Classifying a value you did not construct
+ends there.
+
+Covered by `packages/webmcp/tests/mcp-b-schema-kinds.test.ts`: a spoofed
+`Date` and `Map`, a throwing tag getter, a proxy with a throwing
+`getPrototypeOf` trap, and a proxy wrapping a `Date`, alongside the iframe and
+null-prototype cases that must keep passing. Three of them fail against the
+tag-based predicate.
