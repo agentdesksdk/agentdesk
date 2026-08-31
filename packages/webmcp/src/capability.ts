@@ -68,6 +68,33 @@ export type Presentation = {
     | ((input: Record<string, unknown>, ctx: AppContext) => string);
 };
 
+/**
+ * The routing graph, expressed on the capability that knows about it.
+ *
+ * `requires` names a step that usually has to happen first, so a query that
+ * matches this capability can pull its prerequisite in. `related` names a
+ * step a caller commonly wants alongside it. Both are names rather than
+ * references, because a capability can name one the catalog does not hold
+ * and routing has to survive that rather than throw.
+ */
+export type CapabilityRelationships = {
+  requires?: readonly string[];
+  related?: readonly string[];
+};
+
+/**
+ * What a defined capability carries. Both arrays are always present, so
+ * routing reads `relationships.requires` without a guard.
+ *
+ * Author input stays optional above, because making a caller write two empty
+ * arrays to say nothing would be a worse API. Normalization is what closes
+ * the gap, and this is the type that records it happened.
+ */
+export type NormalizedRelationships = {
+  readonly requires: readonly string[];
+  readonly related: readonly string[];
+};
+
 export type Policy =
   | { kind: "allow" }
   | { kind: "approval_required" };
@@ -128,6 +155,16 @@ export type Capability = {
   entities: readonly string[];
   /** Route prefixes on which this capability is more relevant. */
   routes: readonly string[];
+  /**
+   * How this capability sits against others, used by hybrid routing to
+   * surface the step a task needs next rather than the whole catalog.
+   *
+   * These are routing hints, not execution constraints. The runtime does
+   * not enforce ordering from `requires`, because a capability that truly
+   * cannot run yet says so through `availability` or `checkInput`, where
+   * the refusal carries a reason a human can read.
+   */
+  relationships: NormalizedRelationships;
   risk: RiskLevel;
   inputSchema: InputSchema;
   annotations: {
@@ -262,6 +299,7 @@ type CapabilitySpecBase = {
   keywords?: readonly string[];
   entities?: readonly string[];
   routes?: readonly string[];
+  relationships?: CapabilityRelationships;
   risk?: RiskLevel;
   inputSchema?: InputSchema;
   readOnlyHint?: boolean;
@@ -443,6 +481,12 @@ export function defineCapability(spec: CapabilitySpec): Capability {
     keywords: [...keywords],
     entities: spec.entities ?? [],
     routes: spec.routes ?? [],
+    // Copied and frozen, so a caller mutating the array it passed in cannot
+    // rewrite the routing graph of an already-defined capability.
+    relationships: Object.freeze({
+      requires: Object.freeze([...(spec.relationships?.requires ?? [])]),
+      related: Object.freeze([...(spec.relationships?.related ?? [])]),
+    }),
     risk,
     inputSchema: spec.inputSchema ?? { type: "object", properties: {} },
     annotations: {
