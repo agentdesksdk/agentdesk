@@ -22,6 +22,10 @@ describe their own application: discovery, compilation, execution,
 authentication, request binding, validation, receipts, and drift
 detection.
 
+`roadmap.md` sequences the work after PR #20 into three waves and four
+lanes, with the SDK work serialized as one stack because every guarantee
+lands in `runtime.ts`, and a per-PR review checklist.
+
 `operation-plan.md` specifies what happens to the shipped plan machinery
 when the capability was generated or inferred rather than authored, which
 is the case where every guarantee that depends on an author-supplied
