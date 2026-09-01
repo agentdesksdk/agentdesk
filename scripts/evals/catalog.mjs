@@ -27,7 +27,10 @@ export function buildCatalog(defineCapability, receipt, unavailable) {
       description: "Refund the shipping fee on an order",
       risk: "CONSEQUENTIAL",
       approvalEvidence: "summary",
-      availability: (input) =>
+      // Input-dependent, so it lives on checkInput. The SDK hands
+      // `availability` the application context and not the call input, and
+      // this guard sat there unreachable until issue #28.
+      checkInput: (input) =>
         store.refunded.has(String(input.order_id))
           ? unavailable("ALREADY_REFUNDED", "Shipping was already refunded on this order.")
           : { available: true },
