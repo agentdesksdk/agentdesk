@@ -1,6 +1,6 @@
 # P2: the recomputation test checks only metric values
 
-Status: **RESOLVED** in `aca9813`
+Status: **RESOLVED** in `pending`
 
 Reviewed worktree: `cheery-obsidian`, commit `2f1f9e8` (PR #14)
 
@@ -51,3 +51,19 @@ exposure from `ARMS`, and run id from a consistency check across every record.
 Either make the timestamp explicit non-recomputable metadata or store the
 source needed to validate it. Add mutations for task count, arm label,
 exposure, and run id alongside the existing metric and Markdown guards.
+
+## Follow-up verification at `253a3be`
+
+Task count, task path, labels, and exposure are now derived from their sources,
+but the promised run-id consistency check is absent. The rebuild takes
+`reference.baseline[0].runId` and never checks any other record.
+
+Changing the `delete-all-orders` AgentDesk record to `runId: "different-run"`
+still produces a report deeply equal to the published artifact. Metrics ignore
+the field, and the rebuilt report continues to use the first baseline record's
+value. A stored artifact can therefore combine records from different runs
+while passing the whole-report check.
+
+Validate that every record in every arm carries the same non-empty run id
+before rebuilding. Add a regression that changes one non-first record in the
+other arm and proves the artifact check fails.

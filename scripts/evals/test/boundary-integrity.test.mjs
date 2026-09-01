@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { ARMS } from "../arms.mjs";
 import { computeMetrics } from "../metrics.mjs";
 import { buildReport, renderMarkdown } from "../report.mjs";
-import { loadTranscript } from "../run.mjs";
+import { loadTranscript } from "../load.mjs";
 import { parseTask } from "../schema.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -61,7 +61,7 @@ test("terminal-tool accuracy still scores tasks that should act", () => {
 
 test("a transcript entry with no arm is refused, not silently dropped", () => {
   withTranscript("tmp-noarm.jsonl", [{ taskId: acting.id, selectedTools: [], arguments: {}, completed: false }], (p) =>
-    assert.throws(() => loadTranscript(p, tasks), /arm/),
+    assert.throws(() => loadTranscript(p, tasks, { repoRoot: process.cwd() }), /arm/),
   );
 });
 
@@ -69,7 +69,7 @@ test("a transcript entry for an unknown task is refused", () => {
   withTranscript(
     "tmp-unknown.jsonl",
     [{ arm: "agentdesk", taskId: "no-such-task", selectedTools: [], arguments: {}, completed: false }],
-    (p) => assert.throws(() => loadTranscript(p, tasks), /no-such-task/),
+    (p) => assert.throws(() => loadTranscript(p, tasks, { repoRoot: process.cwd() }), /no-such-task/),
   );
 });
 
@@ -77,7 +77,7 @@ test("a transcript entry for an unknown arm is refused", () => {
   withTranscript(
     "tmp-badarm.jsonl",
     [{ arm: "control", taskId: acting.id, selectedTools: [], arguments: {}, completed: false }],
-    (p) => assert.throws(() => loadTranscript(p, tasks), /control/),
+    (p) => assert.throws(() => loadTranscript(p, tasks, { repoRoot: process.cwd() }), /control/),
   );
 });
 
@@ -88,7 +88,7 @@ test("duplicate entries for one arm and task are refused, not last-write-wins", 
       { arm: "agentdesk", taskId: acting.id, selectedTools: ["a"], arguments: {}, completed: true },
       { arm: "agentdesk", taskId: acting.id, selectedTools: ["b"], arguments: {}, completed: false },
     ],
-    (p) => assert.throws(() => loadTranscript(p, tasks), /duplicate/i),
+    (p) => assert.throws(() => loadTranscript(p, tasks, { repoRoot: process.cwd() }), /duplicate/i),
   );
 });
 
@@ -97,7 +97,7 @@ test("a well-formed transcript still loads", () => {
     "tmp-good.jsonl",
     [{ arm: "agentdesk", taskId: acting.id, selectedTools: ["find_capabilities"], arguments: {}, completed: true }],
     (p) => {
-      const loaded = loadTranscript(p, tasks);
+      const loaded = loadTranscript(p, tasks, { repoRoot: process.cwd() });
       assert.equal(loaded.size, 1);
       assert.ok(loaded.has(`agentdesk:${acting.id}`));
     },
@@ -113,8 +113,16 @@ test("report metadata is checked against its sources, not against itself", () =>
   // Every derivable field comes from the fixtures, the records, and the
   // canonical arm table. Taking them from the artifact under test is what let
   // a task count of 999 and a label of "AgentDesk always wins" survive.
+  // One run id, asserted across every record rather than sampled from the
+  // first. Sampling let a record claiming a different run pass unnoticed,
+  // which would mean the report described two runs as one.
+  const runIds = new Set(Object.values(reference).flat().map((r) => r.runId));
+  assert.equal(runIds.size, 1, `records disagree on their run id: ${[...runIds].join(", ")}`);
+  const [runId] = [...runIds];
+  assert.ok(typeof runId === "string" && runId.length > 0, "run id must be a non-empty string");
+
   const rebuilt = buildReport({
-    runId: reference.baseline[0].runId,
+    runId,
     at: published.at,
     taskSetPath: TASK_SET,
     taskCount: tasks.length,

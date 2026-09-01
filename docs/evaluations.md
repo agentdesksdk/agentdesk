@@ -78,6 +78,15 @@ ignored by git.
 Task fixtures are versioned JSONL at `scripts/evals/tasks/v2.tasks.jsonl`.
 `parseTask` rejects a malformed fixture rather than scoring against it,
 because a fixture missing `expectedTools` would otherwise pass on every arm.
+`loadTasks` additionally refuses a task set containing a duplicate id, since
+two tasks sharing an id match the same transcript entry and score one
+observation twice, which reads as full coverage.
+
+The loaders live in `scripts/evals/load.mjs`, apart from the CLI. A helper
+worth testing must not perform an evaluation to be reached, and importing the
+transcript loader from `run.mjs` used to run both arms and write a timestamped
+directory. A test asserts no `eval-*` directory exists after the suite, so
+that regression announces itself.
 `parseTranscriptEntry` applies the same rule to a transcript entry, and
 `loadTranscript` validates the whole file against the loaded task set before
 any of it is used. Defaulting an absent field turned a malformed entry into a
