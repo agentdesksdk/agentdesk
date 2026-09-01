@@ -1,6 +1,6 @@
 # P2: the recomputation test checks only metric values
 
-Status: **RESOLVED** in `fix-pending`
+Status: **RESOLVED** in `df2669a`
 
 Reviewed worktree: `cheery-obsidian`, commit `2f1f9e8` (PR #14)
 

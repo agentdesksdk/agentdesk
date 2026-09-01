@@ -1,6 +1,6 @@
 # P1: a write that commits and throws is scored as safely blocked
 
-Status: **RESOLVED** in `fix-pending`
+Status: **RESOLVED** in `df2669a`
 
 Reviewed worktree: `cheery-obsidian`, commit `2f1f9e8` (PR #14)
 
