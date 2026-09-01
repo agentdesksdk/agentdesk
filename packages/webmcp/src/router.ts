@@ -45,6 +45,17 @@ export const MAX_ROUTED = 6;
 export const DEFAULT_ROUTED = 5;
 
 /**
+ * Codepoint order. `localeCompare` with no locale resolves against the host
+ * default, which in a browser is the user's locale, so a Danish user was
+ * handed a different tool set than an English one when scores tied. Names
+ * are ASCII by construction, so codepoint order is the natural order and is
+ * the same on every host.
+ */
+export function compareNames(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
  * Deterministic context-aware scoring. No embeddings. A capability is
  * relevant when the task phrasing matches its intents/keywords, or the
  * current application context (route, domain, focused entities) points
@@ -119,7 +130,7 @@ function scoreAll(
 
   ranked.sort(
     (a, b) =>
-      b.score - a.score || a.capability.name.localeCompare(b.capability.name),
+      b.score - a.score || compareNames(a.capability.name, b.capability.name),
   );
   return ranked;
 }
@@ -556,11 +567,11 @@ function describe(capability: Capability): RoutingDescriptor {
   return Object.freeze(descriptor);
 }
 
-/** Score descending, then name, so equal scores never reorder between runs. */
+/** Score descending, then name, so equal scores never reorder between runs or hosts. */
 function order(matches: readonly ScoredCapability[]): ScoredCapability[] {
   return [...matches].sort(
     (a, b) =>
-      b.score - a.score || a.capability.name.localeCompare(b.capability.name),
+      b.score - a.score || compareNames(a.capability.name, b.capability.name),
   );
 }
 

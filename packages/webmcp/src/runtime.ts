@@ -43,7 +43,7 @@ import {
   type ReconciliationOutcome,
   type StoredReceipt,
 } from "./receipts.ts";
-import { isRouteError, rankCapabilities, routeCapability } from "./router.ts";
+import { compareNames, isRouteError, rankCapabilities, routeCapability } from "./router.ts";
 import {
   approvalRequired,
   capabilityUnavailable,
@@ -452,7 +452,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     }
     if (value && typeof value === "object") {
       return `{${Object.entries(value as Record<string, unknown>)
-        .sort(([a], [b]) => a.localeCompare(b))
+        .sort(([a], [b]) => compareNames(a, b))
         .map(([k, v]) => `${JSON.stringify(k)}:${fingerprintInput(v)}`)
         .join(",")}}`;
     }
@@ -1510,7 +1510,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       fallback = true;
       ranked = appCaps
         .filter((capability) => evaluateAvailability(capability, context).available)
-        .sort((a, b) => a.name.localeCompare(b.name))
+        .sort((a, b) => compareNames(a.name, b.name))
         .slice(0, 5)
         .map((capability) => ({ capability, score: 0 }));
     }
