@@ -1,21 +1,43 @@
 import { useEffect, useRef, useState } from "react";
+import { ROUTING_WEIGHTS, type RuntimeSnapshot } from "@agentdesk/webmcp";
 import { agentdesk, webmcpNative } from "../runtime/agentdesk.ts";
+import { useAnnouncer } from "./announcer.ts";
 import { useRuntime } from "./hooks.ts";
 
-const BOOTSTRAP = new Set([
+export const BOOTSTRAP = new Set([
   "find_capabilities",
   "invoke_capability",
   "get_context",
   "get_action_status",
 ]);
 
+/**
+ * How many application tools the agent can call right now, bootstrap aside.
+ * Under "routed" exposure that is the working set; under "flat" it is every
+ * registered application tool. Exposure is one of those two strings.
+ */
+export function agentVisibleTools(snapshot: RuntimeSnapshot): number {
+  return snapshot.exposure === "flat"
+    ? snapshot.nativeTools.filter((name) => !BOOTSTRAP.has(name)).length
+    : snapshot.routedTools.length;
+}
+
+type RoutingReport = NonNullable<RuntimeSnapshot["lastRouting"]>;
+type RoutedMatch = RoutingReport["matches"][number];
+
+function availabilityText(match: RoutedMatch, report: RoutingReport): string {
+  if (!match.available) {
+    return "unavailable";
+  }
+  return report.activated.includes(match.name)
+    ? "available, active as a native tool"
+    : "available";
+}
+
 export function Inspector() {
   const snapshot = useRuntime();
   const [query, setQuery] = useState("");
-  const routedCount =
-    snapshot.exposure === "flat"
-      ? snapshot.nativeTools.filter((name) => !BOOTSTRAP.has(name)).length
-      : snapshot.routedTools.length;
+  const routedCount = agentVisibleTools(snapshot);
 
   const previous = useRef(routedCount);
   const [bump, setBump] = useState(false);
@@ -29,15 +51,34 @@ export function Inspector() {
     return undefined;
   }, [routedCount]);
 
+  // A routing decision is announced once, when it is made. The report on
+  // mount is history, not news, so it seeds the ref instead of being spoken.
+  const { announcement, announce } = useAnnouncer(4000);
+  const announced = useRef(snapshot.lastRouting);
+  useEffect(() => {
+    const report = snapshot.lastRouting;
+    if (report === null || report === announced.current) {
+      return;
+    }
+    announced.current = report;
+    announce(
+      `Routed ${snapshot.catalogSize} candidates to ${report.activated.length} active tool${
+        report.activated.length === 1 ? "" : "s"
+      }.`,
+    );
+  }, [snapshot.lastRouting, snapshot.catalogSize, announce]);
+
   const appTools = snapshot.nativeTools.filter((name) => !BOOTSTRAP.has(name));
   const bootstrapTools = snapshot.nativeTools.filter((name) =>
     BOOTSTRAP.has(name),
   );
-  const unavailableMatches =
-    snapshot.lastRouting?.matches.filter((match) => !match.available) ?? [];
+  const report = snapshot.lastRouting;
 
   return (
     <>
+      <p className="visually-hidden" role="status" aria-live="polite">
+        {announcement}
+      </p>
       <div className="rail-section">
         <h3>Capability virtualization</h3>
         <div className="reduction" title="internal capabilities → routed application tools">
@@ -102,6 +143,57 @@ export function Inspector() {
         </form>
       </div>
 
+      {report ? (
+        <div className="rail-section routing-decision">
+          <h3>Routing decision</h3>
+          <p className="decision">
+            <strong>{snapshot.catalogSize}</strong> candidates, these{" "}
+            <strong>{report.activated.length}</strong>, because
+          </p>
+          {report.query !== "" ? (
+            <p className="query">“{report.query}”</p>
+          ) : null}
+          <ol
+            className="route-matches"
+            aria-label="Routed capabilities in rank order"
+          >
+            {report.matches.map((match) => (
+              <li
+                key={match.name}
+                data-match={match.name}
+                className={`match${match.available ? "" : " unavailable"}`}
+              >
+                <span className="name">{match.name}</span>{" "}
+                <span className="score">score {match.score}</span>{" "}
+                <span className={`risk ${match.risk}`}>{match.risk}</span>
+                {match.requiresApproval ? (
+                  <span className="policy">needs approval</span>
+                ) : null}
+                <div className="availability">
+                  {availabilityText(match, report)}
+                </div>
+                {match.reasonCode !== undefined ? (
+                  <div className="why">
+                    {match.reasonCode}: {match.reason}
+                  </div>
+                ) : null}
+                {match.suggestedCapability ? (
+                  <div className="suggest">
+                    Try {match.suggestedCapability} instead.
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+          <p className="footnote">
+            A score adds the weight of each signal that matched: intent{" "}
+            {ROUTING_WEIGHTS.intent}, domain {ROUTING_WEIGHTS.domain}, entity{" "}
+            {ROUTING_WEIGHTS.entity}, keyword {ROUTING_WEIGHTS.keyword} (up to
+            two hits), route {ROUTING_WEIGHTS.route}.
+          </p>
+        </div>
+      ) : null}
+
       <div className="rail-section">
         <h3>Active tools</h3>
         <div className="chips">
@@ -129,26 +221,6 @@ export function Inspector() {
           </>
         ) : null}
       </div>
-
-      {unavailableMatches.length > 0 ? (
-        <div className="rail-section">
-          <h3>Relevant but unavailable</h3>
-          {unavailableMatches.map((match) => (
-            <div key={match.name} className="match">
-              <span className="name">{match.name}</span>{" "}
-              <span className={`risk ${match.risk}`}>{match.risk}</span>
-              <div className="why">
-                {match.reasonCode}: {match.reason}
-              </div>
-              {match.suggestedCapability ? (
-                <div className="suggest">
-                  Try {match.suggestedCapability} instead.
-                </div>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      ) : null}
     </>
   );
 }
