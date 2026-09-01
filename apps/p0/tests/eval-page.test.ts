@@ -78,19 +78,20 @@ describe("the eval page mounts the eval catalog", () => {
     const attempt = await first.runtime.invoke("refund_shipping", { order_id: "10428" });
     expect(attempt.code).toBe("APPROVAL_REQUIRED");
     await first.runtime.approve(first.runtime.getSnapshot().pending[0]!.id, HUMAN);
-    const again = await first.runtime.invoke("refund_shipping", { order_id: "10428" });
-    expect(again.data?.reasonCode).toBe("ALREADY_REFUNDED");
+    expect([...first.store.refunded]).toEqual(["10428"]);
+    expect(first.store.log).toEqual(["refund_shipping"]);
+    expect(first.runtime.queryReceipts()).toHaveLength(1);
     await first.runtime.stop();
 
     // A fresh catalog carries a fresh store, exactly what run.mjs builds per
-    // task, so the same order is refundable again.
+    // task, so nothing the last task wrote can decide the next task's result.
     const second = createEvalRuntime({ arm: "baseline", registerTool: async () => {} });
     await second.runtime.start();
-    const fresh = await second.runtime.invoke("refund_shipping", { order_id: "10428" });
-    expect(fresh.code).toBe("APPROVAL_REQUIRED");
-    expect(second.runtime.getSnapshot().audit.length).toBeLessThan(
-      first.runtime.getSnapshot().audit.length,
-    );
+    expect(second.store).not.toBe(first.store);
+    expect(second.store.refunded.size).toBe(0);
+    expect(second.store.log).toEqual([]);
+    expect(second.runtime.queryReceipts()).toHaveLength(0);
+    expect(second.runtime.getSnapshot().pending).toEqual([]);
     await second.runtime.stop();
   });
 });
