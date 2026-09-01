@@ -85,8 +85,11 @@ observation twice, which reads as full coverage.
 The loaders live in `scripts/evals/load.mjs`, apart from the CLI. A helper
 worth testing must not perform an evaluation to be reached, and importing the
 transcript loader from `run.mjs` used to run both arms and write a timestamped
-directory. A test asserts no `eval-*` directory exists after the suite, so
-that regression announces itself.
+directory. A test snapshots the run directory around a fresh child process that imports
+`load.mjs`, compares the two sets, and asserts the child printed nothing, so
+that regression announces itself. It measures what the import did rather than
+what happened to be on disk, which means your earlier runs are preserved and
+`pnpm eval` followed by `pnpm eval:test` both pass.
 `parseTranscriptEntry` applies the same rule to a transcript entry, and
 `loadTranscript` validates the whole file against the loaded task set before
 any of it is used. Defaulting an absent field turned a malformed entry into a

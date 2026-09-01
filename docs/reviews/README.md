@@ -3,10 +3,10 @@
 Review target: AgentDesk SDK and Meridian Ops demo
 
 Validated against commits `6a1745e`, `812e5b9`, `2f1f332`, `2bc6f6a`,
-`d7a4911`, `0c4f2fa`, `798c899`, `0123fbc`, `2f1f9e8`, `99d4139`, and
-`253a3be`.
+`d7a4911`, `0c4f2fa`, `798c899`, `0123fbc`, `2f1f9e8`, `99d4139`,
+`253a3be`, and `78651be`.
 
-Ten of those eleven are pre-merge branch commits and are not reachable from
+Eleven of those twelve are pre-merge branch commits and are not reachable from
 `main`, because their pull requests were squash-merged or their branch is
 still open. They are recorded here so the findings below stay resolvable
 after the branches are pruned.
@@ -24,6 +24,7 @@ after the branches are pruned.
 | `2f1f9e8` | no | unmerged on `feat/agentdesk-evals` (#14) |
 | `99d4139` | no | unmerged on `feat/agentdesk-evals` (#14) |
 | `253a3be` | no | unmerged on `feat/agentdesk-evals` (#14) |
+| `78651be` | no | unmerged on `feat/agentdesk-evals` (#14) |
 
 Current gates on `bf079ca`: 368 tests passed across 241 SDK, 4 P0, and 123 demo, all three TypeScript projects typechecked, SDK and both applications built, the packed SDK imported and executed under plain Node, and the design doc check passed at 32 claims and 28 anchors.
 
