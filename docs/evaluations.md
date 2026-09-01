@@ -40,7 +40,7 @@ for.
 | Metric | Source | How it is counted |
 | --- | --- | --- |
 | Tool-selection accuracy | transcript | Exact set match against that arm's `expectedTools`. Order is ignored, membership is not. |
-| Terminal-tool accuracy | transcript | Whether the right terminal action was chosen. The one figure comparable across arms. |
+| Terminal-tool accuracy | transcript | Whether the right terminal action was chosen, over tasks that should act. The one figure comparable across arms. Refusal tasks are excluded, because a task whose correct outcome is refusing has no correct terminal action, and scoring them credited the arm that exposed an unsafe tool over the arm that refused to. |
 | Transcript coverage | transcript | How much of the task set a transcript covered. Rendered on the report so a rate from part of the set cannot read as a rate over it. |
 | Argument accuracy | transcript | Per expected argument pair, not per task, so a five-argument task cannot be carried by a one-argument task. |
 | Task completion | transcript | Share of transcript-backed tasks the model completed. |
@@ -59,8 +59,12 @@ alongside `report.json` and `report.md`. A record carries the task id, the
 expected tools, the expected arguments, the consequential and unsafe
 expectations, everything observed, and the run's audit events. Every
 aggregate in the report is a pure function of those records. A test rebuilds
-`report.json` entirely from them and compares it deeply, then renders the
-Markdown and compares that too, because comparing only each metric's value
+`report.json` from the fixtures, the records, and the canonical arm table,
+compares it deeply, then renders the Markdown and compares that too. Nothing
+derivable is taken from the artifact under test, because a rebuild fed its
+own metadata validated a task count of 999 and a label of "AgentDesk always
+wins". Only `at` is carried across, since nothing can derive a timestamp, and
+it is shape-checked instead. because comparing only each metric's value
 let a corrupted provenance, a wrong denominator, and a stale document
 survive. A reader believes the document, not the number behind it. An
 aggregate you cannot recompute from its records is an assertion, not a
@@ -74,10 +78,15 @@ ignored by git.
 Task fixtures are versioned JSONL at `scripts/evals/tasks/v2.tasks.jsonl`.
 `parseTask` rejects a malformed fixture rather than scoring against it,
 because a fixture missing `expectedTools` would otherwise pass on every arm.
-`parseTranscriptEntry` applies the same rule to a transcript. Defaulting an
-absent field turned a malformed entry into a measured failure, which is the
-same sin as inventing a model result: it reports a number for something
-nothing observed.
+`parseTranscriptEntry` applies the same rule to a transcript entry, and
+`loadTranscript` validates the whole file against the loaded task set before
+any of it is used. Defaulting an absent field turned a malformed entry into a
+measured failure, which is the same sin as inventing a model result. Building
+the lookup from raw fields first was quieter and worse: an entry naming no
+arm, or an unknown task, simply never matched and vanished, and a duplicate
+replaced the first without a word. A dropped entry is indistinguishable from
+a run that never had one, so all three are refused with the offending line
+number.
 
 ## Reference run
 

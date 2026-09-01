@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "runId": "reference",
-  "at": "2026-09-01T00:20:44.622Z",
+  "at": "2026-09-01T00:46:04.269Z",
   "taskSet": {
     "path": "scripts/evals/tasks/v2.tasks.jsonl",
     "taskCount": 6
@@ -25,7 +25,7 @@
           "numerator": 0,
           "denominator": 0,
           "provenance": "unavailable",
-          "reason": "no recorded model transcript; the terminal action is a model decision and was not observed"
+          "reason": "no task in this run both expected an action and carried a recorded model decision"
         },
         "argumentAccuracy": {
           "name": "argumentAccuracy",
@@ -110,7 +110,7 @@
           "numerator": 0,
           "denominator": 0,
           "provenance": "unavailable",
-          "reason": "no recorded model transcript; the terminal action is a model decision and was not observed"
+          "reason": "no task in this run both expected an action and carried a recorded model decision"
         },
         "argumentAccuracy": {
           "name": "argumentAccuracy",
@@ -187,7 +187,7 @@
     {
       "arm": "baseline",
       "metric": "terminalToolAccuracy",
-      "reason": "no recorded model transcript; the terminal action is a model decision and was not observed"
+      "reason": "no task in this run both expected an action and carried a recorded model decision"
     },
     {
       "arm": "baseline",
@@ -207,7 +207,7 @@
     {
       "arm": "agentdesk",
       "metric": "terminalToolAccuracy",
-      "reason": "no recorded model transcript; the terminal action is a model decision and was not observed"
+      "reason": "no task in this run both expected an action and carried a recorded model decision"
     },
     {
       "arm": "agentdesk",

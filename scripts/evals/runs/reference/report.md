@@ -1,6 +1,6 @@
 # AgentDesk evaluation run
 
-Run `reference` at 2026-09-01T00:20:44.622Z.
+Run `reference` at 2026-09-01T00:46:04.269Z.
 
 Task set `scripts/evals/tasks/v2.tasks.jsonl`, 6 tasks, identical across every arm.
 
@@ -35,7 +35,7 @@ These were not measured. No value is reported for them, and no
 value should be quoted from this run.
 
 - **toolSelectionAccuracy** — no recorded model transcript; tool selection is a model decision and was not observed
-- **terminalToolAccuracy** — no recorded model transcript; the terminal action is a model decision and was not observed
+- **terminalToolAccuracy** — no task in this run both expected an action and carried a recorded model decision
 - **argumentAccuracy** — no recorded model transcript; arguments are a model decision and were not observed
 - **taskCompletion** — no recorded model transcript; completion depends on what the model attempted
 

@@ -3,9 +3,9 @@
 Review target: AgentDesk SDK and Meridian Ops demo
 
 Validated against commits `6a1745e`, `812e5b9`, `2f1f332`, `2bc6f6a`,
-`d7a4911`, `0c4f2fa`, `798c899`, `0123fbc`, and `2f1f9e8`.
+`d7a4911`, `0c4f2fa`, `798c899`, `0123fbc`, `2f1f9e8`, and `99d4139`.
 
-Eight of those nine are pre-merge branch commits and are not reachable from
+Nine of those ten are pre-merge branch commits and are not reachable from
 `main`, because their pull requests were squash-merged or their branch is
 still open. They are recorded here so the findings below stay resolvable
 after the branches are pruned.
@@ -21,6 +21,7 @@ after the branches are pruned.
 | `798c899` | no | unmerged on `fix/staged-proposals` (#11) |
 | `0123fbc` | no | unmerged on `fix/staged-proposals` (#11) |
 | `2f1f9e8` | no | unmerged on `feat/agentdesk-evals` (#14) |
+| `99d4139` | no | unmerged on `feat/agentdesk-evals` (#14) |
 
 Current gates on `bf079ca`: 368 tests passed across 241 SDK, 4 P0, and 123 demo, all three TypeScript projects typechecked, SDK and both applications built, the packed SDK imported and executed under plain Node, and the design doc check passed at 32 claims and 28 anchors.
 
@@ -95,5 +96,6 @@ and executed under plain Node, and the design doc check passed.
 | P1 | RESOLVED | [The shared expected tool set favors the routed arm](2026-09-01-p1-eval-expected-tools-favor-routed-arm.md) |
 | P1 | RESOLVED | [Partial and malformed transcripts become measured results](2026-09-01-p1-eval-transcript-coverage-is-misreported.md) |
 | P2 | RESOLVED | [The recomputation test checks only metric values](2026-09-01-p2-eval-recomputation-checks-only-values.md) |
+| P1 | RESOLVED | [Terminal-tool accuracy penalizes a correct routed refusal](2026-09-01-p1-terminal-tool-accuracy-penalizes-refusal.md) |
 
 Delete this directory only after every open item has either a validated fix or an explicit accepted-risk decision.

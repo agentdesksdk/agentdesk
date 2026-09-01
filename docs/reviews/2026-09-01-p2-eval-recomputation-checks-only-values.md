@@ -1,6 +1,6 @@
 # P2: the recomputation test checks only metric values
 
-Status: **RESOLVED** in `df2669a`
+Status: **RESOLVED** in `pending`
 
 Reviewed worktree: `cheery-obsidian`, commit `2f1f9e8` (PR #14)
 
@@ -32,3 +32,22 @@ it byte-for-byte with the committed `report.md`.
 Prove the guard is load-bearing by changing only a denominator, only a
 provenance value, and only the Markdown. Each mutation must fail the reference
 artifact check even when the metric's numeric `value` is unchanged.
+
+## Follow-up verification at `99d4139`
+
+Metric objects and Markdown are now checked completely, but the test does not
+recompute the whole report as claimed. It feeds `buildReport` the report's own
+`runId`, timestamp, task path, task count, arm labels, and exposure values.
+Those fields therefore validate themselves.
+
+Changing the committed task count to 999 and the AgentDesk label to
+`AgentDesk always wins`, then rebuilding with the test's current inputs,
+still produces a deep-equal report and renders both corrupt values into
+Markdown. The metrics remain honest while the purportedly checked artifact is
+not.
+
+Derive task count from the parsed fixture or record set, arm labels and
+exposure from `ARMS`, and run id from a consistency check across every record.
+Either make the timestamp explicit non-recomputable metadata or store the
+source needed to validate it. Add mutations for task count, arm label,
+exposure, and run id alongside the existing metric and Markdown guards.

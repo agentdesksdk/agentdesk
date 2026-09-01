@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { applyTranscript, ARMS, probeTask } from "./arms.mjs";
+import { applyTranscript, ARMS, parseTranscriptEntry, probeTask } from "./arms.mjs";
 import { buildCatalog } from "./catalog.mjs";
 import { computeMetrics } from "./metrics.mjs";
 import { buildReport, renderMarkdown } from "./report.mjs";
@@ -10,6 +10,8 @@ import { parseTask } from "./schema.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
 const dist = join(repoRoot, "packages", "webmcp", "dist", "index.js");
+const ARM_NAMES = Object.keys(ARMS);
+const NEWLINE = String.fromCharCode(10);
 
 function argValue(flag, fallback) {
   const index = process.argv.indexOf(flag);
@@ -33,17 +35,49 @@ function loadTasks(path) {
     });
 }
 
-function loadTranscript(path) {
+/**
+ * The transcript is external input, so the whole file is validated against
+ * the loaded task set before any of it is used. Building the lookup from raw
+ * fields first meant an entry naming no arm, or an unknown task, simply never
+ * matched and vanished, and a duplicate quietly replaced the first. A dropped
+ * entry is indistinguishable from a run that never had one.
+ */
+export function loadTranscript(path, tasks) {
   if (path === undefined) return new Map();
   if (!existsSync(path)) {
     throw new Error(`transcript not found: ${path}`);
   }
-  const entries = readFileSync(path, "utf8")
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map((l) => JSON.parse(l));
-  return new Map(entries.map((e) => [`${e.arm}:${e.taskId}`, e]));
+  const known = new Set(tasks.map((t) => t.id));
+  const source = relative(repoRoot, path);
+  const byKey = new Map();
+
+  readFileSync(path, "utf8").split(NEWLINE).forEach((rawLine, index) => {
+    const line = rawLine.trim();
+    if (line === "") return;
+    const at = `${source} line ${index + 1}`;
+    let raw;
+    try {
+      raw = JSON.parse(line);
+    } catch (err) {
+      throw new SyntaxError(`${at} is not valid JSON: ${err.message}`);
+    }
+    const entry = parseTranscriptEntry(raw, at);
+    if (typeof entry.arm !== "string") {
+      throw new TypeError(`${at} must name an arm, one of ${ARM_NAMES.join(", ")}`);
+    }
+    if (!ARM_NAMES.includes(entry.arm)) {
+      throw new TypeError(`${at} names arm ${JSON.stringify(entry.arm)}, not one of ${ARM_NAMES.join(", ")}`);
+    }
+    if (!known.has(entry.taskId)) {
+      throw new TypeError(`${at} names task ${JSON.stringify(entry.taskId)}, which is not in the task set`);
+    }
+    const key = `${entry.arm}:${entry.taskId}`;
+    if (byKey.has(key)) {
+      throw new TypeError(`${at} is a duplicate entry for ${key}`);
+    }
+    byKey.set(key, entry);
+  });
+  return byKey;
 }
 
 async function main() {
@@ -58,7 +92,7 @@ async function main() {
 
   const tasksPath = resolve(repoRoot, argValue("--tasks", join(here, "tasks", "v2.tasks.jsonl")));
   const tasks = loadTasks(tasksPath);
-  const transcript = loadTranscript(argValue("--transcript", undefined));
+  const transcript = loadTranscript(argValue("--transcript", undefined), tasks);
   const runId = argValue("--run-id", `eval-${new Date().toISOString().replace(/[:.]/g, "-")}`);
   const outDir = resolve(repoRoot, argValue("--out", join(here, "runs", runId)));
   mkdirSync(outDir, { recursive: true });
