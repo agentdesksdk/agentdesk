@@ -142,6 +142,15 @@ Visibility is still not authorization: a permitted origin can see the tool and
 call it, and AgentDesk's own policy gate is what decides whether the call
 proceeds.
 
+`fromOrigins` on `getTools` is weaker still. It is a request to the provider
+to filter, and enforcement lives entirely in the provider. Under a browser the
+provider is the browser. Under the polyfill the provider is page or extension
+script, which is not a security boundary at all, so `listTools` returns
+whatever the provider chose to return. Filtering the result client-side on
+`tool.origin` or `RegisteredTool.window` recovers nothing, because the same
+provider supplied those values. Treat `fromOrigins` as a routing convenience
+and never let it gate a decision.
+
 **A page message may request privileged work. It may never authorize it.**
 Those are different things, and conflating them either forbids the bridge or
 builds a hole in it.

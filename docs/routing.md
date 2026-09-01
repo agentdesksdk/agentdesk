@@ -21,8 +21,12 @@ weights, its tie-breaking, and its budget are unchanged.
 | Keyword | 2 per hit, capped at 2 hits | A declared keyword appears in the query |
 | Route | 1 | The current route starts with a declared prefix |
 
-A capability scoring zero is never routed. Ties break by name, so equal
-scores never reorder between runs.
+A capability scoring zero is never routed. Ties break by codepoint order of
+the name, so equal scores never reorder between runs or between hosts. The
+comparison is deliberately not locale-aware. A locale-aware tie-break resolves
+against the user's locale in a browser, and Danish collation sorts a leading
+`aa` after `z`, so the same application published a different tool set to a
+Danish user than to an English one.
 
 ## Three strategies
 

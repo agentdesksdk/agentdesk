@@ -103,4 +103,10 @@ and executed under plain Node, and the design doc check passed.
 | P1 | RESOLVED | [Duplicate task ids count one transcript twice](2026-09-01-p1-duplicate-task-ids-double-count-transcript.md) |
 | P2 | RESOLVED | [Importing the transcript loader executes the evaluation CLI](2026-09-01-p2-importing-transcript-loader-runs-eval.md) |
 
+| P1 | RESOLVED | [The routing tie-break is locale-sensitive, so the tool surface varies by user](2026-09-02-p1-routing-tie-break-is-locale-sensitive.md) |
+| P2 | RESOLVED | [Duplicate relationship edges are counted twice](2026-09-02-p2-duplicate-relationship-edges-count-twice.md) |
+| P2 | RESOLVED | [`fromOrigins` is advisory and nothing says so](2026-09-02-p2-from-origins-is-advisory-and-undocumented.md) |
+| P2 | RESOLVED | [The eval surface metrics ignore the recorded peak](2026-09-02-p2-eval-surface-metrics-ignore-recorded-peak.md) |
+| P2 | RESOLVED | [Eval reproducibility rests on no tie at the cut](2026-09-02-p2-eval-reproducibility-rests-on-no-tie-at-cut.md) |
+
 Delete this directory only after every open item has either a validated fix or an explicit accepted-risk decision.
