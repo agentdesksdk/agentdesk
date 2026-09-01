@@ -17,6 +17,18 @@ to slide editors, design tools, IDEs, and admin platforms: large internal
 capability catalogs, a small task-relevant working set, and a handful of
 actions a human should personally authorize.
 
+### Beyond operations consoles
+
+The same runtime fits any application with a wide capability surface and a
+few actions a human should personally authorize: slide editors, design
+tools, IDEs, admin platforms. Structured operations beat synthesized input
+there for the same reason they do here, and more so, because GUI editing
+depends on pixel geometry and continuous pointer state that a
+screenshot-action loop cannot observe. AgentDesk is a layer an application
+adopts, not a wrapper over someone else's app. The rest of this document
+covers the catalog shape, batched edit sessions, and the integration
+constraint. None of it is implemented; Meridian Ops is the proof.
+
 ## Creative and spatial applications
 
 A deck editor is the clearest next case. Structured operations beat
