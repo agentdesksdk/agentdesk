@@ -1,6 +1,6 @@
 # P1: partial and malformed transcripts become measured results
 
-Status: **RESOLVED** in `pending`
+Status: **RESOLVED** in `aca9813`
 
 Reviewed worktree: `cheery-obsidian`, commit `2f1f9e8` (PR #14)
 

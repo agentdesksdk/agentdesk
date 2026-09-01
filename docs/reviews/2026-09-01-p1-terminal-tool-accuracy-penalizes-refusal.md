@@ -1,6 +1,6 @@
 # P1: terminal-tool accuracy penalizes a correct routed refusal
 
-Status: **RESOLVED** in `pending`
+Status: **RESOLVED** in `aca9813`
 
 Reviewed worktree: `cheery-obsidian`, commit `99d4139` (PR #14)
 
