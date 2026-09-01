@@ -1,4 +1,7 @@
 import { useState } from "react";
+import { createAgentDeskRuntime } from "@agentdesk/webmcp";
+import { capabilities } from "../capabilities/index.ts";
+import { stagingAdapter } from "../capabilities/staged.ts";
 import { StatCard } from "../components/bits.tsx";
 import { useBenchmark, useRuntime } from "../components/hooks.ts";
 import { resetStore } from "../data/store.ts";
@@ -8,7 +11,7 @@ import {
   runSideBySide,
   type ArmMeasurement,
 } from "../instrumentation/sideBySide.ts";
-import { agentdesk, OPERATOR } from "../runtime/agentdesk.ts";
+import { OPERATOR } from "../runtime/agentdesk.ts";
 
 type SideBySide =
   | { status: "idle" }
@@ -23,17 +26,30 @@ export function Benchmark() {
 
   async function runBothModes() {
     setSideBySide({ status: "running" });
+    // A probe runtime over the page's own catalog and staging adapter, built
+    // the way `pnpm eval` builds one. The page's runtime is left alone: its
+    // guided presence navigates on every invoke, which would unmount this
+    // page mid-run, and the shell re-asserts the route's exposure on each
+    // navigation, which would flip an arm halfway through its measurement.
+    const probe = createAgentDeskRuntime({
+      capabilities,
+      registerTool: async () => {},
+      staging: stagingAdapter,
+      actor: { id: "agent", name: "Agent", kind: "agent" },
+      exposure: snapshot.exposure,
+    });
     try {
+      await probe.start();
       const rows = await runSideBySide({
-        runtime: agentdesk,
+        runtime: probe,
         task: REFUND_SHIPPING_HAPPY,
         approver: OPERATOR,
         // The same seed for both arms, the way each eval arm gets a fresh
-        // catalog: the store back to its seed and the runtime's own
+        // catalog: the store back to its seed and the probe's own
         // bookkeeping cleared.
         reset: async () => {
           resetStore();
-          await agentdesk.reset();
+          await probe.reset();
         },
       });
       setSideBySide({ status: "done", rows });
@@ -42,6 +58,8 @@ export function Benchmark() {
         status: "failed",
         message: err instanceof Error ? err.message : String(err),
       });
+    } finally {
+      await probe.stop();
     }
   }
   const modeLabel = snapshot.exposure === "flat" ? "Baseline (flat)" : "AgentDesk (routed)";
@@ -83,7 +101,8 @@ export function Benchmark() {
         <p className="page-sub" style={{ marginBottom: 12 }}>
           Runs the eval task <code>{REFUND_SHIPPING_HAPPY.id}</code> (&ldquo;
           {REFUND_SHIPPING_HAPPY.prompt}&rdquo;) under flat exposure, then
-          routed, on this page&apos;s runtime. Each arm starts from the demo
+          routed, on a runtime built from this page&apos;s catalog the way{" "}
+          <code>pnpm eval</code> builds one. Each arm starts from the demo
           seed; the approval is granted by you as the operator, and the seed
           is restored when the run ends. Both columns are the task-time peak:
           sampled after routing and after execution, the larger reported.
