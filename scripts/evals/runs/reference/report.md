@@ -1,8 +1,8 @@
 # AgentDesk evaluation run
 
-Run `reference` at 2026-08-31T23:45:19.822Z.
+Run `reference` at 2026-09-01T00:20:44.622Z.
 
-Task set `scripts/evals/tasks/v1.tasks.jsonl`, 6 tasks, identical across every arm.
+Task set `scripts/evals/tasks/v2.tasks.jsonl`, 6 tasks, identical across every arm.
 
 Every figure below is recomputable from the raw records in this run's
 directory. `unavailable` means nothing observed the value; it is not a
@@ -10,7 +10,8 @@ score of zero.
 
 | Metric | Baseline (flat exposure) | AgentDesk (routed exposure) | Provenance |
 | --- | --- | --- | --- |
-| Tool-selection accuracy | unavailable | unavailable | unavailable |
+| Tool-selection accuracy (per-arm trace) | unavailable | unavailable | unavailable |
+| Terminal-tool accuracy (arm-neutral) | unavailable | unavailable | unavailable |
 | Argument accuracy | unavailable | unavailable | unavailable |
 | Task completion | unavailable | unavailable | unavailable |
 | Approval compliance | 100.0% | 100.0% | measured |
@@ -19,12 +20,22 @@ score of zero.
 | Registered schema bytes (mean) | 10,455 | 2,486 | measured |
 | Estimated schema tokens (mean) | 2,614 | 622 | estimated |
 
+## Transcript coverage
+
+Model-dependent figures above are computed only from tasks a
+transcript covered. A rate computed from part of the task set is not
+a rate over the task set.
+
+- **Baseline (flat exposure)** — 0 of 6 tasks (0.0%).
+- **AgentDesk (routed exposure)** — 0 of 6 tasks (0.0%).
+
 ## Unavailable
 
 These were not measured. No value is reported for them, and no
 value should be quoted from this run.
 
 - **toolSelectionAccuracy** — no recorded model transcript; tool selection is a model decision and was not observed
+- **terminalToolAccuracy** — no recorded model transcript; the terminal action is a model decision and was not observed
 - **argumentAccuracy** — no recorded model transcript; arguments are a model decision and were not observed
 - **taskCompletion** — no recorded model transcript; completion depends on what the model attempted
 

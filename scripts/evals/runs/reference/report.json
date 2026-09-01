@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "runId": "reference",
-  "at": "2026-08-31T23:45:19.822Z",
+  "at": "2026-09-01T00:20:44.622Z",
   "taskSet": {
-    "path": "scripts/evals/tasks/v1.tasks.jsonl",
+    "path": "scripts/evals/tasks/v2.tasks.jsonl",
     "taskCount": 6
   },
   "arms": {
@@ -18,6 +18,14 @@
           "denominator": 0,
           "provenance": "unavailable",
           "reason": "no recorded model transcript; tool selection is a model decision and was not observed"
+        },
+        "terminalToolAccuracy": {
+          "name": "terminalToolAccuracy",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0,
+          "provenance": "unavailable",
+          "reason": "no recorded model transcript; the terminal action is a model decision and was not observed"
         },
         "argumentAccuracy": {
           "name": "argumentAccuracy",
@@ -74,6 +82,13 @@
           "denominator": 6,
           "provenance": "estimated",
           "formula": "registeredSchemaBytes / 4"
+        },
+        "transcriptCoverage": {
+          "name": "transcriptCoverage",
+          "value": 0,
+          "numerator": 0,
+          "denominator": 6,
+          "provenance": "measured"
         }
       }
     },
@@ -88,6 +103,14 @@
           "denominator": 0,
           "provenance": "unavailable",
           "reason": "no recorded model transcript; tool selection is a model decision and was not observed"
+        },
+        "terminalToolAccuracy": {
+          "name": "terminalToolAccuracy",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0,
+          "provenance": "unavailable",
+          "reason": "no recorded model transcript; the terminal action is a model decision and was not observed"
         },
         "argumentAccuracy": {
           "name": "argumentAccuracy",
@@ -144,6 +167,13 @@
           "denominator": 6,
           "provenance": "estimated",
           "formula": "registeredSchemaBytes / 4"
+        },
+        "transcriptCoverage": {
+          "name": "transcriptCoverage",
+          "value": 0,
+          "numerator": 0,
+          "denominator": 6,
+          "provenance": "measured"
         }
       }
     }
@@ -153,6 +183,11 @@
       "arm": "baseline",
       "metric": "toolSelectionAccuracy",
       "reason": "no recorded model transcript; tool selection is a model decision and was not observed"
+    },
+    {
+      "arm": "baseline",
+      "metric": "terminalToolAccuracy",
+      "reason": "no recorded model transcript; the terminal action is a model decision and was not observed"
     },
     {
       "arm": "baseline",
@@ -168,6 +203,11 @@
       "arm": "agentdesk",
       "metric": "toolSelectionAccuracy",
       "reason": "no recorded model transcript; tool selection is a model decision and was not observed"
+    },
+    {
+      "arm": "agentdesk",
+      "metric": "terminalToolAccuracy",
+      "reason": "no recorded model transcript; the terminal action is a model decision and was not observed"
     },
     {
       "arm": "agentdesk",

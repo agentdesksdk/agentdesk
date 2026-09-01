@@ -4,7 +4,8 @@ const pct = (v) => (v === null ? "unavailable" : `${(v * 100).toFixed(1)}%`);
 const num = (v) => (v === null ? "unavailable" : Math.round(v).toLocaleString("en-US"));
 
 const SHAPE = {
-  toolSelectionAccuracy: { label: "Tool-selection accuracy", format: pct },
+  toolSelectionAccuracy: { label: "Tool-selection accuracy (per-arm trace)", format: pct },
+  terminalToolAccuracy: { label: "Terminal-tool accuracy (arm-neutral)", format: pct },
   argumentAccuracy: { label: "Argument accuracy", format: pct },
   taskCompletion: { label: "Task completion", format: pct },
   approvalCompliance: { label: "Approval compliance", format: pct },
@@ -50,6 +51,21 @@ export function renderMarkdown(report) {
     const cells = armKeys.map((k) => shape.format(report.arms[k].metrics[name]?.value ?? null));
     const provenances = [...new Set(armKeys.map((k) => report.arms[k].metrics[name]?.provenance))];
     lines.push(`| ${shape.label} | ${cells.join(" | ")} | ${provenances.join(", ")} |`);
+  }
+
+  const coverage = armKeys
+    .map((k) => [k, report.arms[k].metrics.transcriptCoverage])
+    .filter(([, m]) => m && m.value !== null);
+  if (coverage.length > 0) {
+    lines.push("", "## Transcript coverage", "");
+    lines.push("Model-dependent figures above are computed only from tasks a");
+    lines.push("transcript covered. A rate computed from part of the task set is not");
+    lines.push("a rate over the task set.", "");
+    for (const [arm, metric] of coverage) {
+      lines.push(
+        `- **${report.arms[arm].label}** — ${metric.numerator} of ${metric.denominator} tasks (${pct(metric.value)}).`,
+      );
+    }
   }
 
   if (report.unavailable.length > 0) {

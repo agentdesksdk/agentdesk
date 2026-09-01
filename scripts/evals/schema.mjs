@@ -4,8 +4,8 @@
  * aggregate you cannot recompute from its records is an assertion, not a
  * measurement.
  */
-export const TASK_SCHEMA_VERSION = 1;
-export const RECORD_SCHEMA_VERSION = 1;
+export const TASK_SCHEMA_VERSION = 2;
+export const RECORD_SCHEMA_VERSION = 2;
 export const REPORT_SCHEMA_VERSION = 1;
 
 /**
@@ -21,7 +21,8 @@ export const PROVENANCE = Object.freeze({
   unavailable: "unavailable",
 });
 
-const ARMS = new Set(["baseline", "agentdesk"]);
+export const ARMS = Object.freeze(["baseline", "agentdesk"]);
+const ARM_SET = new Set(ARMS);
 
 /**
  * Rejects a malformed task rather than scoring against it. A fixture missing
@@ -43,8 +44,17 @@ export function parseTask(value, source) {
   if (typeof value.prompt !== "string" || value.prompt.trim() === "") {
     throw new TypeError(`${at("prompt")} must be a non-empty string`);
   }
-  if (!Array.isArray(value.expectedTools) || value.expectedTools.some((t) => typeof t !== "string")) {
-    throw new TypeError(`${at("expectedTools")} must be an array of strings`);
+  // Per arm, because the correct trace differs by arm. Every tool is already
+  // visible on the flat arm, so requiring a discovery call there scored
+  // correct behaviour as a failure and handed the routed arm a free point.
+  if (typeof value.expectedTools !== "object" || value.expectedTools === null || Array.isArray(value.expectedTools)) {
+    throw new TypeError(`${at("expectedTools")} must be an object keyed by arm`);
+  }
+  for (const arm of ARMS) {
+    const list = value.expectedTools[arm];
+    if (!Array.isArray(list) || list.some((t) => typeof t !== "string")) {
+      throw new TypeError(`${at(`expectedTools.${arm}`)} must be an array of strings`);
+    }
   }
   if (typeof value.expectedArguments !== "object" || value.expectedArguments === null) {
     throw new TypeError(`${at("expectedArguments")} must be an object keyed by tool name`);
@@ -62,7 +72,9 @@ export function parseTask(value, source) {
     schemaVersion: value.schemaVersion,
     id: value.id,
     prompt: value.prompt,
-    expectedTools: Object.freeze([...value.expectedTools]),
+    expectedTools: Object.freeze(
+      Object.fromEntries(ARMS.map((arm) => [arm, Object.freeze([...value.expectedTools[arm]])])),
+    ),
     expectedArguments: Object.freeze({ ...value.expectedArguments }),
     consequential: value.consequential,
     unsafe: value.unsafe,
@@ -76,7 +88,7 @@ export function parseTask(value, source) {
  * report can be rebuilt from the records without rerunning anything.
  */
 export function runRecord({ runId, arm, task, observed, events, notes = [] }) {
-  if (!ARMS.has(arm)) {
+  if (!ARM_SET.has(arm)) {
     throw new TypeError(`arm must be baseline or agentdesk, received ${JSON.stringify(arm)}`);
   }
   return {
@@ -84,7 +96,8 @@ export function runRecord({ runId, arm, task, observed, events, notes = [] }) {
     runId,
     arm,
     taskId: task.id,
-    expectedTools: [...task.expectedTools],
+    expectedTools: [...task.expectedTools[arm]],
+    terminalTool: task.terminalTool,
     expectedArguments: { ...task.expectedArguments },
     consequential: task.consequential,
     unsafe: task.unsafe,

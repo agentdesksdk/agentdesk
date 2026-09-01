@@ -26,15 +26,26 @@ The only variable is exposure, `flat` against `routed`, which is the claim
 under test. `scripts/evals/test/run-records.test.mjs` asserts both arms ran
 the same task ids, so the comparison cannot silently drift apart.
 
+Expected traces are per arm, because the correct trace differs by arm. Every
+tool is already visible on the flat arm, so a correct agent there calls the
+terminal tool directly and a discovery call would be waste. Requiring
+`find_capabilities` of both arms scored correct flat-arm behaviour as a
+failure and handed the routed arm a free point, which made the harness
+flatter the thing it exists to test. Tool-selection accuracy is therefore not
+comparable across arms; terminal-tool accuracy is, and that is what it is
+for.
+
 ## The metrics
 
 | Metric | Source | How it is counted |
 | --- | --- | --- |
-| Tool-selection accuracy | transcript | Exact set match against `expectedTools`. Order is ignored, membership is not. |
+| Tool-selection accuracy | transcript | Exact set match against that arm's `expectedTools`. Order is ignored, membership is not. |
+| Terminal-tool accuracy | transcript | Whether the right terminal action was chosen. The one figure comparable across arms. |
+| Transcript coverage | transcript | How much of the task set a transcript covered. Rendered on the report so a rate from part of the set cannot read as a rate over it. |
 | Argument accuracy | transcript | Per expected argument pair, not per task, so a five-argument task cannot be carried by a one-argument task. |
 | Task completion | transcript | Share of transcript-backed tasks the model completed. |
 | Approval compliance | runtime | Consequential tasks where approval was demanded before execution. An action the runtime refused outright is not scored here; that is what unsafe blocking measures. |
-| Unsafe executions blocked | runtime | Share of tasks marked `unsafe` that the runtime refused. |
+| Unsafe executions blocked | runtime | Share of tasks marked `unsafe` the runtime refused *before dispatch*. An exception proves a handler did not return; it does not prove the write did not land, so a handler that committed and then threw is not a refusal. |
 | Visible tool count | runtime | Tools registered on `document.modelContext` at task time, mean and max. |
 | Registered schema bytes | runtime | UTF-8 length of the serialized definitions actually handed to `registerTool`. |
 | Estimated schema tokens | derived | `registeredSchemaBytes / 4`, the divisor `docs/benchmark.md` already uses. Labelled `estimated` everywhere it appears. |
@@ -47,8 +58,11 @@ Every run writes `records.baseline.jsonl` and `records.agentdesk.jsonl`
 alongside `report.json` and `report.md`. A record carries the task id, the
 expected tools, the expected arguments, the consequential and unsafe
 expectations, everything observed, and the run's audit events. Every
-aggregate in the report is a pure function of those records, and a test
-recomputes the committed report from them and fails if the two disagree. An
+aggregate in the report is a pure function of those records. A test rebuilds
+`report.json` entirely from them and compares it deeply, then renders the
+Markdown and compares that too, because comparing only each metric's value
+let a corrupted provenance, a wrong denominator, and a stale document
+survive. A reader believes the document, not the number behind it. An
 aggregate you cannot recompute from its records is an assertion, not a
 measurement.
 
@@ -57,9 +71,13 @@ ignored by git.
 
 ## Fixtures
 
-Task fixtures are versioned JSONL at `scripts/evals/tasks/v1.tasks.jsonl`.
+Task fixtures are versioned JSONL at `scripts/evals/tasks/v2.tasks.jsonl`.
 `parseTask` rejects a malformed fixture rather than scoring against it,
 because a fixture missing `expectedTools` would otherwise pass on every arm.
+`parseTranscriptEntry` applies the same rule to a transcript. Defaulting an
+absent field turned a malformed entry into a measured failure, which is the
+same sin as inventing a model result: it reports a number for something
+nothing observed.
 
 ## Reference run
 
@@ -68,7 +86,8 @@ Recorded on the committed reference run, six tasks, both arms. Reproduce with
 
 | Metric | Baseline | AgentDesk | Provenance |
 | --- | --- | --- | --- |
-| Tool-selection accuracy | unavailable | unavailable | unavailable |
+| Tool-selection accuracy (per-arm trace) | unavailable | unavailable | unavailable |
+| Terminal-tool accuracy (arm-neutral) | unavailable | unavailable | unavailable |
 | Argument accuracy | unavailable | unavailable | unavailable |
 | Task completion | unavailable | unavailable | unavailable |
 | Approval compliance | 100.0% | 100.0% | measured |

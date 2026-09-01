@@ -151,7 +151,8 @@ test("a malformed transcript entry is rejected, not turned into a measurement", 
       blocked: false, visibleToolCount: 1, schemaBytes: 1,
     },
   };
-  assert.throws(() => applyTranscript(probe, { taskId: "refund", nonsense: true }), /selectedTools/);
+  assert.throws(() => applyTranscript(probe, { taskId: "refund" }), /selectedTools/);
+  assert.throws(() => applyTranscript(probe, { taskId: "refund", nonsense: true }), /unknown field/);
   assert.throws(() => applyTranscript(probe, { taskId: "refund", selectedTools: ["a"], arguments: {} }), /completed/);
   assert.throws(
     () => applyTranscript(probe, { taskId: "refund", selectedTools: ["a"], arguments: {}, completed: true, extra: 1 }),

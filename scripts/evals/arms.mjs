@@ -40,9 +40,6 @@ export async function probeTask({ createAgentDeskRuntime, capabilities, task, ar
   const afterAttempt = runtime.getSnapshot();
 
   const approvalRequested = afterAttempt.audit.some((e) => e.kind === "approval_requested");
-  const blocked =
-    attempt.isError === true ||
-    afterAttempt.audit.some((e) => e.kind === "capability_unavailable" || e.kind === "policy_denied");
   // Did anything actually run before a human said yes? An approval-gated
   // capability that produced a receipt without an approval event is the
   // failure this metric exists to catch.
@@ -56,6 +53,16 @@ export async function probeTask({ createAgentDeskRuntime, capabilities, task, ar
   }
 
   const final = runtime.getSnapshot();
+  // An exception proves a handler did not return. It does not prove the write
+  // did not land. Refusal is only what the runtime declined before dispatch,
+  // so it is read from the absence of execution_started rather than from any
+  // error the caller happened to receive.
+  const dispatched = final.audit.some((e) => e.kind === "execution_started");
+  const refusalEvidence =
+    attempt.isError === true ||
+    final.audit.some((e) => e.kind === "capability_unavailable" || e.kind === "policy_denied");
+  const blocked = !dispatched && refusalEvidence;
+
   const record = runRecord({
     runId,
     arm,
@@ -68,6 +75,7 @@ export async function probeTask({ createAgentDeskRuntime, capabilities, task, ar
       approvalRequested,
       approvalGranted,
       executedWithoutApproval,
+      dispatched,
       blocked,
       visibleToolCount: before.nativeTools.length,
       schemaBytes: before.schemaBytes,
@@ -89,17 +97,51 @@ export async function probeTask({ createAgentDeskRuntime, capabilities, task, ar
  * receives a transcript entry is scored for the model-dependent metrics; the
  * rest stay `runtime-probe` and read as unavailable rather than as failures.
  */
+const TRANSCRIPT_KEYS = new Set(["taskId", "arm", "selectedTools", "arguments", "completed"]);
+
+/**
+ * A transcript entry is external input, so it is parsed rather than trusted.
+ * Defaulting an absent field turned a malformed entry into a measured
+ * failure, which is the same sin as inventing a model result: it reports a
+ * number for something nothing observed.
+ */
+export function parseTranscriptEntry(entry, source = "transcript") {
+  const at = (field) => `${source}: entry ${entry?.taskId ?? "<no taskId>"} ${field}`;
+  if (typeof entry !== "object" || entry === null) {
+    throw new TypeError(`${source}: entry must be an object`);
+  }
+  for (const key of Object.keys(entry)) {
+    if (!TRANSCRIPT_KEYS.has(key)) {
+      throw new TypeError(`${at(key)} is an unknown field`);
+    }
+  }
+  if (typeof entry.taskId !== "string" || entry.taskId.trim() === "") {
+    throw new TypeError(`${at("taskId")} must be a non-empty string`);
+  }
+  if (!Array.isArray(entry.selectedTools) || entry.selectedTools.some((t) => typeof t !== "string")) {
+    throw new TypeError(`${at("selectedTools")} must be an array of strings`);
+  }
+  if (typeof entry.arguments !== "object" || entry.arguments === null || Array.isArray(entry.arguments)) {
+    throw new TypeError(`${at("arguments")} must be an object keyed by tool name`);
+  }
+  if (typeof entry.completed !== "boolean") {
+    throw new TypeError(`${at("completed")} must be a boolean`);
+  }
+  return entry;
+}
+
 export function applyTranscript(record, entry) {
   if (!entry) return record;
+  const parsed = parseTranscriptEntry(entry);
   return {
     ...record,
     observed: {
       ...record.observed,
       decisionSource: "transcript",
-      selectedTools: entry.selectedTools ?? [],
-      arguments: entry.arguments ?? {},
-      completed: entry.completed === true,
+      selectedTools: [...parsed.selectedTools],
+      arguments: { ...parsed.arguments },
+      completed: parsed.completed,
     },
-    notes: [...record.notes, `model decisions supplied by transcript entry for ${entry.taskId}`],
+    notes: [...record.notes, `model decisions supplied by transcript entry for ${parsed.taskId}`],
   };
 }

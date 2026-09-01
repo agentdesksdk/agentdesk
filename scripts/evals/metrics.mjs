@@ -76,6 +76,39 @@ export function argumentAccuracy(records) {
   return ratio("argumentAccuracy", hit, total);
 }
 
+/**
+ * The one number comparable across arms. Arm-specific expectations are what
+ * make tool selection fair, and they are also what make it incomparable: the
+ * two arms are being asked different questions. This asks the same question
+ * of both, namely whether the right terminal action was chosen.
+ */
+export function terminalToolAccuracy(records) {
+  const scored = withDecision(records).filter((r) => typeof r.terminalTool === "string");
+  if (scored.length === 0) {
+    return unavailable(
+      "terminalToolAccuracy",
+      "no recorded model transcript; the terminal action is a model decision and was not observed",
+    );
+  }
+  return ratio(
+    "terminalToolAccuracy",
+    scored.filter((r) => r.observed.selectedTools?.includes(r.terminalTool)).length,
+    scored.length,
+  );
+}
+
+/**
+ * How much of the task set the transcript actually covered. A perfect score
+ * computed from one task in six is not a perfect run, and a report that hides
+ * the denominator invites exactly that reading.
+ */
+export function transcriptCoverage(records) {
+  if (records.length === 0) {
+    return unavailable("transcriptCoverage", "no records in this run");
+  }
+  return ratio("transcriptCoverage", withDecision(records).length, records.length);
+}
+
 export function taskCompletion(records) {
   const scored = withDecision(records);
   if (scored.length === 0) {
@@ -155,6 +188,8 @@ export function estimatedSchemaTokens(bytesMetric) {
 }
 
 export const METRICS = Object.freeze([
+  terminalToolAccuracy,
+  transcriptCoverage,
   toolSelectionAccuracy,
   argumentAccuracy,
   taskCompletion,
@@ -168,6 +203,7 @@ export function computeMetrics(records) {
   const bytes = registeredSchemaBytes(records);
   return {
     toolSelectionAccuracy: toolSelectionAccuracy(records),
+    terminalToolAccuracy: terminalToolAccuracy(records),
     argumentAccuracy: argumentAccuracy(records),
     taskCompletion: taskCompletion(records),
     approvalCompliance: approvalCompliance(records),
@@ -175,5 +211,6 @@ export function computeMetrics(records) {
     visibleToolCount: visibleToolCount(records),
     registeredSchemaBytes: bytes,
     estimatedSchemaTokens: estimatedSchemaTokens(bytes),
+    transcriptCoverage: transcriptCoverage(records),
   };
 }

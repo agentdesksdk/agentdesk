@@ -56,7 +56,7 @@ async function main() {
   }
   const sdk = await import(pathToFileURL(dist).href);
 
-  const tasksPath = resolve(repoRoot, argValue("--tasks", join(here, "tasks", "v1.tasks.jsonl")));
+  const tasksPath = resolve(repoRoot, argValue("--tasks", join(here, "tasks", "v2.tasks.jsonl")));
   const tasks = loadTasks(tasksPath);
   const transcript = loadTranscript(argValue("--transcript", undefined));
   const runId = argValue("--run-id", `eval-${new Date().toISOString().replace(/[:.]/g, "-")}`);

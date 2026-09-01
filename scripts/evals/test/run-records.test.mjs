@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { computeMetrics } from "../metrics.mjs";
+import { buildReport, renderMarkdown } from "../report.mjs";
 import { parseTask, RECORD_SCHEMA_VERSION } from "../schema.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -15,7 +16,7 @@ const readJsonl = (p) =>
     .filter(Boolean)
     .map((l) => JSON.parse(l));
 
-const tasks = readJsonl(join(evals, "tasks", "v1.tasks.jsonl"));
+const tasks = readJsonl(join(evals, "tasks", "v2.tasks.jsonl"));
 const reference = Object.fromEntries(
   ["baseline", "agentdesk"].map((arm) => [arm, readJsonl(join(evals, "runs", "reference", `records.${arm}.jsonl`))]),
 );
@@ -23,7 +24,7 @@ const report = JSON.parse(readFileSync(join(evals, "runs", "reference", "report.
 
 test("every shipped task fixture parses", () => {
   for (const raw of tasks) {
-    assert.doesNotThrow(() => parseTask(raw, "v1.tasks.jsonl"));
+    assert.doesNotThrow(() => parseTask(raw, "v2.tasks.jsonl"));
   }
 });
 
@@ -49,17 +50,30 @@ test("every record carries its schema version and its expectations", () => {
   }
 });
 
-test("the published report is recomputable from the raw records", () => {
-  for (const arm of Object.keys(reference)) {
-    const recomputed = computeMetrics(reference[arm]);
-    for (const [name, metric] of Object.entries(recomputed)) {
-      assert.deepEqual(
-        report.arms[arm].metrics[name].value,
-        metric.value,
-        `${arm}.${name} in report.json does not match its records`,
-      );
-    }
-  }
+test("the whole published report is recomputable from the raw records", () => {
+  // Comparing only each metric's value let a corrupted provenance, a wrong
+  // denominator, and a stale formula survive. The artifact is rebuilt and
+  // compared entire, including the rendered Markdown, because a reader
+  // believes the document, not the number behind it.
+  const rebuilt = buildReport({
+    runId: report.runId,
+    at: report.at,
+    taskSetPath: report.taskSet.path,
+    taskCount: report.taskSet.taskCount,
+    arms: Object.fromEntries(
+      Object.keys(reference).map((arm) => [
+        arm,
+        { label: report.arms[arm].label, exposure: report.arms[arm].exposure, metrics: computeMetrics(reference[arm]) },
+      ]),
+    ),
+  });
+  assert.deepEqual(rebuilt, report, "report.json does not match what its own records compute");
+  const stripCr = (text) => text.split(String.fromCharCode(13)).join("");
+  assert.equal(
+    stripCr(renderMarkdown(rebuilt)),
+    stripCr(readFileSync(join(evals, "runs", "reference", "report.md"), "utf8")),
+    "report.md is stale against report.json",
+  );
 });
 
 test("the reference run claims no model results", () => {
