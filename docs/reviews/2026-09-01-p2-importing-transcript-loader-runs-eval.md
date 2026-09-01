@@ -1,6 +1,6 @@
 # P2: importing the transcript loader executes the evaluation CLI
 
-Status: **RESOLVED** in `pending`
+Status: **RESOLVED** in `873f57f`
 
 Reviewed worktree: `cheery-obsidian`, commit `253a3be` (PR #14)
 

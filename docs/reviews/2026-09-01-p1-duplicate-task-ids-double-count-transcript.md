@@ -1,6 +1,6 @@
 # P1: duplicate task ids count one transcript twice
 
-Status: **RESOLVED** in `pending`
+Status: **RESOLVED** in `873f57f`
 
 Reviewed worktree: `cheery-obsidian`, commit `253a3be` (PR #14)
 
