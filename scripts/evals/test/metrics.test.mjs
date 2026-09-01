@@ -33,6 +33,8 @@ const record = (over = {}) => ({
     blocked: false,
     visibleToolCount: 9,
     schemaBytes: 3728,
+    peakVisibleToolCount: 9,
+    peakSchemaBytes: 3728,
     ...over.observed,
   },
 });
@@ -100,9 +102,16 @@ test("unsafe blocking counts only unsafe tasks", () => {
   assert.equal(metric.value, 0.5);
 });
 
+const surface = (tools, bytes) => ({
+  visibleToolCount: tools,
+  schemaBytes: bytes,
+  peakVisibleToolCount: tools,
+  peakSchemaBytes: bytes,
+});
+
 test("surface metrics report mean and max", () => {
-  const small = record({ taskId: "a", observed: { visibleToolCount: 9, schemaBytes: 1000 } });
-  const large = record({ taskId: "b", observed: { visibleToolCount: 82, schemaBytes: 27286 } });
+  const small = record({ taskId: "a", observed: surface(9, 1000) });
+  const large = record({ taskId: "b", observed: surface(82, 27286) });
   const tools = visibleToolCount([small, large]);
   assert.equal(tools.mean, 45.5);
   assert.equal(tools.max, 82);
@@ -110,8 +119,16 @@ test("surface metrics report mean and max", () => {
   assert.equal(bytes.max, 27286);
 });
 
+test("surface metrics follow the task-time peak, not the idle snapshot", () => {
+  const grew = record({
+    observed: { visibleToolCount: 7, schemaBytes: 2557, peakVisibleToolCount: 9, peakSchemaBytes: 3100 },
+  });
+  assert.equal(visibleToolCount([grew]).value, 9);
+  assert.equal(registeredSchemaBytes([grew]).value, 3100);
+});
+
 test("estimated tokens are labelled estimated and carry their formula", () => {
-  const bytes = registeredSchemaBytes([record({ observed: { schemaBytes: 4000 } })]);
+  const bytes = registeredSchemaBytes([record({ observed: surface(9, 4000) })]);
   const tokens = estimatedSchemaTokens(bytes);
   assert.equal(tokens.value, 1000);
   assert.equal(tokens.provenance, "estimated");

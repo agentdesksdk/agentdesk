@@ -23,7 +23,7 @@ const probe = {
     executedWithoutApproval: false,
     blocked: false,
     visibleToolCount: 7,
-    schemaBytes: 2486,
+    schemaBytes: 2486, peakVisibleToolCount: 7, peakSchemaBytes: 2486,
   },
 };
 

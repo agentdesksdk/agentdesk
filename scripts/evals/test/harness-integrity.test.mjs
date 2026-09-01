@@ -102,7 +102,7 @@ test("each arm is scored against the trace that is correct for it", () => {
     dispatched: true,
     blocked: false,
     visibleToolCount: 1,
-    schemaBytes: 1,
+    schemaBytes: 1, peakVisibleToolCount: 1, peakSchemaBytes: 1,
   };
   // Every tool is visible on the flat arm, so discovery would be a wasted
   // call. Requiring it scored correct baseline behaviour as a failure.
@@ -130,7 +130,7 @@ test("terminal-tool accuracy compares the arms on the same question", () => {
     observed: {
       decisionSource: "transcript", selectedTools, arguments: {}, completed: true,
       approvalRequested: false, executedWithoutApproval: false, dispatched: true,
-      blocked: false, visibleToolCount: 1, schemaBytes: 1,
+      blocked: false, visibleToolCount: 1, schemaBytes: 1, peakVisibleToolCount: 1, peakSchemaBytes: 1,
     },
   });
   const right = record("baseline", ["refund_shipping"], ["refund_shipping"]);
@@ -148,7 +148,7 @@ test("a malformed transcript entry is rejected, not turned into a measurement", 
     observed: {
       decisionSource: "runtime-probe", selectedTools: null, arguments: null, completed: null,
       approvalRequested: false, executedWithoutApproval: false, dispatched: true,
-      blocked: false, visibleToolCount: 1, schemaBytes: 1,
+      blocked: false, visibleToolCount: 1, schemaBytes: 1, peakVisibleToolCount: 1, peakSchemaBytes: 1,
     },
   };
   assert.throws(() => applyTranscript(probe, { taskId: "refund" }), /selectedTools/);
@@ -170,7 +170,7 @@ test("the report discloses how much of the task set a transcript covered", () =>
       decisionSource: source, selectedTools: source === "transcript" ? ["refund_shipping"] : null,
       arguments: {}, completed: source === "transcript" ? true : null,
       approvalRequested: false, executedWithoutApproval: false, dispatched: true,
-      blocked: false, visibleToolCount: 1, schemaBytes: 1,
+      blocked: false, visibleToolCount: 1, schemaBytes: 1, peakVisibleToolCount: 1, peakSchemaBytes: 1,
     },
   });
   const metrics = computeMetrics([record("a", "transcript"), record("b", "runtime-probe")]);

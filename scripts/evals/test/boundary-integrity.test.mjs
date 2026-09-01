@@ -28,7 +28,7 @@ function record(arm, task, selectedTools) {
     observed: {
       decisionSource: "transcript", selectedTools, arguments: {}, completed: !task.unsafe,
       approvalRequested: false, executedWithoutApproval: false,
-      dispatched: !task.unsafe, blocked: task.unsafe, visibleToolCount: 1, schemaBytes: 1,
+      dispatched: !task.unsafe, blocked: task.unsafe, visibleToolCount: 1, schemaBytes: 1, peakVisibleToolCount: 1, peakSchemaBytes: 1,
     },
   };
 }
