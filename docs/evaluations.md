@@ -73,6 +73,18 @@ measurement.
 `scripts/evals/runs/reference/` is the committed example. Timestamped runs are
 ignored by git.
 
+Recomputability across hosts has one more dependency. `visibleToolCount` and
+`registeredSchemaBytes` follow which capabilities route, and routing breaks a
+tied score by name. That tie-break is codepoint order, which is the same on
+every host, so a tie at the cut resolves identically everywhere. In the
+reference run no task ties at the cut in any case: every task scores fewer
+capabilities than the budget, so nothing is truncated. Adding a capability
+that matches a task, or tightening the budget, can create a tie at the cut,
+and the codepoint tie-break is what keeps the numbers reproducible when it
+does. Both surface metrics read the task-time peak of each record rather
+than the pre-task snapshot, so an arm whose surface grows during execution
+is charged for what the agent could actually see.
+
 ## Fixtures
 
 Task fixtures are versioned JSONL at `scripts/evals/tasks/v2.tasks.jsonl`.

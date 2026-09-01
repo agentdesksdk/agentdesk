@@ -168,11 +168,11 @@ function summarize(name, values) {
 }
 
 export function visibleToolCount(records) {
-  return summarize("visibleToolCount", records.map((r) => r.observed.visibleToolCount).filter((v) => typeof v === "number"));
+  return summarize("visibleToolCount", records.map((r) => r.observed.peakVisibleToolCount).filter((v) => typeof v === "number"));
 }
 
 export function registeredSchemaBytes(records) {
-  return summarize("registeredSchemaBytes", records.map((r) => r.observed.schemaBytes).filter((v) => typeof v === "number"));
+  return summarize("registeredSchemaBytes", records.map((r) => r.observed.peakSchemaBytes).filter((v) => typeof v === "number"));
 }
 
 /**

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { defineCapability, type Capability } from "../src/capability.ts";
 import {
+  RELATION_WEIGHTS,
   rankCapabilities,
   routeTask,
   type RoutingResult,
@@ -469,6 +470,35 @@ describe("relationship arrays are owned by the capability", () => {
     requires.push("smuggled_step");
 
     expect(capability.relationships.requires).toEqual(["first_step"]);
+  });
+
+  it("counts a relationship once however many times a manifest repeats it", async () => {
+    const target = defineCapability({
+      name: "target_task",
+      description: "Shares nothing with the query",
+      execute: () => ({}),
+    });
+    const anchor = defineCapability({
+      name: "anchor_task",
+      description: "Matches the query",
+      keywords: ["ping"],
+      relationships: { requires: ["target_task", "target_task"], related: ["target_task", "target_task"] },
+      execute: () => ({}),
+    });
+
+    expect(anchor.relationships.requires).toEqual(["target_task"]);
+    expect(anchor.relationships.related).toEqual(["target_task"]);
+
+    const result = await routeTask(
+      [anchor, target],
+      { query: "ping", context: { route: "/", state: {} } },
+      { kind: "hybrid" },
+    );
+    if (!result.ok) return;
+    const pulled = result.matches.find((m) => m.capability.name === "target_task");
+    expect(pulled?.score).toBe(RELATION_WEIGHTS.requires + RELATION_WEIGHTS.related);
+    expect(pulled?.reasons.filter((r) => r === "required by anchor_task")).toHaveLength(1);
+    expect(pulled?.reasons.filter((r) => r === "related to anchor_task")).toHaveLength(1);
   });
 });
 

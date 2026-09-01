@@ -107,7 +107,7 @@ argument is `{ signal }`; annotations are exactly `readOnlyHint` and
 | Abort-based unregistration | Implemented (ToolSurfaceManager) |
 | `name`/`title`/`description`/`inputSchema` | Implemented |
 | `readOnlyHint`/`untrustedContentHint` | Implemented; no other keys exist |
-| `getTools({fromOrigins})` | Optional client (`createWebMcpClient`) |
+| `getTools({fromOrigins})` | Optional client (`createWebMcpClient`); advisory, enforced by the provider and never a gate (see `mcp-b-interop.md`) |
 | `executeTool(tool, input, {signal})` | Optional client; input serialized (see `testing.md`) |
 | `toolchange` | Optional client (`onToolChange`) |
 | Permissions Policy `tools` | Documented for deployment; nothing to implement in-page |

@@ -484,8 +484,8 @@ export function defineCapability(spec: CapabilitySpec): Capability {
     // Copied and frozen, so a caller mutating the array it passed in cannot
     // rewrite the routing graph of an already-defined capability.
     relationships: Object.freeze({
-      requires: Object.freeze([...(spec.relationships?.requires ?? [])]),
-      related: Object.freeze([...(spec.relationships?.related ?? [])]),
+      requires: Object.freeze([...new Set(spec.relationships?.requires ?? [])]),
+      related: Object.freeze([...new Set(spec.relationships?.related ?? [])]),
     }),
     risk,
     inputSchema: spec.inputSchema ?? { type: "object", properties: {} },
