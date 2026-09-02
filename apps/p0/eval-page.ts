@@ -87,3 +87,28 @@ export function createEvalRuntime(options: {
   });
   return { arm, runtime, capabilities, store };
 }
+
+// Stubs. The tests in tests/eval-page-shape.test.ts were written against
+// these exports first; every answer here is wrong on purpose, so the tests
+// fail on their assertions and not on an import.
+export type ShapeName = "bare" | "structured";
+export type Cell = { arm: ArmName; exposure: string; shape: ShapeName; label: string };
+
+export const EVAL_CELLS: Record<string, Cell> = {};
+
+export function cellHref(cell: Cell): string {
+  return `?arm=${cell.arm}`;
+}
+
+export function cellFromSearch(search: string): Cell | null {
+  void search;
+  return null;
+}
+
+export function projectToolResult<T extends { content: Array<{ type: string; text: string }> }>(
+  shape: ShapeName,
+  result: T,
+): T {
+  void shape;
+  return result;
+}
