@@ -982,3 +982,127 @@ input[type="text"]:focus {
 .ghost .change-row:first-of-type {
   border-top: none;
 }
+
+/* Judge narration on the overview: the Try-this card beside live counters. */
+.narration {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr);
+  gap: 14px;
+  align-items: start;
+  margin-bottom: 22px;
+}
+
+@media (max-width: 1180px) {
+  .narration {
+    grid-template-columns: 1fr;
+  }
+}
+
+.try-this {
+  margin-bottom: 0;
+}
+
+.try-this .lede {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  color: var(--ink-soft);
+}
+
+.hero-prompt {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 0 10px 10px 0;
+  font-size: 14.5px;
+  line-height: 1.5;
+  user-select: all;
+}
+
+.hero-prompt p {
+  margin: 0;
+}
+
+.try-steps {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.try-steps dt {
+  font-weight: 700;
+  margin-top: 10px;
+}
+
+.try-steps dd {
+  margin: 2px 0 0;
+}
+
+.try-steps ol {
+  margin: 4px 0 0;
+  padding-left: 20px;
+}
+
+.try-steps code {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  background: var(--bg);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.judge-counters {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 0;
+}
+
+/* The routing decision in the rail: N candidates, these K, because. */
+.routing-decision .decision {
+  margin: 0 0 4px;
+  font-size: 13.5px;
+}
+
+.routing-decision .query {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  font-style: italic;
+  color: var(--ink-soft);
+}
+
+.route-matches {
+  margin: 0;
+  padding-left: 22px;
+}
+
+.route-matches .match {
+  margin-bottom: 6px;
+}
+
+/* Unavailability is stated in text; the border only echoes it. */
+.route-matches .match.unavailable {
+  border-left: 3px solid var(--danger);
+}
+
+.match .score {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+
+.match .policy {
+  margin-left: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--warn);
+}
+
+.match .availability {
+  margin-top: 3px;
+  color: var(--ink-soft);
+}
+
+.routing-decision .footnote {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
