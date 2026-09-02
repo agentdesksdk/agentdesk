@@ -47,17 +47,22 @@ export type StagingAdapter<S> = {
    * Lands the staged run. `restage` re-runs the same operation on a fresh
    * fork for an adapter that must re-derive against current state.
    *
-   * Throwing refuses the commit. It does not prove the write did not land,
-   * so the runtime treats it as indeterminate rather than a clean failure.
+   * Returns the result, or a promise of it for a store that answers later.
+   * The runtime awaits it before recording the outcome, so a completion is
+   * never audited for a write the store then rolled back.
    *
-   * An adapter that knows nothing was dispatched says so by throwing
-   * `StagedCommitRefused` or `CapabilityUnavailableError`. Both mean the
-   * commit stopped before it wrote, which only the adapter can establish.
+   * Throwing, or rejecting, refuses the commit. It does not prove the write
+   * did not land, so the runtime treats it as indeterminate rather than a
+   * clean failure. An adapter that knows nothing was dispatched says so
+   * with `StagedCommitRefused` or `CapabilityUnavailableError`, thrown or
+   * rejected with. Both mean the commit stopped before it wrote, which only
+   * the adapter can establish.
    */
   commit: (staged: S, restage: () => { staged: S; result: unknown }) => unknown;
   /**
    * Releases a staged run that will never land. Called at most once, and
-   * only a successful return establishes disposal.
+   * only a successful return, or a promise that resolves, establishes
+   * disposal; a rejection is a failed cleanup like a throw is.
    */
   release: (staged: S) => void | Promise<void>;
   /**
@@ -318,14 +323,19 @@ export function buildStageHandler<S>(
   hooks: StageHooks,
 ): StageHandler {
   const tryRelease = (staged: S): void => {
-    try {
-      adapter.release(staged);
-    } catch (err) {
+    const failed = (err: unknown): void =>
       hooks.cleanupFailed({
         operation,
         detail: err instanceof Error ? err.message : String(err),
         artifact: staged,
       });
+    try {
+      const outcome: unknown = adapter.release(staged);
+      if (isThenable(outcome)) {
+        (outcome as Promise<void>).then(undefined, failed);
+      }
+    } catch (err) {
+      failed(err);
     }
   };
 
@@ -396,14 +406,11 @@ export function buildStageHandler<S>(
           );
         }
         settled = true;
-        try {
-          return adapter.commit(forked.staged, () =>
-            stageOnce(input, forked.staged),
-          );
-        } catch (err) {
-          // Only the adapter can know the write never reached the
-          // application. Anything else may have landed, so the artifact is
-          // kept rather than released and the outcome stays unknown.
+        // Only the adapter can know the write never reached the
+        // application. Anything else may have landed, so the artifact is
+        // kept rather than released and the outcome stays unknown. A
+        // rejection is read exactly as a throw is.
+        const classify = (err: unknown): never => {
           if (
             err instanceof StagedCommitRefused ||
             err instanceof CapabilityUnavailableError
@@ -416,7 +423,18 @@ export function buildStageHandler<S>(
             err,
             forked.staged,
           );
+        };
+        let outcome: unknown;
+        try {
+          outcome = adapter.commit(forked.staged, () =>
+            stageOnce(input, forked.staged),
+          );
+        } catch (err) {
+          classify(err);
         }
+        return isThenable(outcome)
+          ? (outcome as Promise<unknown>).then((value) => value, classify)
+          : outcome;
       },
       discard: () => {
         if (settled) {

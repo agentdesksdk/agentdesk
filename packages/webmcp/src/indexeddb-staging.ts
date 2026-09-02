@@ -89,15 +89,23 @@ const versionOf = (row: IndexedDbRow | undefined): number | null =>
 /**
  * A staging adapter over IndexedDB.
  *
- * The contract is synchronous and IndexedDB is not, so the adapter keeps an
- * in-process mirror of the rows it governs, loaded once by `open`. Forks and
- * diffs read the mirror; commits and releases apply to the mirror and then
- * dispatch their IndexedDB work through one serialized queue, which `flush`
- * settles. A commit is one readwrite transaction that re-checks every base
- * row's version before it writes and aborts if any moved, so a second tab's
- * write is refused by the database even though this process could not see
- * it. When a transaction aborts, IndexedDB itself discards every write in
+ * Fork and diff are synchronous and IndexedDB is not, so the adapter keeps
+ * an in-process mirror of the rows it governs, loaded once by `open`, and
+ * forks derive against it. Commit is one readwrite transaction whose
+ * outcome is the commit's outcome: it re-checks every base row's version
+ * and aborts if any moved, so a second tab's write is refused by the
+ * database even though this process could not see it, and the promise it
+ * returns settles only when the transaction has. The mirror moves when the
+ * transaction completes and not before, so a refused commit leaves it as it
+ * was. When a transaction aborts, IndexedDB itself discards every write in
  * it; the adapter does nothing to undo, because there is nothing to undo.
+ *
+ * A fork opened while a commit is in flight derives against the rows as
+ * they were, without waiting, because fork cannot wait; its own commit is
+ * then refused by the version check, which is what a fork against rows that
+ * moved deserves. Fork rows and releases still go through one serialized
+ * queue that `flush` settles, so a fork's row is written before the commit
+ * that deletes it.
  */
 export function indexedDbStaging(options: IndexedDbStagingOptions): IndexedDbStagingAdapter {
   const factory =
@@ -116,7 +124,8 @@ export function indexedDbStaging(options: IndexedDbStagingOptions): IndexedDbSta
 
   // ponytail: one queue for all IndexedDB work, so a fork's row is written
   // before the commit that deletes it; per-store queues if this serializes
-  // too much.
+  // too much. A commit's own outcome goes to its caller; everything else
+  // reports through flush().
   let queue: Promise<void> = Promise.resolve();
   const faults: Error[] = [];
   const enqueue = (work: (database: IDBDatabase) => Promise<void>): void => {
@@ -125,6 +134,14 @@ export function indexedDbStaging(options: IndexedDbStagingOptions): IndexedDbSta
       .catch((err: unknown) => {
         faults.push(err instanceof Error ? err : new Error(String(err)));
       });
+  };
+  const after = <T,>(work: (database: IDBDatabase) => Promise<T>): Promise<T> => {
+    const outcome = queue.then(() => work(opened()));
+    queue = outcome.then(
+      () => undefined,
+      () => undefined,
+    );
+    return outcome;
   };
 
   const opened = (): IDBDatabase => {
@@ -307,7 +324,9 @@ export function indexedDbStaging(options: IndexedDbStagingOptions): IndexedDbSta
       return changes;
     },
 
-    commit(fork) {
+    // Always a promise, so a refusal before dispatch and a refusal from the
+    // database reach the caller the same way.
+    commit: async (fork) => {
       if (fork.settled || !forks.has(fork.id)) {
         throw new StagedCommitRefused(
           `${fork.operation} was already released, so there is nothing left to commit`,
@@ -320,22 +339,53 @@ export function indexedDbStaging(options: IndexedDbStagingOptions): IndexedDbSta
         stale(fork, moved);
       }
       drop(fork);
-      for (const { store, id, row } of fork.head) {
-        mirror.get(store)!.set(id, structuredClone(row));
-      }
       // Every store the fork read or wrote, since a read-only base row still
       // has to be re-read inside the transaction.
       const touched = [...new Set([...fork.base, ...fork.head].map((row) => row.store))];
-      enqueue((database) => {
+      return after((database) => {
         const tx = database.transaction([...touched, STAGING_STORE], "readwrite");
-        const done = settle(tx);
         let unchecked = fork.base.length;
+        let unwritten = fork.head.length + 1;
         let refused: Error | undefined;
+        const done = new Promise<void>((resolve, reject) => {
+          tx.oncomplete = () => resolve();
+          // An abort is IndexedDB's own word that it rolled back, except
+          // when it arrives with no error after every write was accepted:
+          // that is a connection lost while committing, and the spec does
+          // not promise the commit had not happened.
+          tx.onabort = () => {
+            const error = tx.error as { message?: string } | null | undefined;
+            if (refused !== undefined) {
+              reject(refused);
+            } else if (error) {
+              reject(
+                new StagedCommitRefused(
+                  `${fork.operation} was not committed: IndexedDB aborted the transaction and rolled it back: ${error.message ?? String(error)}`,
+                ),
+              );
+            } else if (unwritten === 0) {
+              reject(
+                new Error(
+                  `${fork.operation} may have been committed: the transaction was aborted with no error after every write was accepted, so whether it landed is unknown`,
+                ),
+              );
+            } else {
+              reject(
+                new StagedCommitRefused(
+                  `${fork.operation} was not committed: the transaction was aborted before its writes were accepted`,
+                ),
+              );
+            }
+          };
+        });
+        const accepted = () => {
+          unwritten -= 1;
+        };
         const write = () => {
           for (const { store, row } of fork.head) {
-            tx.objectStore(store).put(row);
+            tx.objectStore(store).put(row).onsuccess = accepted;
           }
-          tx.objectStore(STAGING_STORE).delete(fork.id);
+          tx.objectStore(STAGING_STORE).delete(fork.id).onsuccess = accepted;
         };
         if (unchecked === 0) {
           write();
@@ -346,10 +396,13 @@ export function indexedDbStaging(options: IndexedDbStagingOptions): IndexedDbSta
             if (versionOf(request.result as IndexedDbRow | undefined) !== expected.version) {
               // Nothing has been written yet, and nothing will be: aborting
               // discards the transaction, and IndexedDB rolls back whatever
-              // it held. The mirror is ahead of the database until the next
-              // open(); flush() reports it.
-              refused = new Error(
-                `${fork.operation} was not committed: ${expected.store} ${expected.id} moved in the database after it was forked`,
+              // it held.
+              refused = new CapabilityUnavailableError(
+                unavailable(
+                  "APPROVAL_STALE",
+                  `${expected.store} ${expected.id} changed in the database after this was proposed, so approving it would apply a change reviewed against state that is gone. Request the action again to review it against current state.`,
+                  fork.operation,
+                ),
               );
               tx.abort();
               return;
@@ -360,11 +413,14 @@ export function indexedDbStaging(options: IndexedDbStagingOptions): IndexedDbSta
             }
           };
         }
-        return done.catch((err: unknown) => {
-          throw refused ?? err;
+        return done.then(() => {
+          // The transaction is the authority; the mirror follows it.
+          for (const { store, id, row } of fork.head) {
+            mirror.get(store)!.set(id, structuredClone(row));
+          }
+          return fork.result;
         });
       });
-      return fork.result;
     },
 
     release: forget,

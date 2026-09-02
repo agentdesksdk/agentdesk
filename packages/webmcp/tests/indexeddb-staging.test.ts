@@ -37,7 +37,7 @@ function fakeIndexedDb() {
   const databases = new Map<string, { version: number; stores: Map<string, Table> }>();
   const transactions: Array<{ names: string[]; mode: string }> = [];
   let cut = false;
-  let lose = false;
+  let lose: string | null = null;
 
   const seed = (name: string, rows: Record<string, Record<string, unknown>[]>) => {
     const stores = new Map<string, Table>();
@@ -68,12 +68,12 @@ function fakeIndexedDb() {
           if (hung) {
             cut = false;
           }
-          // The connection goes away after the writes were dispatched: the
-          // transaction reports an error and never says complete or abort,
-          // and whether the writes landed is not observable from the page.
-          const lost = mode === "readwrite" && lose;
+          // The connection goes away while the transaction is committing:
+          // IndexedDB fires abort with no error after every write was
+          // accepted, and whether they landed is not observable from the page.
+          const lost = mode === "readwrite" && lose !== null && list.includes(lose);
           if (lost) {
-            lose = false;
+            lose = null;
           }
           const overlay = new Map<string, Map<string, Record<string, unknown> | null>>();
           const writes: Array<() => void> = [];
@@ -137,8 +137,8 @@ function fakeIndexedDb() {
                       land();
                     }
                     if (lost) {
-                      tx.error = new Error("connection lost");
-                      tx.onerror?.({ target: tx });
+                      tx.error = null;
+                      tx.onabort?.({ target: tx });
                       return;
                     }
                     tx.oncomplete?.({ target: tx });
@@ -219,9 +219,9 @@ function fakeIndexedDb() {
     cut: () => {
       cut = true;
     },
-    /** The next readwrite transaction errors after its writes were sent, with no abort. */
-    lose: () => {
-      lose = true;
+    /** The next readwrite transaction naming `store` aborts with no error after its writes were accepted. */
+    lose: (store: string) => {
+      lose = store;
     },
   };
 }
@@ -461,7 +461,7 @@ describe("the IndexedDB staging adapter holds the fork, diff, commit, release co
     await adapter.flush();
     expect(db.table(DB, STAGING).size).toBe(0);
 
-    expect(() => adapter.commit(staged, () => adapter.fork("cancel", { id: "O-1" }))).toThrow(
+    await expect(adapter.commit(staged, () => adapter.fork("cancel", { id: "O-1" }))).rejects.toThrow(
       StagedCommitRefused,
     );
     await adapter.flush();
@@ -546,7 +546,7 @@ describe("the transaction's outcome is the commit's outcome", () => {
     const { adapter, db } = makeAdapter();
     await adapter.open();
     const runtime = await runtimeOver(adapter, [directCapability("cancel_thing", "cancel")]);
-    db.lose();
+    db.lose(ORDERS);
 
     const result = await runtime.invoke("cancel_thing", { id: "O-1" });
 
