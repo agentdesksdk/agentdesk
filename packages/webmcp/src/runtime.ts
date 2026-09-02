@@ -366,6 +366,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
    * approval that does not carry a valid token.
    */
   approvalGesture?: "optional" | "required";
+  /**
+   * How the runtime knows a user activation is in progress when a token is
+   * minted. Defaults to `navigator.userActivation.isActive`, and refuses
+   * when there is no navigator; Node and jsdom tests inject one.
+   */
+  gesture?: { userActivation?: () => boolean };
 }): AgentDeskRuntime {
   const audit = new AuditBus();
   const approvals = new ApprovalManager();
