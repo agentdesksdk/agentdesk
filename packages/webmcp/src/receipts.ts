@@ -217,6 +217,7 @@ export class ReceiptStore {
         (filter.capability === undefined ||
           entry.capability === filter.capability) &&
         (filter.planId === undefined || entry.planId === filter.planId) &&
+        (filter.grantId === undefined || entry.grantId === filter.grantId) &&
         (filter.actorId === undefined ||
           entry.executedBy?.id === filter.actorId) &&
         (filter.since === undefined || entry.at >= filter.since) &&

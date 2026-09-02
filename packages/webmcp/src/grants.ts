@@ -1,4 +1,5 @@
-import type { CapabilityName } from "./capability.ts";
+import { deepFreeze } from "./audit.ts";
+import { isCapabilityName, type CapabilityName } from "./capability.ts";
 import type { HumanActor } from "./plan.ts";
 
 /**
@@ -104,3 +105,332 @@ export type GrantConsultation =
       reasonCode: GrantRefusalCode;
       reason: string;
     };
+
+/** A request with every field checked, ready for the store. */
+export type ParsedGrantRequest = {
+  capability: CapabilityName;
+  scope: readonly ScopeRule[];
+  uses: number;
+  expiresAt: number;
+};
+
+const BOUND_KEY = /^(max|min)([A-Z][A-Za-z0-9_]*)$/;
+
+function isScopeValue(value: unknown): value is ScopeValue {
+  return (
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value))
+  );
+}
+
+/**
+ * Turns the per-field scope literal into rules. `maxAmount: 25` bounds
+ * `amount` from above and `minAmount: 5` from below; any other key is an
+ * exact match on that field. Two bounds on one field merge; a bound and an
+ * exact on one field contradict each other and are refused, as is any
+ * value that is not a finite number, a string, or a boolean.
+ */
+export function parseScope(
+  scope: Record<string, ScopeValue> | undefined,
+): { ok: true; rules: ScopeRule[] } | { ok: false; reason: string } {
+  const exact = new Map<string, ScopeValue>();
+  const bounds = new Map<string, { min?: number; max?: number }>();
+  for (const [key, value] of Object.entries(scope ?? {})) {
+    if (!isScopeValue(value)) {
+      return {
+        ok: false,
+        reason: `scope field ${key} must be a string, a boolean, or a finite number`,
+      };
+    }
+    const bound = BOUND_KEY.exec(key);
+    if (bound) {
+      const field = bound[2]!.charAt(0).toLowerCase() + bound[2]!.slice(1);
+      if (typeof value !== "number") {
+        return { ok: false, reason: `scope bound ${key} must be a number` };
+      }
+      const existing = bounds.get(field) ?? {};
+      bounds.set(field, { ...existing, [bound[1]!]: value });
+      continue;
+    }
+    exact.set(key, value);
+  }
+  for (const field of bounds.keys()) {
+    if (exact.has(field)) {
+      return {
+        ok: false,
+        reason: `scope field ${field} carries both an exact value and a bound`,
+      };
+    }
+  }
+  for (const [field, range] of bounds) {
+    if (range.min !== undefined && range.max !== undefined && range.min > range.max) {
+      return {
+        ok: false,
+        reason: `scope bound on ${field} has a minimum above its maximum`,
+      };
+    }
+  }
+  const rules: ScopeRule[] = [
+    ...[...bounds].map(([field, range]) => ({ field, kind: "bound" as const, ...range })),
+    ...[...exact].map(([field, value]) => ({ field, kind: "exact" as const, value })),
+  ];
+  rules.sort((a, b) => (a.field < b.field ? -1 : a.field > b.field ? 1 : 0));
+  return { ok: true, rules };
+}
+
+export function parseGrantRequest(
+  request: GrantRequest,
+  at: number,
+): { ok: true; parsed: ParsedGrantRequest } | { ok: false; reason: string } {
+  if (typeof request !== "object" || request === null) {
+    return { ok: false, reason: "a grant request must be an object" };
+  }
+  if (typeof request.capability !== "string" || !isCapabilityName(request.capability)) {
+    return { ok: false, reason: "a grant must name a capability" };
+  }
+  if (
+    typeof request.uses !== "number" ||
+    !Number.isInteger(request.uses) ||
+    request.uses < 1
+  ) {
+    return { ok: false, reason: "a grant must allow a positive whole number of uses" };
+  }
+  const expiresAt =
+    typeof request.expiresAt === "number"
+      ? request.expiresAt
+      : typeof request.expiresAt === "string"
+        ? Date.parse(request.expiresAt)
+        : Number.NaN;
+  if (!Number.isFinite(expiresAt)) {
+    return {
+      ok: false,
+      reason: "a grant must expire at an ISO timestamp or epoch milliseconds",
+    };
+  }
+  if (expiresAt <= at) {
+    return { ok: false, reason: "a grant must expire in the future" };
+  }
+  const scope = parseScope(request.scope);
+  if (!scope.ok) {
+    return scope;
+  }
+  return {
+    ok: true,
+    parsed: {
+      capability: request.capability,
+      scope: scope.rules,
+      uses: request.uses,
+      expiresAt,
+    },
+  };
+}
+
+/**
+ * Whether the call input sits inside the scope. Every rule must hold, and a
+ * field the input does not carry fails its rule, so a scope can only ever
+ * narrow what a call may do.
+ */
+export function matchesScope(
+  scope: readonly ScopeRule[],
+  input: Record<string, unknown>,
+): { ok: true } | { ok: false; reason: string } {
+  for (const rule of scope) {
+    if (!(rule.field in input) || input[rule.field] === undefined) {
+      return { ok: false, reason: `the input carries no ${rule.field}` };
+    }
+    const value = input[rule.field];
+    if (rule.kind === "exact") {
+      if (value !== rule.value) {
+        return {
+          ok: false,
+          reason: `${rule.field} is ${JSON.stringify(value)}, the grant covers ${JSON.stringify(rule.value)}`,
+        };
+      }
+      continue;
+    }
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return { ok: false, reason: `${rule.field} must be a finite number` };
+    }
+    if (rule.max !== undefined && value > rule.max) {
+      return {
+        ok: false,
+        reason: `${rule.field} ${value} is above the granted maximum of ${rule.max}`,
+      };
+    }
+    if (rule.min !== undefined && value < rule.min) {
+      return {
+        ok: false,
+        reason: `${rule.field} ${value} is below the granted minimum of ${rule.min}`,
+      };
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * In-memory, like every other record store here. Every record handed out
+ * is frozen, so a holder cannot add a use to a grant it was shown.
+ *
+ * Expiry settles lazily: a live grant past its expiry becomes `expired` the
+ * next time anything reads it with a clock.
+ */
+export class GrantStore {
+  private readonly grants = new Map<string, Grant>();
+  private nextId = 1;
+
+  issue(parsed: ParsedGrantRequest, by: HumanActor, at: number): LiveGrant {
+    const grant: LiveGrant = deepFreeze({
+      id: `GRT-${this.nextId++}` as GrantId,
+      capability: parsed.capability,
+      scope: parsed.scope.map((rule) => ({ ...rule })),
+      uses: parsed.uses,
+      remaining: parsed.uses,
+      issuedBy: { ...by },
+      issuedAt: at,
+      expiresAt: parsed.expiresAt,
+      state: "live",
+    });
+    this.grants.set(grant.id, grant);
+    return grant;
+  }
+
+  get(id: string, at: number): Grant | undefined {
+    const grant = this.grants.get(id);
+    return grant === undefined ? undefined : this.settle(grant, at);
+  }
+
+  list(at: number): Grant[] {
+    return [...this.grants.values()].map((grant) => this.settle(grant, at));
+  }
+
+  /** Capabilities holding at least one live grant, for a refusal's `nowPossible`. */
+  liveCapabilities(at: number): CapabilityName[] {
+    const names = new Set<CapabilityName>();
+    for (const grant of this.list(at)) {
+      if (grant.state === "live") {
+        names.add(grant.capability);
+      }
+    }
+    return [...names];
+  }
+
+  /**
+   * The first live grant whose scope covers the call wins. When none does,
+   * the refusal names the grant whose state best explains why, in this
+   * order: a live grant the call falls outside of, then an exhausted one,
+   * then a revoked one, then an expired one. That order puts the reason a
+   * person can act on first.
+   */
+  consult(
+    capability: string,
+    input: Record<string, unknown>,
+    at: number,
+  ): GrantConsultation {
+    const candidates = this.list(at).filter((grant) => grant.capability === capability);
+    if (candidates.length === 0) {
+      return { kind: "none" };
+    }
+    let outOfScope: { grant: Grant; reason: string } | undefined;
+    for (const grant of candidates) {
+      if (grant.state !== "live") {
+        continue;
+      }
+      const fit = matchesScope(grant.scope, input);
+      if (fit.ok) {
+        return { kind: "matched", grant };
+      }
+      outOfScope ??= { grant, reason: fit.reason };
+    }
+    if (outOfScope) {
+      return {
+        kind: "refused",
+        grant: outOfScope.grant,
+        reasonCode: "GRANT_OUT_OF_SCOPE",
+        reason: `grant ${outOfScope.grant.id} does not cover this call: ${outOfScope.reason}`,
+      };
+    }
+    const byState = (state: GrantState) =>
+      candidates.find((grant) => grant.state === state);
+    const exhausted = byState("exhausted");
+    if (exhausted) {
+      return {
+        kind: "refused",
+        grant: exhausted,
+        reasonCode: "GRANT_EXHAUSTED",
+        reason: `grant ${exhausted.id} has spent all ${exhausted.uses} of its uses`,
+      };
+    }
+    const revoked = byState("revoked");
+    if (revoked && revoked.state === "revoked") {
+      return {
+        kind: "refused",
+        grant: revoked,
+        reasonCode: "GRANT_REVOKED",
+        reason: `grant ${revoked.id} was revoked by ${revoked.revokedBy.id}`,
+      };
+    }
+    const expired = byState("expired")!;
+    return {
+      kind: "refused",
+      grant: expired,
+      reasonCode: "GRANT_EXPIRED",
+      reason: `grant ${expired.id} expired at ${new Date(expired.expiresAt).toISOString()}`,
+    };
+  }
+
+  /**
+   * Spends one use. Synchronous, so a caller that spends before its first
+   * await holds the use before any concurrent call can read the count.
+   * Returns nothing when the grant is not live, which is the caller's cue
+   * to refuse rather than execute.
+   */
+  spend(id: string, at: number): Grant | undefined {
+    const grant = this.get(id, at);
+    if (grant === undefined || grant.state !== "live") {
+      return undefined;
+    }
+    const remaining = grant.remaining - 1;
+    const next: Grant =
+      remaining === 0
+        ? { ...grant, state: "exhausted", remaining: 0, exhaustedAt: at }
+        : { ...grant, remaining };
+    this.grants.set(id, deepFreeze(next));
+    return next;
+  }
+
+  revoke(
+    id: string,
+    by: HumanActor,
+    at: number,
+  ): { ok: true; grant: Grant } | { ok: false; reason: string } {
+    const grant = this.get(id, at);
+    if (grant === undefined) {
+      return { ok: false, reason: `unknown grant: ${id}` };
+    }
+    if (grant.state !== "live") {
+      return { ok: false, reason: `grant ${id} is ${grant.state}, and only a live grant can be revoked` };
+    }
+    const revoked: Grant = deepFreeze({
+      ...grant,
+      state: "revoked",
+      revokedAt: at,
+      revokedBy: { ...by },
+    });
+    this.grants.set(id, revoked);
+    return { ok: true, grant: revoked };
+  }
+
+  clear(): void {
+    this.grants.clear();
+  }
+
+  private settle(grant: Grant, at: number): Grant {
+    if (grant.state !== "live" || grant.expiresAt > at) {
+      return grant;
+    }
+    const expired: Grant = deepFreeze({ ...grant, state: "expired", expiredAt: at });
+    this.grants.set(grant.id, expired);
+    return expired;
+  }
+}

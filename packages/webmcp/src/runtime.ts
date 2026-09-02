@@ -29,7 +29,13 @@ import type {
   Settled,
   Situation,
 } from "./protocol.ts";
-import type { Grant, GrantRequest } from "./grants.ts";
+import {
+  GrantStore,
+  parseGrantRequest,
+  type Grant,
+  type GrantRequest,
+  type LiveGrant,
+} from "./grants.ts";
 import { defaultValidator, type Validator } from "./validation.ts";
 import {
   PresentationBus,
@@ -63,6 +69,7 @@ import {
   errorResult,
   executionCancelled,
   executionIndeterminate,
+  grantRefused,
   idempotencyCapacity,
   idempotencyConflict,
   isReceiptEnvelope,
@@ -332,6 +339,10 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   const presentation = new PresentationBus();
   const plans = new PlanStore();
   const receipts = new ReceiptStore();
+  // Bounded mandates a person issued. Consulted only where policy would ask
+  // for an approval, so a grant can narrow what needs a human and never
+  // widen what policy allows.
+  const grants = new GrantStore();
   // Staged proposals live here, keyed by the runtime identity that owns
   // each one, never by business input. Disposal is this store's job on
   // every path that resolves an owner without committing it.
@@ -412,6 +423,21 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       return { ok: false, reason: refusal };
     }
     return { ok: true, actor: deepFreeze(parsed.actor) };
+  }
+
+  /**
+   * The identity that mints or revokes authority. It goes through the same
+   * parse as the ambient actor and throws the same `TypeError` on a
+   * malformed shape, and throws again when the parsed actor is not a
+   * person. An agent asking for a mandate is not a caller to hand a reason
+   * to; it is the thing a grant exists to keep from happening.
+   */
+  function adoptHumanActor(next: Actor | undefined, refusal: string): HumanActor {
+    const adopted = adoptActor(next);
+    if (adopted === undefined || !isHumanActor(adopted)) {
+      throw new TypeError(refusal);
+    }
+    return adopted;
   }
 
   let actor: Actor | undefined = adoptActor(options.actor);
@@ -661,6 +687,11 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     for (const match of lastRouting?.matches ?? []) {
       names.add(match.name);
     }
+    // A capability a person has already granted authority over is a live
+    // option whatever the graph says, so a refusal can point at it.
+    for (const name of grants.liveCapabilities(now())) {
+      names.add(name);
+    }
     return partition([...names], evidence);
   }
 
@@ -757,7 +788,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       schemaBytes: surface.schemaBytes(),
       idempotencyEntries: idempotency.size,
       plans: plans.list(),
-      grants: [],
+      grants: grants.list(now()),
       ...(actor !== undefined ? { actor } : {}),
       audit: audit.list(),
     };
@@ -905,7 +936,39 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     }
 
     present(capability, "capability_started", input, invocationActor);
+    // A grant is consulted only where policy would ask for an approval. It
+    // sits after policy, so a denial is final before any mandate is read,
+    // and before the approval gate, so a matching live grant is what stands
+    // in for the person this once. A grant on record that does not cover
+    // the call refuses it outright: the mandate is the person's answer for
+    // this capability, and a call outside it is not quietly escalated to
+    // an approval they already chose not to sit for.
+    let authorizing: LiveGrant | undefined;
     if (decision.kind === "require_approval") {
+      const consulted = grants.consult(capability.name, input, now());
+      if (consulted.kind === "refused") {
+        audit.append({
+          kind: "capability_unavailable",
+          capability: capability.name,
+          reasonCode: consulted.reasonCode,
+          at: now(),
+        });
+        emit();
+        return grantRefused(
+          capability.name,
+          {
+            grantId: consulted.grant.id,
+            reasonCode: consulted.reasonCode,
+            reason: consulted.reason,
+          },
+          refusal(capability),
+        );
+      }
+      if (consulted.kind === "matched") {
+        authorizing = consulted.grant;
+      }
+    }
+    if (decision.kind === "require_approval" && authorizing === undefined) {
       const summary =
         capability.describeApproval?.(input, context) ??
         capability.title ??
@@ -1042,11 +1105,52 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         previewUnavailable(capability.name, direct.error, refusal(capability)),
       );
     }
+    // The use is spent here, synchronously, at the moment the runtime
+    // commits to executing and before its first await. A concurrent second
+    // call runs its own consult only after this one has suspended, so it
+    // sees the decremented count and cannot double-spend the last use. A
+    // replay above returned before reaching this line, so an idempotent
+    // retry spends nothing. A use once spent is never returned: the
+    // handler may already be running, and a mandate counts dispatches.
+    let grantId: string | undefined;
+    if (authorizing !== undefined) {
+      const spent = grants.spend(authorizing.id, now());
+      if (spent === undefined) {
+        // Re-entrant code revoked or exhausted the grant between the
+        // consult and this claim. Refuse with its current state.
+        direct.proposal?.discard();
+        const consulted = grants.consult(capability.name, input, now());
+        const why =
+          consulted.kind === "refused"
+            ? consulted
+            : {
+                grant: authorizing,
+                reasonCode: "GRANT_REVOKED" as const,
+                reason: `grant ${authorizing.id} is no longer live`,
+              };
+        audit.append({
+          kind: "capability_unavailable",
+          capability: capability.name,
+          reasonCode: why.reasonCode,
+          at: now(),
+        });
+        emit();
+        return settle(
+          grantRefused(
+            capability.name,
+            { grantId: why.grant.id, reasonCode: why.reasonCode, reason: why.reason },
+            refusal(capability),
+          ),
+        );
+      }
+      grantId = authorizing.id;
+    }
     const outcome = await executeNow(capability, input, {
       actor: invocationActor,
       signal,
       idempotencyKey,
       claim,
+      ...(grantId !== undefined ? { grantId } : {}),
       ...(direct.proposal ? { commit: direct.proposal.commit } : {}),
     });
     if (!outcome.ok) {
@@ -1194,6 +1298,8 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     signal?: AbortSignal | undefined;
     idempotencyKey?: string | undefined;
     planId?: string | undefined;
+    /** The grant that authorized this execution in place of an approval. */
+    grantId?: string | undefined;
     /**
      * An idempotency slot the caller already claimed. Present when the
      * caller had to know it owned this execution before doing work that
@@ -1412,6 +1518,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       signal,
       idempotencyKey,
       planId,
+      grantId,
       humanInitiated = false,
       actor: actingActor,
     } = opts;
@@ -1451,6 +1558,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       kind: "execution_started",
       capability: capability.name,
       executionId,
+      ...(grantId !== undefined ? { grantId } : {}),
       ...(actingActor !== undefined ? { actor: actingActor } : {}),
       at: now(),
     });
@@ -1519,6 +1627,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
             verification,
             at: now(),
             ...(planId !== undefined ? { planId } : {}),
+            ...(grantId !== undefined ? { grantId } : {}),
             ...(actingActor !== undefined ? { executedBy: actingActor } : {}),
           });
         }
@@ -2072,6 +2181,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       idempotency.clear();
       plans.clear();
       receipts.clear();
+      grants.clear();
       routedNames = new Set();
       lastRouting = null;
       if (started) {
@@ -2690,17 +2800,42 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       emit();
       return { ok: true, receipt: receipts.get(receiptId)! };
     },
-    grant() {
-      return { ok: false, reason: "grants are not implemented" };
+    grant(request, by) {
+      // Identity first, before the request is even read. A malformed or
+      // non-human issuer throws where the ambient actor would, because
+      // minting authority is not a call to hand a reason back to.
+      const issuer = adoptHumanActor(
+        by ?? actor,
+        "a grant must be issued by a human; pass one to grant rather than relying on the acting actor",
+      );
+      const parsed = parseGrantRequest(request, now());
+      if (!parsed.ok) {
+        return parsed;
+      }
+      const target = catalog.get(parsed.parsed.capability);
+      if (target === undefined || !appOnly(target)) {
+        return { ok: false, reason: `unknown capability: ${request.capability}` };
+      }
+      const issued = grants.issue(parsed.parsed, issuer, now());
+      emit();
+      return { ok: true, grant: issued };
     },
-    revokeGrant() {
-      return { ok: false, reason: "grants are not implemented" };
+    revokeGrant(grantId, by) {
+      const revoker = adoptHumanActor(
+        by ?? actor,
+        "a grant must be revoked by a human; pass one to revokeGrant rather than relying on the acting actor",
+      );
+      const result = grants.revoke(grantId, revoker, now());
+      if (result.ok) {
+        emit();
+      }
+      return result;
     },
     listGrants() {
-      return [];
+      return grants.list(now());
     },
-    getGrant() {
-      return undefined;
+    getGrant(grantId) {
+      return grants.get(grantId, now());
     },
     async invoke(name, input = {}) {
       if (!started) {

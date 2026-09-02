@@ -132,6 +132,7 @@ export {
   type PendingAction,
 } from "./approval.ts";
 export type { AuditEvent, AuditListener } from "./audit.ts";
+export { GrantStore, matchesScope, parseGrantRequest, parseScope } from "./grants.ts";
 export type {
   Grant,
   GrantConsultation,
@@ -140,6 +141,7 @@ export type {
   GrantRequest,
   GrantState,
   LiveGrant,
+  ParsedGrantRequest,
   ScopeRule,
   ScopeValue,
 } from "./grants.ts";
@@ -158,6 +160,7 @@ export {
   capabilityUnavailable,
   completed,
   executionCancelled,
+  grantRefused,
   idempotencyCapacity,
   idempotencyConflict,
   isReceiptEnvelope,
