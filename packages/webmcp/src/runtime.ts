@@ -481,8 +481,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   function isPersistedHolder(value: unknown): value is PersistedHolder {
     return typeof value === "object" && value !== null && PERSISTED in value;
   }
-  /** Idempotency keys claimed before a restart, by slot, with the input they were claimed for. */
-  const restoredClaims = new Map<string, string>();
+  /**
+   * Idempotency keys claimed before a restart, by slot: the input they were
+   * claimed for, and the receipt the write recorded when it recorded one.
+   * The result is gone; the receipt is what a refusal can point at.
+   */
+  const restoredClaims = new Map<string, { fingerprint: string; receiptId?: string }>();
 
   /**
    * How an artifact is written down. The object itself when it clones; the
@@ -567,7 +571,10 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     }
     for (const claim of await persistence.loadIdempotencyClaims()) {
       if (claim.version === 1 && typeof claim.slot === "string") {
-        restoredClaims.set(claim.slot, claim.fingerprint);
+        restoredClaims.set(claim.slot, {
+          fingerprint: claim.fingerprint,
+          ...(typeof claim.receiptId === "string" ? { receiptId: claim.receiptId } : {}),
+        });
       }
     }
   }
@@ -2019,6 +2026,8 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         value: unknown;
         result: ToolResult;
         verification?: VerificationResult;
+        /** The stored receipt this execution recorded, when it recorded one. */
+        receiptId?: string;
       }
     | {
         ok: false;
@@ -2174,7 +2183,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
    */
   type IdempotencyClaim =
     | { kind: "none" }
-    | { kind: "won"; settle: (result: ToolResult) => void }
+    | {
+        kind: "won";
+        slot: string;
+        fingerprint: string;
+        settle: (result: ToolResult) => void;
+      }
     | { kind: "replay"; result: Promise<ToolResult> }
     | { kind: "refused"; result: ToolResult };
 
@@ -2198,13 +2212,21 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     // prevent, so the call is refused either way, with the cause.
     const restored = restoredClaims.get(slot);
     if (restored !== undefined) {
+      const same = restored.fingerprint === fingerprint;
+      // No capability repairs this: the fix is a person checking the
+      // earlier write, so the receipt it recorded rides as evidence and
+      // `next` names the receipts query for the capability.
+      const evidence: Evidence[] =
+        same && restored.receiptId !== undefined
+          ? [{ kind: "receipt", id: restored.receiptId }]
+          : [];
       return {
         kind: "refused",
         result: idempotencyConflict(
           capability.name,
           idempotencyKey,
-          refusal(capability),
-          restored === fingerprint ? "after_restart" : "different_input",
+          refusal(capability, undefined, evidence),
+          same ? "after_restart" : "different_input",
         ),
       };
     }
@@ -2246,6 +2268,8 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     );
     return {
       kind: "won",
+      slot,
+      fingerprint,
       settle: (result) => {
         if (entry.settled) {
           return;
@@ -2271,6 +2295,18 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     const outcome = await runExecution(capability, input, opts);
     if (claim.kind === "won") {
       claim.settle(outcome.result);
+      if (outcome.ok && outcome.receiptId !== undefined) {
+        const receiptId = outcome.receiptId;
+        persist(() =>
+          persistence!.saveIdempotencyClaim({
+            version: 1,
+            slot: claim.slot,
+            fingerprint: claim.fingerprint,
+            at: now(),
+            receiptId,
+          }),
+        );
+      }
     }
     return outcome;
   }
@@ -2494,6 +2530,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         value,
         result: toolResult,
         verification,
+        ...(stored !== undefined ? { receiptId: stored.id } : {}),
       };
     } catch (err) {
       const attempted: Evidence[] = [{ kind: "execution", id: executionId }];
