@@ -265,16 +265,15 @@ neither in memory nor synchronous, and building it showed where the
 contract is silent. Each item is something the implementation needed and
 the contract did not say.
 
-1. **Fork and diff are synchronous and say nothing about stores that are
-   not.** `fork` and `diff` return values, and have to: a plan's second
-   operation derives against the first's staged head inside one `scope`,
-   and the diff is what a person reads at request time. IndexedDB can only
-   be read through requests that settle later. The adapter therefore needs
-   an in-process mirror of the rows it governs, loaded before the first
-   fork, and the contract has no `open` or ready hook: the application has
-   to await the adapter's own `open()` before the runtime starts, and a
-   fork against an unloaded mirror is refused by the adapter throwing, not
-   by anything the runtime checks at `start`.
+1. **Resolved for fork; diff stays synchronous by decision.** `fork` may
+   now return a promise, and the runtime awaits it before `diff`, so a
+   store that reads over the network is driven by the runtime like any
+   other. `diff` still returns a value, because it derives from the fork
+   alone and is what a person reads at request time. The IndexedDB adapter
+   keeps a synchronous fork over a mirror by choice, since the rows an
+   operation names are discovered by running it; the contract still has no
+   `open` or ready hook for that mirror, so the application awaits the
+   adapter's own `open()` before the runtime starts.
 
 2. **Resolved: a commit that has returned can no longer report a
    completion that rolled back.** This was a correctness gap. The only
@@ -337,13 +336,16 @@ The third implementation, `restStaging` in
 transaction and no local state. Same shape: each item is something it
 needed that the contract did not say.
 
-1. **Fork has no asynchronous half.** A REST row can only be read with a
-   round trip, and `fork` returns a value. The adapter needs
-   `prepare(operation, input)` awaited before the fork, and the runtime
-   never calls it: the host that invokes a staged capability has to know
-   to prepare first, and the contract says nothing about a step before
-   fork that can fail. The first leak above, narrowed to fork and diff by
-   #55, is a hard wall here rather than a mirror to load.
+1. **Resolved: fork has an asynchronous half.** A REST row can only be
+   read with a round trip, and `fork` returned a value, so the adapter
+   needed a `prepare` the runtime never called. `fork` may now return a
+   promise and the runtime awaits it, so the adapter's fork fetches the
+   rows the operation names and runs it, `prepare` is gone from its
+   surface, and a staged capability over REST is driven with nothing but
+   `invoke` and `approve`. What the contract now says about the wait: the
+   idempotency slot is claimed before the fork, so a repeat under the same
+   key while the fork is in flight joins the first request rather than
+   forking again, and a scope handed a promise stays open until it settles.
 
 2. **The rows an operation names are not part of the contract.** The
    IndexedDB adapter learned them by watching the draft; REST has to know
@@ -380,7 +382,8 @@ packages/webmcp/src/capability.ts Change RiskLevel untrustedContentHint
 packages/webmcp/src/plan.ts expectedRevision
 packages/webmcp/src/staging.ts StagingAdapter StagedCommitIndeterminate StagedCommitRefused stateDigest identify buildStageHandler scope
 packages/webmcp/src/runtime.ts runInvocation
-packages/webmcp/src/rest-staging.ts restStaging RestCommitPartial prepare rows follows acknowledged
+packages/webmcp/src/rest-staging.ts restStaging RestCommitPartial fetchRows rows follows acknowledged
+packages/webmcp/src/runtime.ts stageFor currentDigest
 packages/webmcp/src/indexeddb-staging.ts indexedDbStaging open flush resolveArtifact STAGING_STORE
 packages/webmcp/src/runtime.ts describeArtifact
 -->
