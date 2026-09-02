@@ -1,5 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 import { Pill, fmtDate, fmtMoney } from "../components/bits.tsx";
+import { DurabilityCard } from "../components/DurabilityCard.tsx";
 import { Ghost } from "../components/Ghost.tsx";
 import { GrantCard } from "../components/GrantCard.tsx";
 import { useDemoStore } from "../components/hooks.ts";
@@ -135,6 +136,7 @@ export function OrderDetail() {
             ) : null}
           </div>
           <GrantCard orderId={order.id} />
+          <DurabilityCard orderId={order.id} />
           <div
             className="panel"
             data-reveal="order-billing"
