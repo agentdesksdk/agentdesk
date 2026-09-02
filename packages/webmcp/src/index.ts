@@ -135,6 +135,16 @@ export {
 } from "./approval.ts";
 export type { AuditEvent, AuditListener } from "./audit.ts";
 export {
+  indexedDbPersistence,
+  memoryPersistence,
+  type IndexedDbLike,
+  type IndexedDbPersistenceOptions,
+  type PersistedArtifact,
+  type PersistedIdempotencyClaim,
+  type PersistedRecord,
+  type PersistenceAdapter,
+} from "./persistence.ts";
+export {
   GESTURE_TTL_MS,
   GestureStore,
   isApprovalGesture,

@@ -58,6 +58,7 @@ import {
   type VerificationResult,
 } from "./plan.ts";
 import type { EvidenceLink, Receipt } from "./results.ts";
+import type { PersistenceAdapter } from "./persistence.ts";
 import {
   GestureStore,
   isApprovalGesture,
@@ -372,6 +373,11 @@ export function createAgentDeskRuntime<S = unknown>(options: {
    * when there is no navigator; Node and jsdom tests inject one.
    */
   gesture?: { userActivation?: () => boolean };
+  /**
+   * Where unreconciled records and idempotency claims survive a restart.
+   * Absent means in memory, which is exactly what the runtime did before.
+   */
+  persistence?: PersistenceAdapter;
 }): AgentDeskRuntime {
   const audit = new AuditBus();
   const approvals = new ApprovalManager();
