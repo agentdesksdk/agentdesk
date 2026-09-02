@@ -98,6 +98,7 @@ document.modelContext.registerTool(...)
 | `plan.ts` | `PlanStore`, `OperationPlan`, plan statuses, `Actor`, `VerificationResult` |
 | `receipts.ts` | `ReceiptStore`, the queryable history of what changed, with the executing actor, plan, and rollback state |
 | `protocol.ts` | The result protocol: `Repair`, `Evidence`, `Situation`, and the `ResultProtocol` union every terminal result conforms to |
+| `grants.ts` | Scoped authority grants: the `Grant` state union, scope parsing and matching, and the `GrantStore` that spends uses |
 | `results.ts` | Structured tool results (`TOOL_RETIRED`, `APPROVAL_REQUIRED`, `CAPABILITY_UNAVAILABLE`, `completed`), each built from a situation |
 | `tool-surface.ts` | Reconciliation, AbortController lifecycle, tombstones, schema-byte accounting |
 | `runtime.ts` | The pipeline, bootstrap tools, exposure modes, snapshots |
@@ -234,6 +235,117 @@ twice.
 
 Plan outcomes (`OperationOutcome`), `get_action_status`, and a handler
 exception surfaced as a bare `errorResult` are not in this protocol yet.
+
+## Scoped authority grants
+
+A person approves a bounded mandate once, and the runtime spends it one
+execution at a time instead of asking for an approval on every call.
+
+```ts
+const issued = runtime.grant(
+  {
+    capability: "refund_shipping",
+    scope: { customerId: "CUS-104", maxAmount: 25 },
+    uses: 3,
+    expiresAt: "2026-09-03T00:00:00Z",
+  },
+  { id: "operator-1", name: "Amein", kind: "human" },
+);
+// issued.ok && issued.grant.state === "live" && issued.grant.remaining === 3
+runtime.revokeGrant(issued.grant.id, { id: "operator-1", kind: "human" });
+```
+
+**The shape makes the illegal states unconstructible.** A `Grant` carries
+its id, the capability, the parsed `scope`, the `uses` granted, the human
+`issuedBy`, `issuedAt`, and `expiresAt`, and is in exactly one of four
+states: `live` with a `remaining` count, `exhausted` with `remaining: 0`
+and `exhaustedAt`, `expired` with `expiredAt`, or `revoked` with
+`revokedAt` and the human `revokedBy`. A terminal state is a distinct
+shape rather than a live grant with a flag, and only a `LiveGrant` can
+authorize an execution. Records are frozen, so a holder cannot add a use to
+a grant it was shown. Expiry settles lazily: a live grant past its expiry
+becomes `expired` the next time anything reads it.
+
+**Scope is per field, exact for identity and bounded for numbers, and
+never a wildcard.** The request's `scope` is written per input field and
+parsed into `ScopeRule`s: a primitive is an `exact` rule on that field, and
+a key of the form `maxAmount` or `minAmount` is a `bound` on the field
+`amount`. Every rule must hold against the call input, and a field the
+input does not carry fails its rule, so a scope can only ever narrow what a
+call may do. A bound and an exact value on one field contradict each other
+and the request is refused; so is a non-primitive value, a non-positive use
+count, an expiry that is not a timestamp, or an expiry already passed.
+
+**A grant never widens policy.** `runCapability` consults grants after the
+policy decision and before the approval gate, and only when policy said
+`require_approval`. Under `deny` nothing is consulted and nothing executes,
+and the native surface is unchanged because grants have no bearing on
+`routable`. Under `allow` a grant is never consulted, spends nothing, and
+records nothing. Where policy would ask for an approval, the first live
+grant whose scope covers the call stands in for the person this once, and
+the execution runs down the same unapproved path a WRITE takes.
+
+**The use is spent at the execution claim, before the first await.**
+`GrantStore.spend` is synchronous and runs after the idempotency claim and
+after staging succeeded, at the point the runtime commits to executing. A
+concurrent second call runs its own consult only after the first has
+suspended, so it sees the decremented count; two calls against one
+remaining use start exactly one execution. An idempotent replay returned
+before that line, so it spends nothing. A use once spent is never returned,
+because the handler may already be running and a mandate counts dispatches.
+The receipt carries `grantId`, `queryReceipts({ grantId })` finds every
+write one grant authorized, and `execution_started` names the grant.
+
+**A grant that does not apply changes nothing.** A grant on record that
+does not cover the call, a spent grant, a revoked one, or an expired one
+means the grant does not apply, and the call takes the path it always had:
+`APPROVAL_REQUIRED`, with a person deciding. Refusing instead would let a
+mandate for one customer make another customer's refund un-approvable. The
+information is kept: the approval result carries `grant`, the grant the call
+was checked against and why it did not apply, as
+`{ id, outcome: "exhausted" | "expired" | "revoked" }` or
+`{ id, outcome: "missing_field" | "out_of_scope", field }` or
+`{ id, outcome: "over_bound", field, max }` /
+`{ id, outcome: "under_bound", field, min }`. It is in the result protocol:
+`nowPossible` includes every capability holding a live grant, so the answer
+can point at a sibling the person already authorized, and there is no
+`repair`, because the fix is a person deciding rather than a capability the
+agent can call. When several grants exist the considered one is the one
+whose state a person can act on first: a live grant the call fell outside
+of, then an exhausted one, then a revoked one, then an expired one.
+
+**Revoke is immediate.** `revokeGrant` moves a live grant to `revoked` with
+the human who did it, and the next use goes to a person with
+`outcome: "revoked"` on the result. An execution that already spent its use
+is untouched, because its use was spent before its handler ran. Only a live grant can be revoked; revoking an
+exhausted or expired one is refused with a reason rather than rewriting
+its history.
+
+**Only a person can mint or revoke.** `grant` and `revokeGrant` resolve
+their identity through `adoptHumanActor`, which is `adoptActor` followed by
+`isHumanActor`. A malformed identity throws the same `TypeError` the
+ambient actor would, and an agent identity throws too, rather than being
+handed a reason: an agent asking for a mandate is the thing a grant exists
+to prevent, and the ambient actor is usually the agent, so relying on it
+throws as well. Request-shape problems and an unknown capability return
+`{ ok: false, reason }`. `listGrants`, `getGrant`, and `getSnapshot().grants`
+hand out the frozen records in every state; `reset` clears them.
+
+**Audit.** Four kinds carry the grant lifecycle, and `execution_started`
+and the receipt name the grant that authorized a write. `grant_issued`
+carries the human `actor`, `uses`, and `expiresAt`. `grant_applied` is
+written at the spend, before the `execution_started` it precedes, with the
+uses `remaining`. `grant_not_applied` carries the `outcome` and, for a
+scope outcome, the `field`, so the audit says what the mandate stopped at
+even though the call went on to a person. `grant_revoked` carries the human
+`actor` and the uses left unspent. The two human-only kinds type `actor` as
+`HumanActor`, like `plan_approved`. The demo's activity panel renders all
+four; its exhaustive `switch` is why the kinds and the panel cases land in
+one change.
+
+Grants apply to a direct invocation. `approve()` executes an approval a
+person gave for that call, and a plan carries its own approval, so neither
+consults grants.
 
 ## Execution lifecycle
 
@@ -1222,7 +1334,10 @@ differs, which is what makes the `/baseline` vs `/agentdesk` comparison fair.
 packages/webmcp/src/receipts.ts RollbackState ReconciliationOutcome reconcile markIndeterminate rollbackVerification rollbackAttemptedAt rollbackFailure
 packages/webmcp/src/capability.ts verifyRollback rollbackEvidence Unavailability repair
 packages/webmcp/src/runtime.ts reconcileRollback markRolledBack proveRollback ownActor routable visibleRepair situationFor partition desiredNative
-packages/webmcp/src/audit.ts rollback_indeterminate rollback_reconciled rollback_performed
+packages/webmcp/src/audit.ts rollback_indeterminate rollback_reconciled rollback_performed grant_issued grant_revoked grant_applied grant_not_applied
 packages/webmcp/src/protocol.ts Repair Evidence Situation Refusal Settled ResultProtocol RefusalStatus
 packages/webmcp/src/results.ts completed capabilityUnavailable approvalRequired executionIndeterminate
+packages/webmcp/src/grants.ts Grant LiveGrant GrantRequest ScopeRule ConsideredGrant GrantOutcome GrantStore parseScope parseGrantRequest matchesScope consult spend revoke liveCapabilities
+packages/webmcp/src/runtime.ts adoptHumanActor authorizing considered queueApproval revokeGrant listGrants getGrant
+packages/webmcp/src/receipts.ts grantId
 -->

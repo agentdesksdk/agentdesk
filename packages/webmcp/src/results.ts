@@ -1,4 +1,5 @@
 import type { Change, RiskLevel, Unavailability } from "./capability.ts";
+import type { ConsideredGrant } from "./grants.ts";
 import type { Refusal, Settled } from "./protocol.ts";
 
 export type ToolCode =
@@ -114,6 +115,12 @@ export function capabilityUnavailable(
   );
 }
 
+/**
+ * `considered` is the grant the call was checked against and why it did not
+ * apply. A grant that does not apply changes nothing about the outcome,
+ * which is why this is an approval and not a refusal; it only says what
+ * the mandate stopped at, so a person deciding can see it.
+ */
 export function approvalRequired(
   capability: string,
   actionId: string,
@@ -122,6 +129,7 @@ export function approvalRequired(
   preview: Change[],
   approvalEvidence: "derived" | "diff" | "summary",
   situation: Settled,
+  considered?: ConsideredGrant,
 ): ToolResult {
   const data: Record<string, unknown> = {
     status: "APPROVAL_REQUIRED",
@@ -138,6 +146,9 @@ export function approvalRequired(
   };
   if (preview.length > 0) {
     data.will_change = preview;
+  }
+  if (considered !== undefined) {
+    data.grant = { ...considered };
   }
   return coded("APPROVAL_REQUIRED", answered(data, situation), false);
 }

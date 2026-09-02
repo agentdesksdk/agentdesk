@@ -291,6 +291,48 @@ function collapse(events: readonly AuditEvent[]): Rendered[] {
           meta: `${event.detail} · ${event.recordId} still open`,
         });
         break;
+      case "grant_issued":
+        out.push({
+          key,
+          at: event.at,
+          head: "Grant issued",
+          cap: event.capability,
+          meta: `${event.grantId} · ${event.uses} use${event.uses === 1 ? "" : "s"} by ${
+            event.actor.name ?? event.actor.id
+          }`,
+        });
+        break;
+      case "grant_revoked":
+        out.push({
+          key,
+          at: event.at,
+          head: "Grant revoked",
+          cap: event.capability,
+          meta: `${event.grantId} · ${event.remaining} unused, by ${
+            event.actor.name ?? event.actor.id
+          }`,
+        });
+        break;
+      case "grant_applied":
+        out.push({
+          key,
+          at: event.at,
+          head: "Grant applied",
+          cap: event.capability,
+          meta: `${event.grantId} · ${event.remaining} left`,
+        });
+        break;
+      case "grant_not_applied":
+        out.push({
+          key,
+          at: event.at,
+          head: "Grant did not apply",
+          cap: event.capability,
+          meta: `${event.grantId} · ${event.outcome}${
+            event.field !== undefined ? ` on ${event.field}` : ""
+          }; a person decides`,
+        });
+        break;
       // A new audit kind has to get a case above; this stops it compiling
       // rather than letting it vanish from the panel.
       default: {

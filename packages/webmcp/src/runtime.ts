@@ -29,6 +29,14 @@ import type {
   Settled,
   Situation,
 } from "./protocol.ts";
+import {
+  GrantStore,
+  parseGrantRequest,
+  type ConsideredGrant,
+  type Grant,
+  type GrantRequest,
+  type LiveGrant,
+} from "./grants.ts";
 import { defaultValidator, type Validator } from "./validation.ts";
 import {
   PresentationBus,
@@ -159,6 +167,8 @@ export type RuntimeSnapshot = {
   idempotencyEntries: number;
   actor?: Actor;
   plans: OperationPlan[];
+  /** Every grant issued this session, in every state, detached. */
+  grants: Grant[];
   audit: readonly AuditEvent[];
 };
 
@@ -242,6 +252,25 @@ export type AgentDeskRuntime = {
     by?: Actor,
   ) => { ok: true } | { ok: false; reason: string };
   /**
+   * A person approves a bounded mandate once. The issuer must be a human
+   * and goes through the same parsing as the ambient actor, so a malformed
+   * or agent identity throws rather than minting authority. Request-shape
+   * problems, an unknown capability, a non-positive use count, or an
+   * expiry already passed, refuse with a reason.
+   */
+  grant: (
+    request: GrantRequest,
+    by?: Actor,
+  ) => { ok: true; grant: Grant } | { ok: false; reason: string };
+  /** Immediate. The next use refuses; an execution already committed is untouched. */
+  revokeGrant: (
+    grantId: string,
+    by?: Actor,
+  ) => { ok: true; grant: Grant } | { ok: false; reason: string };
+  listGrants: () => Grant[];
+  getGrant: (grantId: string) => Grant | undefined;
+
+  /**
    * Optional. Reports unsupported rather than pretending every app undoes.
    *
    * The receipt is claimed synchronously, so concurrent calls run the
@@ -310,6 +339,10 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   const presentation = new PresentationBus();
   const plans = new PlanStore();
   const receipts = new ReceiptStore();
+  // Bounded mandates a person issued. Consulted only where policy would ask
+  // for an approval, so a grant can narrow what needs a human and never
+  // widen what policy allows.
+  const grants = new GrantStore();
   // Staged proposals live here, keyed by the runtime identity that owns
   // each one, never by business input. Disposal is this store's job on
   // every path that resolves an owner without committing it.
@@ -390,6 +423,21 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       return { ok: false, reason: refusal };
     }
     return { ok: true, actor: deepFreeze(parsed.actor) };
+  }
+
+  /**
+   * The identity that mints or revokes authority. It goes through the same
+   * parse as the ambient actor and throws the same `TypeError` on a
+   * malformed shape, and throws again when the parsed actor is not a
+   * person. An agent asking for a mandate is not a caller to hand a reason
+   * to; it is the thing a grant exists to keep from happening.
+   */
+  function adoptHumanActor(next: Actor | undefined, refusal: string): HumanActor {
+    const adopted = adoptActor(next);
+    if (adopted === undefined || !isHumanActor(adopted)) {
+      throw new TypeError(refusal);
+    }
+    return adopted;
   }
 
   let actor: Actor | undefined = adoptActor(options.actor);
@@ -639,6 +687,11 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     for (const match of lastRouting?.matches ?? []) {
       names.add(match.name);
     }
+    // A capability a person has already granted authority over is a live
+    // option whatever the graph says, so a refusal can point at it.
+    for (const name of grants.liveCapabilities(now())) {
+      names.add(name);
+    }
     return partition([...names], evidence);
   }
 
@@ -695,6 +748,21 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     return situationFor(subject, undefined, evidence);
   }
 
+  /** The audit record of a grant that was considered and did not apply. */
+  function notApplied(
+    capability: string,
+    considered: ConsideredGrant,
+  ): Extract<AuditEvent, { kind: "grant_not_applied" }> {
+    return {
+      kind: "grant_not_applied",
+      grantId: considered.id,
+      capability,
+      outcome: considered.outcome,
+      ...("field" in considered ? { field: considered.field } : {}),
+      at: now(),
+    };
+  }
+
   function present(
     capability: Capability,
     phase: PresentationPhase,
@@ -735,6 +803,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       schemaBytes: surface.schemaBytes(),
       idempotencyEntries: idempotency.size,
       plans: plans.list(),
+      grants: grants.list(now()),
       ...(actor !== undefined ? { actor } : {}),
       audit: audit.list(),
     };
@@ -882,90 +951,27 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     }
 
     present(capability, "capability_started", input, invocationActor);
+    // A grant is consulted only where policy would ask for an approval. It
+    // sits after policy, so a denial is final before any mandate is read,
+    // and before the approval gate, so a matching live grant is what stands
+    // in for the person this once. A grant that does not apply changes
+    // nothing: the call takes the path it always had, an approval with a
+    // person deciding, and the result says which grant was considered and
+    // what it stopped at. Refusing here would let a mandate for one
+    // customer make another customer's refund un-approvable.
+    let authorizing: LiveGrant | undefined;
+    let considered: ConsideredGrant | undefined;
     if (decision.kind === "require_approval") {
-      const summary =
-        capability.describeApproval?.(input, context) ??
-        capability.title ??
-        capability.name;
-      const staged = stageFor(capability, input, signal);
-      if (!staged.ok) {
-        audit.append({
-          kind: "capability_unavailable",
-          capability: capability.name,
-          reasonCode: "PREVIEW_UNAVAILABLE",
-          at: now(),
-        });
-        emit();
-        return previewUnavailable(
-          capability.name,
-          staged.error,
-          refusal(capability),
-        );
+      const consulted = grants.consult(capability.name, input, now());
+      if (consulted.kind === "matched") {
+        authorizing = consulted.grant;
+      } else if (consulted.kind === "not_applied") {
+        considered = consulted.grant;
+        audit.append(notApplied(capability.name, considered));
       }
-      const preview = staged.proposal
-        ? { ok: true as const, changes: [...staged.proposal.changes] }
-        : safePreview(capability, input, context);
-      if (!preview.ok && capability.risk === "CONSEQUENTIAL") {
-        staged.proposal?.discard();
-        audit.append({
-          kind: "capability_unavailable",
-          capability: capability.name,
-          reasonCode: "PREVIEW_UNAVAILABLE",
-          at: now(),
-        });
-        emit();
-        return previewUnavailable(
-          capability.name,
-          preview.error,
-          refusal(capability),
-        );
-      }
-      let action;
-      try {
-        action = approvals.request(
-          capability.name,
-          input,
-          capability.risk,
-          summary,
-          preview.changes,
-          now(),
-        );
-      } catch (err) {
-        // Nothing owns the proposal yet, so a failure to record the pending
-        // action would otherwise strand the fork with no way to reach it.
-        staged.proposal?.discard();
-        throw err;
-      }
-      if (staged.proposal) {
-        // An identical pending request returns the action that already
-        // exists, whose preview came from the proposal held for it.
-        // Replacing that artifact would let a human approve one diff and
-        // land another, so the newer staging is thrown away instead.
-        if (proposals.has(action.id)) {
-          staged.proposal.discard();
-        } else {
-          proposals.put(action.id, staged.proposal);
-        }
-      }
-      audit.append({
-        kind: "approval_requested",
-        capability: capability.name,
-        actionId: action.id,
-        risk: capability.risk,
-        summary,
-        at: now(),
-      });
-      present(capability, "approval_requested", input, invocationActor);
-      emit();
-      return approvalRequired(
-        capability.name,
-        action.id,
-        capability.risk,
-        summary,
-        action.preview,
-        capability.approvalEvidence,
-        settled(capability, [{ kind: "approval", id: action.id }]),
-      );
+    }
+    if (decision.kind === "require_approval" && authorizing === undefined) {
+      return queueApproval(capability, input, signal, invocationActor, considered);
     }
     // A previous call of this exact operation may already have written. A
     // repeat would apply it twice, so it is refused until a human has said
@@ -1019,17 +1025,152 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         previewUnavailable(capability.name, direct.error, refusal(capability)),
       );
     }
+    // The use is spent here, synchronously, at the moment the runtime
+    // commits to executing and before its first await. A concurrent second
+    // call runs its own consult only after this one has suspended, so it
+    // sees the decremented count and cannot double-spend the last use. A
+    // replay above returned before reaching this line, so an idempotent
+    // retry spends nothing. A use once spent is never returned: the
+    // handler may already be running, and a mandate counts dispatches.
+    let grantId: string | undefined;
+    if (authorizing !== undefined) {
+      const spent = grants.spend(authorizing.id, now());
+      if (spent === undefined) {
+        // Re-entrant code revoked or exhausted the grant between the
+        // consult and this claim. The mandate no longer applies, so the
+        // call takes the approval path with the grant it was checked
+        // against, and the idempotency slot settles on that result.
+        direct.proposal?.discard();
+        const consulted = grants.consult(capability.name, input, now());
+        const late: ConsideredGrant =
+          consulted.kind === "not_applied"
+            ? consulted.grant
+            : { id: authorizing.id, outcome: "revoked" };
+        audit.append(notApplied(capability.name, late));
+        return settle(
+          queueApproval(capability, input, signal, invocationActor, late),
+        );
+      }
+      audit.append({
+        kind: "grant_applied",
+        grantId: spent.id,
+        capability: capability.name,
+        remaining: spent.remaining,
+        at: now(),
+      });
+      grantId = authorizing.id;
+    }
     const outcome = await executeNow(capability, input, {
       actor: invocationActor,
       signal,
       idempotencyKey,
       claim,
+      ...(grantId !== undefined ? { grantId } : {}),
       ...(direct.proposal ? { commit: direct.proposal.commit } : {}),
     });
     if (!outcome.ok) {
       direct.proposal?.discard();
     }
     return outcome.result;
+  }
+
+  /**
+   * The approval gate. Stages a preview, records the pending action, and
+   * hands the agent an APPROVAL_REQUIRED naming it. `considered` is the
+   * grant the call was checked against and why it did not apply, so the
+   * person deciding can see what the mandate stopped at.
+   */
+  function queueApproval(
+    capability: Capability,
+    input: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+    invocationActor: Actor | undefined,
+    considered: ConsideredGrant | undefined,
+  ): ToolResult {
+    const summary =
+      capability.describeApproval?.(input, context) ??
+      capability.title ??
+      capability.name;
+    const staged = stageFor(capability, input, signal);
+    if (!staged.ok) {
+      audit.append({
+        kind: "capability_unavailable",
+        capability: capability.name,
+        reasonCode: "PREVIEW_UNAVAILABLE",
+        at: now(),
+      });
+      emit();
+      return previewUnavailable(
+        capability.name,
+        staged.error,
+        refusal(capability),
+      );
+    }
+    const preview = staged.proposal
+      ? { ok: true as const, changes: [...staged.proposal.changes] }
+      : safePreview(capability, input, context);
+    if (!preview.ok && capability.risk === "CONSEQUENTIAL") {
+      staged.proposal?.discard();
+      audit.append({
+        kind: "capability_unavailable",
+        capability: capability.name,
+        reasonCode: "PREVIEW_UNAVAILABLE",
+        at: now(),
+      });
+      emit();
+      return previewUnavailable(
+        capability.name,
+        preview.error,
+        refusal(capability),
+      );
+    }
+    let action;
+    try {
+      action = approvals.request(
+        capability.name,
+        input,
+        capability.risk,
+        summary,
+        preview.changes,
+        now(),
+      );
+    } catch (err) {
+      // Nothing owns the proposal yet, so a failure to record the pending
+      // action would otherwise strand the fork with no way to reach it.
+      staged.proposal?.discard();
+      throw err;
+    }
+    if (staged.proposal) {
+      // An identical pending request returns the action that already
+      // exists, whose preview came from the proposal held for it.
+      // Replacing that artifact would let a human approve one diff and
+      // land another, so the newer staging is thrown away instead.
+      if (proposals.has(action.id)) {
+        staged.proposal.discard();
+      } else {
+        proposals.put(action.id, staged.proposal);
+      }
+    }
+    audit.append({
+      kind: "approval_requested",
+      capability: capability.name,
+      actionId: action.id,
+      risk: capability.risk,
+      summary,
+      at: now(),
+    });
+    present(capability, "approval_requested", input, invocationActor);
+    emit();
+    return approvalRequired(
+      capability.name,
+      action.id,
+      capability.risk,
+      summary,
+      action.preview,
+      capability.approvalEvidence,
+      settled(capability, [{ kind: "approval", id: action.id }]),
+      considered,
+    );
   }
 
   /**
@@ -1171,6 +1312,8 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     signal?: AbortSignal | undefined;
     idempotencyKey?: string | undefined;
     planId?: string | undefined;
+    /** The grant that authorized this execution in place of an approval. */
+    grantId?: string | undefined;
     /**
      * An idempotency slot the caller already claimed. Present when the
      * caller had to know it owned this execution before doing work that
@@ -1389,6 +1532,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       signal,
       idempotencyKey,
       planId,
+      grantId,
       humanInitiated = false,
       actor: actingActor,
     } = opts;
@@ -1428,6 +1572,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       kind: "execution_started",
       capability: capability.name,
       executionId,
+      ...(grantId !== undefined ? { grantId } : {}),
       ...(actingActor !== undefined ? { actor: actingActor } : {}),
       at: now(),
     });
@@ -1496,6 +1641,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
             verification,
             at: now(),
             ...(planId !== undefined ? { planId } : {}),
+            ...(grantId !== undefined ? { grantId } : {}),
             ...(actingActor !== undefined ? { executedBy: actingActor } : {}),
           });
         }
@@ -2049,6 +2195,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       idempotency.clear();
       plans.clear();
       receipts.clear();
+      grants.clear();
       routedNames = new Set();
       lastRouting = null;
       if (started) {
@@ -2666,6 +2813,60 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       });
       emit();
       return { ok: true, receipt: receipts.get(receiptId)! };
+    },
+    grant(request, by) {
+      // Identity first, before the request is even read. A malformed or
+      // non-human issuer throws where the ambient actor would, because
+      // minting authority is not a call to hand a reason back to.
+      const issuer = adoptHumanActor(
+        by ?? actor,
+        "a grant must be issued by a human; pass one to grant rather than relying on the acting actor",
+      );
+      const parsed = parseGrantRequest(request, now());
+      if (!parsed.ok) {
+        return parsed;
+      }
+      const target = catalog.get(parsed.parsed.capability);
+      if (target === undefined || !appOnly(target)) {
+        return { ok: false, reason: `unknown capability: ${request.capability}` };
+      }
+      const issued = grants.issue(parsed.parsed, issuer, now());
+      audit.append({
+        kind: "grant_issued",
+        grantId: issued.id,
+        capability: issued.capability,
+        actor: issuer,
+        uses: issued.uses,
+        expiresAt: issued.expiresAt,
+        at: now(),
+      });
+      emit();
+      return { ok: true, grant: issued };
+    },
+    revokeGrant(grantId, by) {
+      const revoker = adoptHumanActor(
+        by ?? actor,
+        "a grant must be revoked by a human; pass one to revokeGrant rather than relying on the acting actor",
+      );
+      const result = grants.revoke(grantId, revoker, now());
+      if (result.ok) {
+        audit.append({
+          kind: "grant_revoked",
+          grantId: result.grant.id,
+          capability: result.grant.capability,
+          actor: revoker,
+          remaining: result.grant.remaining,
+          at: now(),
+        });
+        emit();
+      }
+      return result;
+    },
+    listGrants() {
+      return grants.list(now());
+    },
+    getGrant(grantId) {
+      return grants.get(grantId, now());
     },
     async invoke(name, input = {}) {
       if (!started) {
