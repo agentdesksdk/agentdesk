@@ -144,6 +144,12 @@ const CLAIMS = [
   ["docs/architecture.md", /One digest function/, "present", "architecture says single approvals and plans share one digest"],
   ["docs/architecture.md", /digest-free by construction/, "present", "architecture says a grant-authorized execution has no digest"],
   ["docs/architecture.md", /binds state, not output/, "present", "architecture states the edge of the digest guarantee"],
+
+  ["docs/architecture.md", /##\s*The agent sees a projection/, "present", "architecture states the agent view contract"],
+  ["docs/architecture.md", /The runtime's view is the outer bound/, "present", "architecture says where the view is declared and which bounds which"],
+  ["docs/architecture.md", /withheld wherever it appears/, "present", "architecture states the hidden value backstop"],
+  ["docs/architecture.md", /VIEW_UNAVAILABLE/, "present", "architecture names the failed view refusal"],
+  ["docs/architecture.md", /The human side is not projected/, "present", "architecture says the snapshot and audit stay whole"],
   ["docs/architecture.md", /adoptHumanActor/, "present", "architecture names the identity boundary a grant issuer crosses"],
 ];
 
