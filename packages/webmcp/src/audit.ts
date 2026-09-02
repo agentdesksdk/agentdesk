@@ -48,6 +48,8 @@ export type AuditEvent =
       capability: string;
       /** The human who authorized it. An agent cannot stand in for one. */
       approvedBy?: Actor;
+      /** The gesture token that carried the approval, when one did. */
+      gestureId?: string;
       at: number;
     }
   | {
@@ -90,7 +92,29 @@ export type AuditEvent =
       risk: RiskLevel;
       at: number;
     }
-  | { kind: "plan_approved"; planId: string; actor: HumanActor; at: number }
+  | {
+      kind: "plan_approved";
+      planId: string;
+      actor: HumanActor;
+      /** The gesture token that carried the approval, when one did. */
+      gestureId?: string;
+      at: number;
+    }
+  | {
+      /**
+       * Content a capability flagged untrusted was in the agent's context
+       * when a person approved. Recorded so the approval's record says the
+       * runtime saw it and treated it as data, not as authority.
+       */
+      kind: "untrusted_content_ignored";
+      /** The approval it was recorded against: a single action or a plan. */
+      actionId?: string;
+      planId?: string;
+      capability: string;
+      /** The capabilities whose untrusted output was in context. */
+      sources: string[];
+      at: number;
+    }
   | { kind: "plan_rejected"; planId: string; at: number }
   | {
       kind: "plan_drifted";

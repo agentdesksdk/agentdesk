@@ -1,4 +1,5 @@
 import type { Change, CapabilityName, RiskLevel } from "./capability.ts";
+import type { ConsideredGrant } from "./grants.ts";
 
 export type ActionId = string & { readonly __brand: "ActionId" };
 
@@ -16,6 +17,12 @@ export type PendingAction = {
    * re-derives it and refuses on mismatch.
    */
   stateVersion?: string;
+  /**
+   * The grant that was consulted for this call and why it did not apply,
+   * the same shape the APPROVAL_REQUIRED result carries. Absent when no
+   * grant was on record for the capability.
+   */
+  grant?: ConsideredGrant;
   createdAt: number;
 };
 
@@ -70,6 +77,7 @@ export class ApprovalManager {
     preview: Change[],
     createdAt: number,
     stateVersion?: string,
+    grant?: ConsideredGrant,
   ): PendingAction {
     const snapshot = structuredClone(input);
     const storedPreview = structuredClone(preview) as Change[];
@@ -92,6 +100,7 @@ export class ApprovalManager {
       summary,
       preview: storedPreview,
       ...(stateVersion !== undefined ? { stateVersion } : {}),
+      ...(grant !== undefined ? { grant: structuredClone(grant) } : {}),
       createdAt,
     };
     this.records.set(id, { status: "PENDING", action });

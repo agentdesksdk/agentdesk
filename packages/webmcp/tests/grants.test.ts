@@ -407,6 +407,55 @@ describe("scoped authority grants: who may issue one", () => {
   });
 });
 
+describe("scoped authority grants: which non-applying grant an approval names", () => {
+  it("names the revoked grant when it was revoked after another was exhausted", async () => {
+    const log: Log = { refunds: [], credits: 0 };
+    const { runtime } = await booted(log);
+    const first = issue(runtime, { ...MANDATE, uses: 1, expiresAt: laterIso(AN_HOUR) });
+    await runtime.invoke("refund_shipping", { customerId: "CUS-104", amount: 5 });
+    expect(runtime.getGrant(first.id)?.state).toBe("exhausted");
+    const second = issue(runtime, { ...MANDATE, uses: 2, expiresAt: laterIso(AN_HOUR) });
+    expect(runtime.revokeGrant(second.id, OPERATOR).ok).toBe(true);
+
+    const asked = await runtime.invoke("refund_shipping", { customerId: "CUS-104", amount: 5 });
+
+    expect(asked.code).toBe("APPROVAL_REQUIRED");
+    expect(asked.data?.grant).toEqual({ id: second.id, outcome: "revoked" });
+  });
+
+  it("names the exhausted grant when it was spent after another was revoked", async () => {
+    const log: Log = { refunds: [], credits: 0 };
+    const { runtime } = await booted(log);
+    const first = issue(runtime, { ...MANDATE, uses: 2, expiresAt: laterIso(AN_HOUR) });
+    expect(runtime.revokeGrant(first.id, OPERATOR).ok).toBe(true);
+    const second = issue(runtime, { ...MANDATE, uses: 1, expiresAt: laterIso(AN_HOUR) });
+    await runtime.invoke("refund_shipping", { customerId: "CUS-104", amount: 5 });
+    expect(runtime.getGrant(second.id)?.state).toBe("exhausted");
+
+    const asked = await runtime.invoke("refund_shipping", { customerId: "CUS-104", amount: 5 });
+
+    expect(asked.code).toBe("APPROVAL_REQUIRED");
+    expect(asked.data?.grant).toEqual({ id: second.id, outcome: "exhausted" });
+  });
+
+  it("keeps a live grant the call fell outside of ahead of any spent one", async () => {
+    const log: Log = { refunds: [], credits: 0 };
+    const { runtime } = await booted(log);
+    // The first live match is the one spent, so the single-use grant goes first.
+    const spent = issue(runtime, { ...MANDATE, uses: 1, expiresAt: laterIso(AN_HOUR) });
+    const live = issue(runtime, { ...MANDATE, uses: 2, expiresAt: laterIso(AN_HOUR) });
+    await runtime.invoke("refund_shipping", { customerId: "CUS-104", amount: 5 });
+    expect([runtime.getGrant(spent.id)?.state, runtime.getGrant(live.id)?.state]).toEqual([
+      "exhausted",
+      "live",
+    ]);
+
+    const asked = await runtime.invoke("refund_shipping", { customerId: "CUS-105", amount: 5 });
+
+    expect(asked.data?.grant).toEqual({ id: live.id, outcome: "out_of_scope", field: "customerId" });
+  });
+});
+
 describe("scoped authority grants: the audit record", () => {
   it("records issue, application, non-application, and revocation as their own kinds", async () => {
     const log: Log = { refunds: [], credits: 0 };

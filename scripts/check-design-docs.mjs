@@ -137,6 +137,8 @@ const CLAIMS = [
   ["docs/architecture.md", /GRANT_REFUSED/, "absent", "a grant that does not apply falls through to approval; there is no refusal code"],
   ["docs/architecture.md", /A grant that does not apply changes nothing/, "present", "architecture states the fall-through"],
   ["docs/architecture.md", /grant_not_applied/, "present", "architecture names the audit kind for a grant that did not apply"],
+  ["docs/architecture.md", /PendingAction\.grant/, "present", "architecture says the pending action carries the considered grant"],
+  ["docs/architecture.md", /whose state most\s+recently changed is named/, "present", "architecture states the recency rule for the considered grant"],
 
   ["docs/architecture.md", /##\s*An approval is bound to a state digest/, "present", "architecture states the state digest contract"],
   ["docs/architecture.md", /requiresNewPreview/, "present", "architecture names the stale approval result"],
@@ -151,6 +153,34 @@ const CLAIMS = [
   ["docs/architecture.md", /VIEW_UNAVAILABLE/, "present", "architecture names the failed view refusal"],
   ["docs/architecture.md", /The human side is not projected/, "present", "architecture says the snapshot and audit stay whole"],
   ["docs/architecture.md", /shorter than eight characters is\s+protected structurally and by whole value/, "present", "architecture states the in-text matching limit of the backstop"],
+
+  ["docs/architecture.md", /##\s*A receipt says where its proof can be seen/, "present", "architecture states the evidence link contract"],
+  ["docs/architecture.md", /Authored wins; otherwise derived; otherwise empty/, "present", "architecture says where evidence comes from"],
+  ["docs/architecture.md", /A link crosses through the agent view like every other field/, "present", "architecture says evidence is projected"],
+  ["docs/architecture.md", /An\s+authored link is the value/, "present", "architecture says an authored evidence link points at the value"],
+  ["docs/architecture.md", /A derived link is page-level/, "present", "architecture says a derived evidence link points at the page"],
+
+  ["docs/architecture.md", /##\s*An approval is bound to a gesture/, "present", "architecture states the approval gesture contract"],
+  ["docs/architecture.md", /single use/, "present", "architecture says a token is single use"],
+  ["docs/architecture.md", /Migration without a flag day/, "present", "architecture says how existing approve calls migrate"],
+  ["docs/architecture.md", /The seam WebAuthn plugs into/, "present", "architecture names the seam a stronger gesture uses"],
+  ["docs/architecture.md", /untrusted_content_ignored/, "present", "architecture names the audit half of the adversarial note"],
+  ["docs/architecture.md", /Minting outside an activation throws/, "present", "architecture says a token requires a user activation"],
+  ["docs/architecture.md", /It does not prove which human/, "present", "architecture states what the token does not prove"],
+  ["docs/architecture.md", /hands its runtime to untrusted script/, "present", "architecture says a page that exposes its runtime has no gesture guarantee"],
+  ["docs/architecture.md", /only the flagged reads between the request and the\s+approval count/, "present", "architecture states the scope of untrusted_content_ignored"],
+
+  ["docs/architecture.md", /##\s*An unknown outcome survives a restart/, "present", "architecture states the durability contract"],
+  ["docs/architecture.md", /refused at load and audited/, "present", "architecture says a tampered record is refused rather than trusted"],
+  ["docs/architecture.md", /cause: "after_restart"/, "present", "architecture says a claimed key is refused after reload"],
+  ["docs/architecture.md", /leaves the record open/, "present", "architecture says an unrebuildable artifact keeps the record open"],
+  ["docs/architecture.md", /byte for byte what it was/, "present", "architecture says a runtime without persistence is unchanged"],
+  ["docs/reviews/2026-08-31-accepted-unreconciled-records-are-not-durable.md", /Status: \*\*RESOLVED\*\*/, "present", "the accepted-risk record is marked resolved"],
+  ["docs/architecture.md", /integrity check against corruption\s+and accidental change, not authentication/, "present", "architecture says what the seal is and is not"],
+  ["docs/architecture.md", /the seal proves the evidence did not change on disk/, "absent", "the seal is not described as proof against an adversary"],
+  ["docs/architecture.md", /never replayed and never re-executed/, "present", "architecture states refusal after restart as a decided limit"],
+  ["docs/architecture.md", /claimed at the request, not at the\s+execution the approval releases later/, "present", "architecture says a key on the approval path is claimed at the request"],
+  ["docs/architecture.md", /The runtime never\s+calls `clear`/, "present", "architecture says clear belongs to the page's reset"],
   ["docs/architecture.md", /adoptHumanActor/, "present", "architecture names the identity boundary a grant issuer crosses"],
 ];
 

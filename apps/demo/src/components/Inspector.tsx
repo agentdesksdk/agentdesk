@@ -5,6 +5,7 @@ import { agentdesk, webmcpNative } from "../runtime/agentdesk.ts";
 import { useAnnouncer } from "./announcer.ts";
 import { authorityClauses } from "./grant-text.ts";
 import { useRuntime } from "./hooks.ts";
+import { UnreconciledPanel } from "./UnreconciledPanel.tsx";
 
 /**
  * How many application tools the agent can call right now, bootstrap aside.
@@ -128,6 +129,8 @@ export function Inspector() {
           </span>
         </div>
       </div>
+
+      <UnreconciledPanel />
 
       <div className="rail-section">
         <h3>Route a task</h3>

@@ -26,6 +26,7 @@ export {
 } from "./capability.ts";
 export { CapabilityCatalog } from "./catalog.ts";
 export {
+  digestOf,
   stateDigest,
   StagedCommitIndeterminate,
   StagedCommitRefused,
@@ -134,6 +135,26 @@ export {
   type PendingAction,
 } from "./approval.ts";
 export type { AuditEvent, AuditListener } from "./audit.ts";
+export {
+  indexedDbPersistence,
+  memoryPersistence,
+  sealOf,
+  verifyRecord,
+  type IndexedDbLike,
+  type IndexedDbPersistenceOptions,
+  type PersistedArtifact,
+  type PersistedIdempotencyClaim,
+  type PersistedRecord,
+  type PersistenceAdapter,
+} from "./persistence.ts";
+export {
+  GESTURE_TTL_MS,
+  GestureStore,
+  isApprovalGesture,
+  type ApprovalGesture,
+  type GestureBinding,
+  type GestureVerdict,
+} from "./gesture.ts";
 export { GrantStore, matchesScope, parseGrantRequest, parseScope } from "./grants.ts";
 export type {
   Grant,
@@ -175,5 +196,7 @@ export {
   validationFailed,
   viewUnavailable,
   type AffectedObject,
+  type AuthoredEvidenceLink,
+  type EvidenceLink,
   type Receipt,
 } from "./results.ts";

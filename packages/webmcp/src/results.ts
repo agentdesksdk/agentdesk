@@ -204,6 +204,31 @@ export type AffectedObject = {
 };
 
 /**
+ * Where a person can go and look. `route` is a page in the application,
+ * `reveal` an opaque anchor the application registered on one of its own
+ * elements, never a selector. This is exactly what a page needs to navigate
+ * and highlight, and nothing more.
+ */
+export type AuthoredEvidenceLink = {
+  label: string;
+  route: string;
+  reveal?: string;
+  /** Set by the runtime, never by a capability; the type says so. */
+  source?: never;
+};
+
+/**
+ * A link as the runtime records it. `source` says which it is: an authored
+ * link points at the value that changed, because the author knew where it
+ * lives; a derived link points at the write's page, because a presentation
+ * hint is all the runtime had. A consequential capability should author
+ * its links.
+ */
+export type EvidenceLink = Omit<AuthoredEvidenceLink, "source"> & {
+  source: "authored" | "derived";
+};
+
+/**
  * Application-authored evidence of a completed write: which entity
  * changed, field-level before/after, and whether it can be undone. The
  * runtime carries receipts verbatim into the tool result, the audit
@@ -215,6 +240,11 @@ export type Receipt = {
   undoable?: boolean;
   note?: string;
   affected?: AffectedObject[];
+  /**
+   * Where the proof of this write can be seen. Authored here, or derived by
+   * the runtime from the capability's presentation hints when absent.
+   */
+  evidence?: EvidenceLink[];
 };
 
 const RECEIPT = Symbol.for("agentdesk.receipt");
@@ -225,12 +255,44 @@ type ReceiptEnvelope = {
   value: unknown;
 };
 
-/** Wraps a handler's return value with a verifiable change receipt. */
-export function receipt(spec: Receipt & { result: unknown }): unknown {
+/**
+ * Wraps a handler's return value with a verifiable change receipt. Authored
+ * evidence is checked here, at authoring time, because a link a page cannot
+ * follow is an author's mistake and the author is the one who can fix it.
+ */
+export function receipt(
+  spec: Omit<Receipt, "evidence"> & {
+    evidence?: AuthoredEvidenceLink[];
+    result: unknown;
+  },
+): unknown {
   const { result, ...rest } = spec;
+  if (rest.evidence !== undefined) {
+    if (!Array.isArray(rest.evidence)) {
+      throw new TypeError("receipt evidence must be an array of links");
+    }
+    for (const link of rest.evidence) {
+      if (typeof link !== "object" || link === null) {
+        throw new TypeError("a receipt evidence link must be an object");
+      }
+      if (typeof link.label !== "string" || link.label.trim() === "") {
+        throw new TypeError("a receipt evidence link needs a non-empty label");
+      }
+      if (typeof link.route !== "string" || !link.route.startsWith("/")) {
+        throw new TypeError(
+          `a receipt evidence link needs a route starting with "/", received ${JSON.stringify(link.route)}`,
+        );
+      }
+      if (link.reveal !== undefined && typeof link.reveal !== "string") {
+        throw new TypeError("a receipt evidence link's reveal must be a string when present");
+      }
+    }
+  }
   const envelope: ReceiptEnvelope = {
     [RECEIPT]: true,
-    receipt: rest,
+    // The author's links are carried as written; the runtime stamps their
+    // source when it settles the receipt, and nothing an author set survives.
+    receipt: rest as Receipt,
     value: result,
   };
   return envelope;
@@ -289,10 +351,17 @@ export function policyDenied(
   );
 }
 
+/**
+ * `cause` says why the key cannot be honoured. `different_input` is the
+ * live conflict. `after_restart` is a key claimed before a restart: the
+ * claim survived but its result did not, and the write may have landed, so
+ * the call is refused rather than repeated.
+ */
 export function idempotencyConflict(
   capability: string,
   key: string,
   situation: Refusal,
+  cause: "different_input" | "after_restart" = "different_input",
 ): ToolResult {
   return coded(
     "IDEMPOTENCY_CONFLICT",
@@ -302,9 +371,15 @@ export function idempotencyConflict(
         code: "IDEMPOTENCY_CONFLICT",
         capability,
         idempotency_key: key,
+        cause,
         reason:
-          "This idempotency key was already used for this capability with different input.",
-        next: "Use a new idempotency_key, or resend the original input to get the original result.",
+          cause === "after_restart"
+            ? "This idempotency key was already used for this capability before a restart. Its result is not available and the write may have landed, so the call is refused rather than repeated."
+            : "This idempotency key was already used for this capability with different input.",
+        next:
+          cause === "after_restart"
+            ? `Ask a person to query the receipts for ${capability}; the receipt in evidence, when there is one, is the earlier write. Use a new idempotency_key only once you know it did not land.`
+            : "Use a new idempotency_key, or resend the original input to get the original result.",
       },
       situation,
     ),

@@ -81,7 +81,7 @@ and executed under plain Node, and the design doc check passed.
 | P1 | RESOLVED | [The audit and UI call an indeterminate plan failed](2026-08-31-p1-indeterminate-plan-audit-says-failed.md) |
 | P2 | RESOLVED | [Start does not validate the required reconciliation hook](2026-08-31-p2-start-does-not-validate-reconcile-hook.md) |
 
-| — | ACCEPTED | [Unreconciled records and artifacts do not survive a restart](2026-08-31-accepted-unreconciled-records-are-not-durable.md) |
+| — | RESOLVED | [Unreconciled records and artifacts do not survive a restart](2026-08-31-accepted-unreconciled-records-are-not-durable.md) |
 | P2 | RESOLVED | [Durability docs overclaim record reconstruction](2026-08-31-p2-durability-docs-overclaim-record-reconstruction.md) |
 
 | P1 | RESOLVED | [A custom scorer can bypass eligibility](2026-08-31-p1-custom-scorer-bypasses-eligibility.md) |

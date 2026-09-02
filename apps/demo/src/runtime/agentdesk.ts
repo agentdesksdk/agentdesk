@@ -1,5 +1,7 @@
 import {
   createAgentDeskRuntime,
+  type PersistenceAdapter,
+  type RegisterToolFn,
   type Actor,
   type AppContext,
   type Exposure,
@@ -7,7 +9,8 @@ import {
 } from "@agentdesk/webmcp";
 import { capabilities } from "../capabilities/index.ts";
 import { stagingAdapter } from "../capabilities/staged.ts";
-import { getState } from "../data/store.ts";
+import { getState, resetStore } from "../data/store.ts";
+import { createDemoPersistence } from "./persistence.ts";
 
 type ModelContextHost = { modelContext?: { registerTool?: unknown } };
 
@@ -31,6 +34,28 @@ export const webmcpNative =
  * surface, counts, and schema bytes remain observable; the UI labels this
  * state "simulated".
  */
+/** The page's own store across reloads: IndexedDB in a browser, memory elsewhere. */
+export const demoPersistence = createDemoPersistence();
+
+/**
+ * A runtime built the way the page builds its own, so a test can start two
+ * on one persistence adapter and stand in for a reload.
+ */
+export function createMeridianRuntime(options: {
+  persistence?: PersistenceAdapter;
+  registerTool?: RegisterToolFn;
+  approvalGesture?: "optional" | "required";
+}) {
+  return createAgentDeskRuntime({
+    capabilities,
+    registerTool: options.registerTool ?? (async () => {}),
+    actor: { id: "agent", name: "Agent", kind: "agent" },
+    staging: stagingAdapter,
+    ...(options.persistence !== undefined ? { persistence: options.persistence } : {}),
+    ...(options.approvalGesture !== undefined ? { approvalGesture: options.approvalGesture } : {}),
+  });
+}
+
 export const agentdesk = createAgentDeskRuntime({
   capabilities,
   ...(webmcpNative ? {} : { registerTool: async () => {} }),
@@ -39,6 +64,12 @@ export const agentdesk = createAgentDeskRuntime({
   // describes a change and the code that performs it are not both supplied
   // by whoever declared the operation.
   staging: stagingAdapter,
+  // An unknown outcome and a claimed idempotency key survive a reload.
+  persistence: demoPersistence.adapter,
+  // An approval must carry a token minted on a click. The card's handler
+  // mints one inside the click; nothing that only asserts an identity is
+  // accepted by this instance.
+  approvalGesture: "required",
   // Cheap revision over the mutable parts of the store. A plan approved
   // against one revision refuses to commit against another.
   revision: () => {
@@ -76,6 +107,34 @@ export const agentdesk = createAgentDeskRuntime({
 });
 
 void agentdesk.start();
+
+/**
+ * Reset Demo. The runtime's own reset keeps unreconciled records on purpose,
+ * and the persisted store is the page's, so a reset settles each open
+ * record as the operator (the seed the store returns to holds none of it),
+ * empties the persisted store, and only then resets the document and the
+ * runtime. A record that cannot be settled is kept and named.
+ */
+export async function resetDemo(): Promise<{ settled: number; kept: string[] }> {
+  const kept: string[] = [];
+  let settled = 0;
+  for (const record of agentdesk.listUnreconciled()) {
+    const resolution =
+      record.kind === "cleanup_failed"
+        ? ({ kind: "cleanup_disposed" } as const)
+        : ({ kind: "commit_not_applied" } as const);
+    const outcome = agentdesk.reconcile(record.id, resolution, OPERATOR);
+    if (outcome.ok) {
+      settled += 1;
+    } else {
+      kept.push(`${record.id}: ${outcome.reason}`);
+    }
+  }
+  await demoPersistence.adapter.clear();
+  resetStore();
+  await agentdesk.reset();
+  return { settled, kept };
+}
 
 let cached: RuntimeSnapshot = agentdesk.getSnapshot();
 agentdesk.subscribe((snapshot) => {
@@ -116,10 +175,19 @@ export function contextForPath(pathname: string): {
   };
 }
 
+/**
+ * What the page exposes for inspection. Minting is deliberately not on it:
+ * a token proves a call made during a user activation by code with access
+ * to the runtime, so only the approval card's click handler closes over
+ * `issueApprovalGesture`, and a script that reaches `window.agentdesk`
+ * cannot mint.
+ */
+const { issueApprovalGesture: _mintOnlyFromTheCard, ...inspectable } = agentdesk;
+
 declare global {
   interface Window {
-    agentdesk: typeof agentdesk;
+    agentdesk: Omit<typeof agentdesk, "issueApprovalGesture">;
   }
 }
 
-window.agentdesk = agentdesk;
+window.agentdesk = inspectable;

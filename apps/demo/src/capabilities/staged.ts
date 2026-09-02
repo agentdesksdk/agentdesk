@@ -17,7 +17,7 @@ import {
   stage,
   stagingScope,
 } from "../data/store.ts";
-import type { Branch } from "../data/types.ts";
+import type { Branch, DemoState } from "../data/types.ts";
 
 /**
  * How an approved branch reaches the live document.
@@ -45,9 +45,24 @@ export type StagedBranch = {
   readonly capability: string;
   readonly mode: CommitMode;
   readonly branch: Branch;
+  /** The input the handler ran with, so the fork can be rebuilt by name. */
+  readonly input: Record<string, unknown>;
+  /**
+   * The registered operation this branch came from. A function, so the
+   * artifact does not clone: a persisted record keeps the identity below
+   * rather than two copies of the document, and `rebuildBranch` re-stages.
+   */
+  readonly operation: Operation;
   /** What the handler returned, carried so the commit hands back its receipt. */
   readonly result: unknown;
   settled: boolean;
+};
+
+/** What a persisted record keeps of a fork: enough to stage it again. */
+export type BranchIdentity = {
+  capability: string;
+  input: Record<string, unknown>;
+  at: number;
 };
 
 /**
@@ -65,7 +80,39 @@ onReset(() => {
     staged.settled = true;
     live.delete(staged);
   }
+  faults.clear();
 });
+
+/**
+ * Commits armed to write and then throw, by operation. The fixture for an
+ * unknown outcome: the runtime cannot tell a commit that failed before its
+ * write from one that failed after, so it records the outcome as
+ * unreconciled and a person settles it.
+ */
+const faults = new Map<string, string>();
+
+const DEFAULT_FAULT =
+  "The connection dropped after the write was sent; the commit's outcome is unknown.";
+
+/** Test and demo fixture: the next commit of `operation` writes, then throws. */
+export function armCommitFault(operation: string, detail: string = DEFAULT_FAULT): void {
+  faults.set(operation, detail);
+}
+
+/** The fixture stood down: a refused call never reaches its commit, so an armed fault would wait for the next one. */
+export function disarmCommitFault(operation: string): void {
+  faults.delete(operation);
+}
+
+/** The write has landed; a fault armed for this operation now fires, once. */
+function landed(capability: string, state: DemoState): void {
+  land(state);
+  const fault = faults.get(capability);
+  if (fault !== undefined) {
+    faults.delete(capability);
+    throw new Error(fault);
+  }
+}
 
 /** What the open branches propose for one entity. */
 export function stagedChangesFor(collection: string, key: string): Change[] {
@@ -96,6 +143,32 @@ export function projectedConflicts(capability: string): MergeConflict[] {
 
 export function openProposalCount(): number {
   return live.size;
+}
+
+/**
+ * Rebuilds a fork from the identity a persisted record kept, against the
+ * document as it is now. Not added to the live set: it exists to be
+ * reconciled, not approved. Undefined when the identity is not one this
+ * adapter wrote or the handler refuses the input today.
+ */
+export function rebuildBranch(identity: unknown): StagedBranch | undefined {
+  if (typeof identity !== "object" || identity === null) {
+    return undefined;
+  }
+  const { capability, input, at } = identity as Partial<BranchIdentity>;
+  if (typeof capability !== "string" || typeof input !== "object" || input === null || typeof at !== "number") {
+    return undefined;
+  }
+  const owned = registry.get(capability);
+  if (owned === undefined) {
+    return undefined;
+  }
+  try {
+    const { result, branch } = stage(capability, () => owned.run(input), at);
+    return { capability, mode: owned.mode, branch, input, operation: owned, result, settled: false };
+  } catch {
+    return undefined;
+  }
 }
 
 function stale(capability: string, detail: string): never {
@@ -167,6 +240,8 @@ export const stagingAdapter: StagingAdapter<StagedBranch> = {
       capability: operation,
       mode: owned.mode,
       branch,
+      input,
+      operation: owned,
       result,
       settled: false,
     };
@@ -193,7 +268,7 @@ export const stagingAdapter: StagingAdapter<StagedBranch> = {
           "Re-running this action against current state produces a different change than the one that was approved.",
         );
       }
-      land(mergeBranch(fresh.staged.branch, getCommittedState()).state);
+      landed(staged.capability, mergeBranch(fresh.staged.branch, getCommittedState()).state);
       return fresh.result;
     }
 
@@ -206,11 +281,18 @@ export const stagingAdapter: StagingAdapter<StagedBranch> = {
           .join(", ")} after this was proposed, so approving it would apply part of the reviewed change and drop the rest.`,
       );
     }
-    land(state);
+    landed(staged.capability, state);
     return staged.result;
   },
 
   release,
+
+  /** The durable key for a fork, since the fork itself does not clone. */
+  identify: (staged): BranchIdentity => ({
+    capability: staged.capability,
+    input: staged.input,
+    at: staged.branch.at,
+  }),
 
   /**
    * A human went and looked. Whatever they found, this branch is finished:

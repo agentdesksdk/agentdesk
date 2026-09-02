@@ -7,8 +7,7 @@ import {
   useLocation,
   useParams,
 } from "react-router-dom";
-import { resetStore } from "../data/store.ts";
-import { agentdesk, contextForPath } from "../runtime/agentdesk.ts";
+import { agentdesk, contextForPath, resetDemo } from "../runtime/agentdesk.ts";
 import { ActivityPanel } from "./ActivityPanel.tsx";
 import { AgentPresence, type PresenceMode } from "./AgentPresence.tsx";
 import { ApprovalCards } from "./ApprovalCards.tsx";
@@ -95,8 +94,7 @@ export function AppShell() {
         </Link>
         <button
           onClick={() => {
-            resetStore();
-            void agentdesk.reset();
+            void resetDemo();
           }}
         >
           Reset Demo

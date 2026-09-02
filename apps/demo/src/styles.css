@@ -1347,3 +1347,95 @@ input[type="text"]:focus {
     grid-template-columns: 92px 1fr;
   }
 }
+/* An unknown outcome in the rail: every field as text, two ways to settle it. */
+.unreconciled-record {
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  background: var(--warn-soft);
+}
+
+.unreconciled-record .record-head {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.unreconciled-record .record-head .cap {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.unreconciled-record .stat-row {
+  font-size: 12px;
+  padding: 1px 0;
+}
+
+.unreconciled-record .num.key {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.unreconciled-record .detail {
+  margin: 6px 0;
+  color: var(--ink-soft);
+}
+
+.unreconciled-record h4 {
+  margin: 6px 0 2px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+}
+
+.unreconciled-record .change-row {
+  grid-template-columns: auto auto 1fr;
+  grid-template-areas:
+    "field field field"
+    "before arrow after";
+  gap: 2px 6px;
+}
+
+.unreconciled-record .change-row .field {
+  grid-area: field;
+}
+
+.unreconciled-record .change-row .before {
+  grid-area: before;
+}
+
+.unreconciled-record .change-row .arrow {
+  grid-area: arrow;
+}
+
+.unreconciled-record .change-row .after {
+  grid-area: after;
+}
+
+.unreconciled-record .record-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.unreconciled-panel .record-refusal {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--danger);
+}
+
+.durability-card .durability-result {
+  margin: 10px 0 0;
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+
+.durability-card .durability-result:empty {
+  display: none;
+}

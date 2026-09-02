@@ -24,7 +24,15 @@ export type Evidence =
   | { kind: "receipt"; id: string }
   | { kind: "execution"; id: string }
   | { kind: "approval"; id: string }
-  | { kind: "record"; id: string };
+  | { kind: "record"; id: string }
+  /** A place in the application a person can navigate to and highlight. */
+  | {
+      kind: "link";
+      label: string;
+      route: string;
+      reveal?: string;
+      source: "authored" | "derived";
+    };
 
 /**
  * What the agent can do next, computed by the runtime from the same

@@ -57,7 +57,20 @@ import {
   type PlannedOperation,
   type VerificationResult,
 } from "./plan.ts";
-import type { Receipt } from "./results.ts";
+import type { EvidenceLink, Receipt } from "./results.ts";
+import {
+  sealOf,
+  verifyRecord,
+  type PersistedArtifact,
+  type PersistedRecord,
+  type PersistenceAdapter,
+} from "./persistence.ts";
+import {
+  GestureStore,
+  isApprovalGesture,
+  type ApprovalGesture,
+  type GestureBinding,
+} from "./gesture.ts";
 import {
   ReceiptStore,
   type ReceiptQuery,
@@ -201,8 +214,15 @@ export type AgentDeskRuntime = {
    * `by` must be a human. A consequential action's approval record exists to
    * say which person authorized it, and the ambient actor is the agent.
    */
-  approve: (actionId: string, by?: Actor) => Promise<ToolResult>;
+  approve: (actionId: string, by?: Actor | ApprovalGesture) => Promise<ToolResult>;
   reject: (actionId: string, by?: Actor) => ToolResult;
+  /**
+   * Mints a single-use token on a human click. Called by page code from
+   * its click handler and handed to `approve` or `approvePlan` in place of
+   * an asserted identity. The issuer must be a human; an agent cannot mint
+   * one, and the runtime throws where it throws for any non-human issuer.
+   */
+  issueApprovalGesture: (binding: GestureBinding, by?: Actor) => ApprovalGesture;
 
   /**
    * Staged outcomes nobody can call settled: a commit that threw after it
@@ -235,7 +255,7 @@ export type AgentDeskRuntime = {
   /** Refuses unless the resolved approver is a human. */
   approvePlan: (
     planId: string,
-    by?: Actor,
+    by?: Actor | ApprovalGesture,
   ) => { ok: true; plan: OperationPlan } | { ok: false; reason: string };
   rejectPlan: (
     planId: string,
@@ -346,6 +366,24 @@ export function createAgentDeskRuntime<S = unknown>(options: {
    * own `agentView` narrows this further and never widens it.
    */
   agentView?: AgentView;
+  /**
+   * Whether an approval must carry a gesture token. `optional` accepts an
+   * asserted human identity as before, so existing callers keep working
+   * while page code migrates to minting tokens; `required` refuses an
+   * approval that does not carry a valid token.
+   */
+  approvalGesture?: "optional" | "required";
+  /**
+   * How the runtime knows a user activation is in progress when a token is
+   * minted. Defaults to `navigator.userActivation.isActive`, and refuses
+   * when there is no navigator; Node and jsdom tests inject one.
+   */
+  gesture?: { userActivation?: () => boolean };
+  /**
+   * Where unreconciled records and idempotency claims survive a restart.
+   * Absent means in memory, which is exactly what the runtime did before.
+   */
+  persistence?: PersistenceAdapter;
 }): AgentDeskRuntime {
   const audit = new AuditBus();
   const approvals = new ApprovalManager();
@@ -356,6 +394,42 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   // for an approval, so a grant can narrow what needs a human and never
   // widen what policy allows.
   const grants = new GrantStore();
+  // Tokens minted on a human click and consumed at approve time. A token
+  // stands for a gesture the runtime can verify, where an asserted
+  // identity was a claim it had to take on trust.
+  const gestures = new GestureStore();
+  const gestureMode: "optional" | "required" = options.approvalGesture ?? "optional";
+  /**
+   * Whether a person is interacting right now. A token minted outside a
+   * user activation proves nothing a plain identity did not, so minting
+   * asks this first. The default reads the browser's own answer and says
+   * no wherever there is none; a seam that throws counts as no.
+   */
+  const userActivation: () => boolean = options.gesture?.userActivation ?? (() => {
+    const host = globalThis as { navigator?: { userActivation?: { isActive?: unknown } } };
+    return host.navigator?.userActivation?.isActive === true;
+  });
+  /**
+   * Flagged reads, in order. Each approval remembers the tick it was
+   * requested at, and at approve time only the reads after that tick count,
+   * so a note read this morning does not mark an approval requested this
+   * afternoon, and two pending approvals each answer for their own window.
+   */
+  let untrustedTick = 0;
+  const untrustedReads: Array<{ name: string; tick: number }> = [];
+  const requestedAtTick = new Map<string, number>();
+  const UNTRUSTED_READS_LIMIT = 200;
+
+  function untrustedSince(key: string): string[] {
+    const since = requestedAtTick.get(key) ?? Number.POSITIVE_INFINITY;
+    const names = new Set<string>();
+    for (const read of untrustedReads) {
+      if (read.tick > since) {
+        names.add(read.name);
+      }
+    }
+    return [...names].sort(compareNames);
+  }
   // Staged proposals live here, keyed by the runtime identity that owns
   // each one, never by business input. Disposal is this store's job on
   // every path that resolves an owner without committing it.
@@ -363,6 +437,147 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   // Staged outcomes nobody can call settled: a commit that threw after it may
   // have written, and a disposal that failed and left the artifact open.
   const unreconciled = new UnreconciledStore();
+  /**
+   * Where records and claims outlive this process. Absent means in memory
+   * and nothing below runs, so a runtime that declares none is what it was.
+   * Saves are queued in order and never awaited by the path that made the
+   * record: a persistence adapter that throws cannot change an outcome,
+   * only lose its own copy, and says so on the console.
+   */
+  const persistence: PersistenceAdapter | undefined = options.persistence;
+  let persisting: Promise<void> = Promise.resolve();
+  let persistsInFlight = 0;
+  function persist(work: () => void | Promise<void>): void {
+    if (persistence === undefined) {
+      return;
+    }
+    // Started at once when nothing is in flight, so a synchronous adapter
+    // has taken effect by the time the caller returns, and chained behind
+    // an asynchronous one still running, so saves land in order.
+    const start = (): Promise<void> => {
+      persistsInFlight += 1;
+      let settled: Promise<void>;
+      try {
+        settled = Promise.resolve(work()).then(() => undefined);
+      } catch (err) {
+        settled = Promise.reject(err);
+      }
+      return settled
+        .catch((err) => {
+          console.error("agentdesk persistence adapter threw", err);
+        })
+        .finally(() => {
+          persistsInFlight -= 1;
+        });
+    };
+    persisting = persistsInFlight === 0 ? start() : persisting.then(start);
+  }
+  /**
+   * A loaded artifact that is not the live object: the persisted
+   * description, kept until `reconcile` asks the adapter to rebuild it.
+   */
+  const PERSISTED = Symbol.for("agentdesk.persisted-artifact");
+  type PersistedHolder = { [PERSISTED]: PersistedRecord };
+  function isPersistedHolder(value: unknown): value is PersistedHolder {
+    return typeof value === "object" && value !== null && PERSISTED in value;
+  }
+  /**
+   * Idempotency keys claimed before a restart, by slot: the input they were
+   * claimed for, and the receipt the write recorded when it recorded one.
+   * The result is gone; the receipt is what a refusal can point at.
+   */
+  const restoredClaims = new Map<string, { fingerprint: string; receiptId?: string }>();
+
+  /**
+   * How an artifact is written down. The object itself when it clones; the
+   * staging adapter's durable key when it does not; `lost` when it has
+   * neither. A lost artifact still surfaces and still guards, and only a
+   * resolver that can rebuild from the record alone can close it.
+   */
+  function describeArtifact(artifact: unknown): PersistedArtifact {
+    try {
+      return { kind: "value", value: structuredClone(artifact) };
+    } catch {
+      const identify = (options.staging as StagingAdapter<unknown> | undefined)?.identify;
+      if (identify !== undefined) {
+        try {
+          return { kind: "reference", reference: structuredClone(identify(artifact)) };
+        } catch {
+          return { kind: "lost" };
+        }
+      }
+      return { kind: "lost" };
+    }
+  }
+
+  /** Writes an open record down, with everything the runtime knows about it. */
+  function persistOpen(id: string): void {
+    if (persistence === undefined) {
+      return;
+    }
+    const found = unreconciled.open(id);
+    if (found === undefined) {
+      return;
+    }
+    const artifact = isPersistedHolder(found.artifact)
+      ? found.artifact[PERSISTED].artifact
+      : describeArtifact(found.artifact);
+    // The live record's own field order is kept, so the record that comes
+    // back serializes byte for byte as the one listed before the restart.
+    const unsealed: Omit<PersistedRecord, "seal"> = {
+      version: 1,
+      ...found.record,
+      changes: [...found.record.changes],
+      artifact,
+    };
+    const record: PersistedRecord = { ...unsealed, seal: sealOf(unsealed) };
+    persist(() => persistence.saveRecord(record));
+  }
+
+  /**
+   * Puts back what the adapter kept. A record that fails verification is
+   * refused and audited rather than trusted; a claim is remembered by slot
+   * so the same key is refused rather than replayed.
+   */
+  async function rehydrate(): Promise<void> {
+    if (persistence === undefined) {
+      return;
+    }
+    const loaded = await persistence.loadOpenRecords();
+    for (const candidate of loaded) {
+      const verified = verifyRecord(candidate);
+      if (!verified.ok) {
+        const id =
+          typeof candidate === "object" && candidate !== null && "id" in candidate
+            ? String((candidate as { id: unknown }).id)
+            : "unknown";
+        audit.append({
+          kind: "staged_reconcile_failed",
+          capability:
+            typeof candidate === "object" && candidate !== null && "capability" in candidate
+              ? String((candidate as { capability: unknown }).capability)
+              : "unknown",
+          recordId: id,
+          detail: `refused at load: ${verified.reason}`,
+          at: now(),
+        });
+        continue;
+      }
+      const { version: _version, seal: _seal, artifact, ...fields } = verified.record;
+      const record: Unreconciled = { ...fields, changes: [...fields.changes] };
+      const holder: unknown =
+        artifact.kind === "value" ? artifact.value : { [PERSISTED]: verified.record };
+      unreconciled.hydrate(record, holder);
+    }
+    for (const claim of await persistence.loadIdempotencyClaims()) {
+      if (claim.version === 1 && typeof claim.slot === "string") {
+        restoredClaims.set(claim.slot, {
+          fingerprint: claim.fingerprint,
+          ...(typeof claim.receiptId === "string" ? { receiptId: claim.receiptId } : {}),
+        });
+      }
+    }
+  }
   // Detached and frozen on the way in, so a caller mutating the object it
   // handed over cannot retroactively rewrite provenance already recorded,
   // and so a getter-backed property is read exactly once. The clone failure
@@ -453,6 +668,37 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     return adopted;
   }
 
+  /**
+   * Who is approving, and how the runtime knows. A gesture token is
+   * verified and consumed here and yields the human who minted it; an
+   * asserted identity is parsed as before, or refused outright when the
+   * runtime requires a gesture. This is the seam a WebAuthn assertion
+   * plugs into: a second gesture kind, a second verifier, the same callers.
+   */
+  function resolveApprover(
+    supplied: Actor | ApprovalGesture | undefined,
+    binding: GestureBinding,
+    refusal: string,
+  ):
+    | { ok: true; actor: HumanActor; gestureId?: string }
+    | { ok: false; reason: string } {
+    if (isApprovalGesture(supplied)) {
+      const verdict = gestures.consume(supplied, binding, now());
+      if (!verdict.ok) {
+        return verdict;
+      }
+      return { ok: true, actor: deepFreeze(verdict.by), gestureId: verdict.id };
+    }
+    if (gestureMode === "required") {
+      return {
+        ok: false,
+        reason:
+          "an approval must carry a token issued on a human click through issueApprovalGesture; an asserted identity is not accepted by this runtime",
+      };
+    }
+    return resolveHumanActor(supplied, refusal);
+  }
+
   let actor: Actor | undefined = adoptActor(options.actor);
   const adapter =
     options.adapter ??
@@ -503,6 +749,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   };
   const IDEMPOTENCY_LIMIT = 512;
   const idempotency = new Map<string, IdempotencyEntry>();
+  /**
+   * Keys claimed at an approval request, by action id, so the execution
+   * the approval releases settles the same claim and records its receipt,
+   * and a rejection settles it with the rejection.
+   */
+  const approvalClaims = new Map<string, Extract<IdempotencyClaim, { kind: "won" }>>();
 
   /**
    * Makes room for one more key by evicting settled entries oldest-first.
@@ -1023,6 +1275,95 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     };
   }
 
+  /**
+   * Where the proof of a write can be seen when the author did not say. A
+   * capability's `presentation.route` and `reveal` already name the page
+   * and the anchor the demo navigates to for the write, so they are the
+   * derivation, with the receipt's entity as the label. Nothing is guessed
+   * from the entity text or the field names: a capability with no route
+   * declared has no derived link, and its receipt says so with an empty
+   * list rather than a link that goes nowhere.
+   */
+  function deriveEvidence(
+    capability: Capability,
+    input: Record<string, unknown>,
+    entity: string,
+  ): EvidenceLink[] {
+    const spec = capability.presentation;
+    if (spec?.route === undefined) {
+      return [];
+    }
+    let route: string | undefined;
+    try {
+      route = spec.route(input, context);
+    } catch {
+      return [];
+    }
+    if (typeof route !== "string" || !route.startsWith("/")) {
+      return [];
+    }
+    return [
+      {
+        label: entity,
+        route,
+        ...(spec.reveal !== undefined ? { reveal: spec.reveal } : {}),
+        source: "derived",
+      },
+    ];
+  }
+
+  /**
+   * Stamps the source on what an author wrote. The runtime sets it and
+   * nothing the author put there survives, so `source` always says who
+   * knew where the proof lives.
+   */
+  function authored(links: readonly EvidenceLink[]): EvidenceLink[] {
+    return links.map((link) => ({
+      label: link.label,
+      route: link.route,
+      ...(link.reveal !== undefined ? { reveal: link.reveal } : {}),
+      source: "authored",
+    }));
+  }
+
+  /**
+   * A link crosses only if nothing it names is hidden. Its `reveal` is
+   * treated as a field name and passed through the view like a change; its
+   * route is checked segment by segment against the hidden values and then
+   * through the same two tiers as any text; its label too. A link with a
+   * hole in it navigates nowhere, so it is dropped rather than withheld.
+   */
+  function linksThroughView(
+    links: readonly EvidenceLink[],
+    capability: Capability | undefined,
+    viewer: Actor | undefined,
+  ): EvidenceLink[] {
+    if (runtimeView === undefined && capability?.agentView === undefined) {
+      return links.map((link) => ({ ...link }));
+    }
+    const hidden = hiddenStrings(capability, viewer);
+    const kept: EvidenceLink[] = [];
+    for (const link of links) {
+      if (link.reveal !== undefined) {
+        const probe = throughView({ [link.reveal]: true }, capability, viewer);
+        if (!isPlainRecord(probe) || !(link.reveal in probe)) {
+          continue;
+        }
+      }
+      if (link.route.split("/").some((segment) => hidden.includes(segment))) {
+        continue;
+      }
+      if (
+        withhold(link.route, hidden) !== link.route ||
+        withhold(link.label, hidden) !== link.label
+      ) {
+        continue;
+      }
+      kept.push({ ...link });
+    }
+    return kept;
+  }
+
   /** Records a failed view and builds the refusal that stands in for the value. */
   function viewFailed(
     capability: Capability | undefined,
@@ -1291,6 +1632,25 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       return policyDenied(capability.name, decision.reason, refusal(capability));
     }
 
+    // A previous call of this exact operation may already have written. A
+    // repeat would apply it twice, so it is refused until a human has said
+    // what happened, on every path: the approval path was reachable around
+    // this guard, so a repeat after a restart was asked for approval again
+    // and, once approved, executed a second time with the record still open.
+    const unresolved = unreconciled.forOperation(
+      operationKey(capability.name, input),
+    );
+    if (unresolved) {
+      emit();
+      return executionIndeterminate(
+        capability.name,
+        unresolved.id,
+        agentText(unresolved.detail),
+        changesThroughView(unresolved.changes, capability, invocationActor),
+        settled(capability, [{ kind: "record", id: unresolved.id }]),
+      );
+    }
+
     present(capability, "capability_started", input, invocationActor);
     // A grant is consulted only where policy would ask for an approval. It
     // sits after policy, so a denial is final before any mandate is read,
@@ -1312,26 +1672,30 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       }
     }
     if (decision.kind === "require_approval" && authorizing === undefined) {
-      return queueApproval(capability, input, signal, invocationActor, considered);
+      // The key is claimed here, at the request, not at the execution the
+      // approval releases later. A repeat with the same key while the
+      // action is pending replays the same approval rather than opening a
+      // second one; a claim that survives a restart refuses the repeat
+      // before any approval is asked. The claim settles with the approval
+      // result now and is settled again with the outcome when a person
+      // decides, so a later repeat replays what actually happened.
+      const claim = claimIdempotency(capability, input, idempotencyKey);
+      if (claim.kind === "refused") {
+        return claim.result;
+      }
+      if (claim.kind === "replay") {
+        return await claim.result;
+      }
+      const asked = queueApproval(capability, input, signal, invocationActor, considered);
+      if (claim.kind === "won") {
+        claim.settle(asked);
+        const actionId = asked.code === "APPROVAL_REQUIRED" ? asked.data?.approval_id : undefined;
+        if (typeof actionId === "string") {
+          approvalClaims.set(actionId, claim);
+        }
+      }
+      return asked;
     }
-    // A previous call of this exact operation may already have written. A
-    // repeat would apply it twice, so it is refused until a human has said
-    // what happened. This guards the unapproved path, which is the one a
-    // caller can reach without anyone looking.
-    const unresolved = unreconciled.forOperation(
-      operationKey(capability.name, input),
-    );
-    if (unresolved) {
-      emit();
-      return executionIndeterminate(
-        capability.name,
-        unresolved.id,
-        agentText(unresolved.detail),
-        changesThroughView(unresolved.changes, capability, invocationActor),
-        settled(capability, [{ kind: "record", id: unresolved.id }]),
-      );
-    }
-
     // Ownership of the idempotency slot is settled before anything is
     // staged. A replay or a refusal that staged first would leave behind a
     // proposal that neither commits nor is discarded, because only the
@@ -1494,12 +1858,18 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         preview.changes,
         now(),
         stateVersion,
+        considered,
       );
     } catch (err) {
       // Nothing owns the proposal yet, so a failure to record the pending
       // action would otherwise strand the fork with no way to reach it.
       staged.proposal?.discard();
       throw err;
+    }
+    // The window this approval answers for opens here. An identical pending
+    // request keeps its original window rather than moving it later.
+    if (!requestedAtTick.has(action.id)) {
+      requestedAtTick.set(action.id, untrustedTick);
     }
     if (staged.proposal) {
       // An identical pending request returns the action that already
@@ -1626,6 +1996,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
             detail: failure.detail,
             at: now(),
           });
+          persistOpen(record.id);
         },
       },
     );
@@ -1684,6 +2055,8 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         value: unknown;
         result: ToolResult;
         verification?: VerificationResult;
+        /** The stored receipt this execution recorded, when it recorded one. */
+        receiptId?: string;
       }
     | {
         ok: false;
@@ -1711,6 +2084,8 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     planId?: string | undefined;
     /** The grant that authorized this execution in place of an approval. */
     grantId?: string | undefined;
+    /** The state digest the approval was bound to, kept on an unknown outcome. */
+    stateVersion?: string | undefined;
     /**
      * An idempotency slot the caller already claimed. Present when the
      * caller had to know it owned this execution before doing work that
@@ -1837,7 +2212,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
    */
   type IdempotencyClaim =
     | { kind: "none" }
-    | { kind: "won"; settle: (result: ToolResult) => void }
+    | {
+        kind: "won";
+        slot: string;
+        fingerprint: string;
+        settle: (result: ToolResult) => void;
+      }
     | { kind: "replay"; result: Promise<ToolResult> }
     | { kind: "refused"; result: ToolResult };
 
@@ -1856,6 +2236,29 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     }
     const slot = `${capability.name}:${idempotencyKey}`;
     const fingerprint = fingerprintInput(input);
+    // A key claimed before a restart has a claim and no result. Replaying
+    // is impossible and re-executing is the double-apply the key exists to
+    // prevent, so the call is refused either way, with the cause.
+    const restored = restoredClaims.get(slot);
+    if (restored !== undefined) {
+      const same = restored.fingerprint === fingerprint;
+      // No capability repairs this: the fix is a person checking the
+      // earlier write, so the receipt it recorded rides as evidence and
+      // `next` names the receipts query for the capability.
+      const evidence: Evidence[] =
+        same && restored.receiptId !== undefined
+          ? [{ kind: "receipt", id: restored.receiptId }]
+          : [];
+      return {
+        kind: "refused",
+        result: idempotencyConflict(
+          capability.name,
+          idempotencyKey,
+          refusal(capability, undefined, evidence),
+          same ? "after_restart" : "different_input",
+        ),
+      };
+    }
     const previous = idempotency.get(slot);
     if (previous) {
       if (previous.fingerprint !== fingerprint) {
@@ -1889,14 +2292,21 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       settled: false,
     };
     idempotency.set(slot, entry);
+    persist(() =>
+      persistence!.saveIdempotencyClaim({ version: 1, slot, fingerprint, at: now() }),
+    );
     return {
       kind: "won",
+      slot,
+      fingerprint,
       settle: (result) => {
-        if (entry.settled) {
-          return;
-        }
+        // The first settle resolves the promise concurrent callers joined;
+        // every settle records the latest result, so a key claimed at an
+        // approval request replays the approval while it is pending and
+        // the outcome once a person has decided.
         entry.settled = true;
         resolve(result);
+        entry.inFlight = Promise.resolve(result);
       },
     };
   }
@@ -1916,6 +2326,18 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     const outcome = await runExecution(capability, input, opts);
     if (claim.kind === "won") {
       claim.settle(outcome.result);
+      if (outcome.ok && outcome.receiptId !== undefined) {
+        const receiptId = outcome.receiptId;
+        persist(() =>
+          persistence!.saveIdempotencyClaim({
+            version: 1,
+            slot: claim.slot,
+            fingerprint: claim.fingerprint,
+            at: now(),
+            receiptId,
+          }),
+        );
+      }
     }
     return outcome;
   }
@@ -1930,6 +2352,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       idempotencyKey,
       planId,
       grantId,
+      stateVersion,
       humanInitiated = false,
       actor: actingActor,
     } = opts;
@@ -1992,12 +2415,24 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         at: now(),
       };
       let verification: VerificationResult = { status: "UNSUPPORTED" };
-      if (isReceiptEnvelope(value)) {
-        event.receipt = value.receipt;
+      // Evidence is settled once, here, before the receipt goes anywhere:
+      // the audit event, the store, and the result all carry the same list,
+      // so "show me proof" is one answer. Authored wins; otherwise derived.
+      const settledReceipt: Receipt | undefined = isReceiptEnvelope(value)
+        ? {
+            ...value.receipt,
+            evidence:
+              value.receipt.evidence !== undefined
+                ? authored(value.receipt.evidence)
+                : deriveEvidence(capability, input, value.receipt.entity),
+          }
+        : undefined;
+      if (settledReceipt !== undefined) {
+        event.receipt = settledReceipt;
         verification = await runVerification(
           capability,
           input,
-          value.receipt.changes,
+          settledReceipt.changes,
         );
       }
       // Verification is an application callback and can outlive the session
@@ -2029,12 +2464,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           const json = JSON.stringify(raw === undefined ? null : raw);
           recordable = json === undefined ? null : JSON.parse(json);
         }
-        if (isReceiptEnvelope(value)) {
+        if (settledReceipt !== undefined) {
           pending = structuredClone({
             capability: capability.name,
             executionId,
             input,
-            receipt: value.receipt,
+            receipt: settledReceipt,
             verification,
             at: now(),
             ...(planId !== undefined ? { planId } : {}),
@@ -2052,6 +2487,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       // One terminal outcome, committed together. Presentation runs after the
       // governance evidence is durable and cannot change it.
       audit.append(event);
+      if (capability.annotations.untrustedContentHint) {
+        untrustedReads.push({ name: capability.name, tick: ++untrustedTick });
+        if (untrustedReads.length > UNTRUSTED_READS_LIMIT) {
+          untrustedReads.splice(0, untrustedReads.length - UNTRUSTED_READS_LIMIT);
+        }
+      }
       const stored = pending ? receipts.record(pending) : undefined;
       const evidence: Evidence[] = [
         ...(stored ? [{ kind: "receipt" as const, id: stored.id }] : []),
@@ -2062,6 +2503,10 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       // above are the human's and stay whole.
       let toolResult: ToolResult;
       try {
+        const linksShown =
+          pending === undefined
+            ? []
+            : linksThroughView(pending.receipt.evidence ?? [], capability, actingActor);
         const receiptShown =
           pending === undefined
             ? undefined
@@ -2073,15 +2518,22 @@ export function createAgentDeskRuntime<S = unknown>(options: {
                     capability,
                     actingActor,
                   ),
+                  evidence: linksShown,
                 },
                 capability,
                 actingActor,
               ) as Receipt);
+        // The same links ride on the protocol's evidence list, so a result
+        // and a receipt answer "show me proof" identically.
+        const proof: Evidence[] = [
+          ...evidence,
+          ...linksShown.map((link) => ({ kind: "link" as const, ...link })),
+        ];
         toolResult = completed(
           throughView(recordable, capability, actingActor),
           receiptShown,
           {
-            ...settled(capability, evidence),
+            ...settled(capability, proof),
             changes: receiptShown?.changes ?? [],
           },
         );
@@ -2109,6 +2561,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         value,
         result: toolResult,
         verification,
+        ...(stored !== undefined ? { receiptId: stored.id } : {}),
       };
     } catch (err) {
       const attempted: Evidence[] = [{ kind: "execution", id: executionId }];
@@ -2152,10 +2605,14 @@ export function createAgentDeskRuntime<S = unknown>(options: {
             detail: message,
             changes: err.changes,
             ...(planId !== undefined ? { planId } : {}),
+            ...(actingActor !== undefined ? { executedBy: actingActor } : {}),
+            ...(stateVersion !== undefined ? { stateVersion } : {}),
+            ...(grantId !== undefined ? { grantId } : {}),
             at: now(),
           },
           err.artifact,
         );
+        persistOpen(record.id);
         audit.append({
           kind: "execution_indeterminate",
           capability: capability.name,
@@ -2284,6 +2741,9 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       const outcome = await executeNow(routed, operation.input, {
         planId,
         actor: executor,
+        ...(operation.stateVersion !== undefined
+          ? { stateVersion: operation.stateVersion }
+          : {}),
         ...(proposal ? { commit: proposal.commit } : {}),
       });
       if (!outcome.ok && !outcome.indeterminate) {
@@ -2301,6 +2761,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
             planId,
             operationIndex: index,
           });
+          persistOpen(outcome.indeterminate.recordId);
           return {
             capability: operation.capability,
             ...correlation,
@@ -2528,10 +2989,14 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     routedNames = next;
   }
 
-  async function approveInner(actionId: string, by?: Actor): Promise<ToolResult> {
+  async function approveInner(
+    actionId: string,
+    by?: Actor | ApprovalGesture,
+  ): Promise<ToolResult> {
     const session = claimSession();
-    const authorizer = resolveHumanActor(
+    const authorizer = resolveApprover(
       by ?? actor,
+      { actionId },
       "an approval must name a human; pass one explicitly rather than relying on the acting actor",
     );
     if (!authorizer.ok) {
@@ -2698,16 +3163,30 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         refusal(routed, missing.repair, claimed),
       );
     }
+    const flagged = untrustedSince(actionId);
+    if (flagged.length > 0) {
+      audit.append({
+        kind: "untrusted_content_ignored",
+        actionId,
+        capability: action.capability,
+        sources: flagged,
+        at: now(),
+      });
+    }
     audit.append({
       kind: "approval_approved",
       actionId,
       capability: action.capability,
       approvedBy: authorizer.actor,
+      ...(authorizer.gestureId !== undefined ? { gestureId: authorizer.gestureId } : {}),
       at: now(),
     });
+    const held = approvalClaims.get(actionId);
     const outcome = await executeNow(routed, action.input, {
       actor: actingActor,
       humanInitiated: true,
+      ...(action.stateVersion !== undefined ? { stateVersion: action.stateVersion } : {}),
+      ...(held !== undefined ? { claim: held } : {}),
       ...(proposal ? { commit: proposal.commit } : {}),
     });
     // approvals.resolve inserts, so resolving after a reset put the cleared
@@ -2730,6 +3209,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       // The artifact is deliberately not discarded. It is the evidence a
       // human reconciles against, and nothing here proves it did not land.
       unreconciled.attach(outcome.indeterminate.recordId, { actionId });
+    persistOpen(outcome.indeterminate.recordId);
       approvals.resolve(actionId, {
         status: "INDETERMINATE",
         action,
@@ -2823,6 +3303,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           );
         }
       }
+      await rehydrate();
       await surface.reconcile(desiredNative());
       started = true;
       emit();
@@ -2884,9 +3365,14 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       proposals.discardAll();
       approvals.clear();
       idempotency.clear();
+      restoredClaims.clear();
+      approvalClaims.clear();
       plans.clear();
       receipts.clear();
       grants.clear();
+      gestures.clear();
+      untrustedReads.length = 0;
+      requestedAtTick.clear();
       routedNames = new Set();
       lastRouting = null;
       if (started) {
@@ -3010,6 +3496,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         ...(revision !== undefined ? { expectedRevision: revision } : {}),
         ...(requester !== undefined ? { requestedBy: requester } : {}),
       });
+      requestedAtTick.set(plan.id, untrustedTick);
       staged.forEach((proposal, index) => {
         if (proposal) {
           proposals.put(StagedProposalStore.planKey(plan.id, index), proposal);
@@ -3034,8 +3521,9 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       // neither a refusal nor an unrecordable identity can strand the plan
       // in APPROVED, and the plan and the audit event carry one value the
       // caller can no longer influence.
-      const approver = resolveHumanActor(
+      const approver = resolveApprover(
         by ?? actor,
+        { planId },
         "a plan approval must name a human authorizer; pass one to approvePlan rather than relying on the acting actor",
       );
       if (!approver.ok) {
@@ -3046,10 +3534,21 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         return { ok: false, reason: `plan ${planId} is not awaiting approval` };
       }
       plans.resolve(planId, { approvedBy: approver.actor });
+      const flagged = untrustedSince(planId);
+      if (flagged.length > 0) {
+        audit.append({
+          kind: "untrusted_content_ignored",
+          planId,
+          capability: claimed.operations.map((operation) => operation.capability).join(", "),
+          sources: flagged,
+          at: now(),
+        });
+      }
       audit.append({
         kind: "plan_approved",
         planId,
         actor: approver.actor,
+        ...(approver.gestureId !== undefined ? { gestureId: approver.gestureId } : {}),
         at: now(),
       });
       emit();
@@ -3576,12 +4075,53 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       }
       return runCapability(routed, input, "invoke");
     },
+    issueApprovalGesture(binding, by) {
+      // Identity first, the same way a grant is minted: a malformed or
+      // non-human issuer throws where the ambient actor would.
+      const issuer = adoptHumanActor(
+        by ?? actor,
+        "an approval token must be minted by a human; pass one to issueApprovalGesture rather than relying on the acting actor",
+      );
+      const bound =
+        typeof binding === "object" && binding !== null
+          ? "actionId" in binding && typeof binding.actionId === "string"
+            ? { actionId: binding.actionId }
+            : "planId" in binding && typeof binding.planId === "string"
+              ? { planId: binding.planId }
+              : undefined
+          : undefined;
+      if (bound === undefined) {
+        throw new TypeError("an approval token is bound to one actionId or one planId");
+      }
+      // A token stands for a click. Minted outside one, it would prove
+      // nothing the asserted identity did not, one call further away.
+      let active = false;
+      try {
+        active = userActivation() === true;
+      } catch {
+        active = false;
+      }
+      if (!active) {
+        throw new Error(
+          "an approval token can only be minted during a user activation; call issueApprovalGesture from the click handler itself, not before or after it",
+        );
+      }
+      return gestures.issue(bound, issuer, now());
+    },
     async approve(actionId, by) {
       // The acting identity is read once, here, for the approval and for
       // the view its result crosses.
       const viewer = actor;
       const owner = approvals.get(actionId)?.action.capability;
       const result = await approveInner(actionId, by);
+      // Once the action is no longer pending, the key claimed at its
+      // request settles with what happened, whatever path answered.
+      const status = approvals.get(actionId)?.status;
+      const held = approvalClaims.get(actionId);
+      if (held !== undefined && status !== "PENDING" && status !== "EXECUTING") {
+        held.settle(result);
+        approvalClaims.delete(actionId);
+      }
       return crossing(
         result,
         owner === undefined ? undefined : catalog.get(owner),
@@ -3616,6 +4156,34 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       if (!parsed.ok) {
         return { ok: false, reason: parsed.reason };
       }
+      // An artifact that came back from persistence as a description rather
+      // than the object is rebuilt here, by the application's resolver. One
+      // that cannot be rebuilt leaves the record open and says so, because
+      // closing a record whose artifact nobody can hand back would settle
+      // nothing in the application.
+      let artifact = found.artifact;
+      if (isPersistedHolder(artifact)) {
+        const rebuilt = persistence?.resolveArtifact?.(artifact[PERSISTED]);
+        if (rebuilt === undefined) {
+          const detail =
+            persistence?.resolveArtifact === undefined
+              ? "the artifact was persisted as a reference and the persistence adapter has no resolveArtifact to rebuild it"
+              : "the persistence adapter's resolveArtifact could not rebuild the artifact";
+          audit.append({
+            kind: "staged_reconcile_failed",
+            capability: found.record.capability,
+            recordId: found.record.id,
+            detail,
+            at: now(),
+          });
+          emit();
+          return {
+            ok: false,
+            reason: `${found.record.id} stays open: ${detail}`,
+          };
+        }
+        artifact = rebuilt;
+      }
       // Only the adapter can make the artifact terminal, and only a
       // successful return says it did. A throw leaves the record and its
       // evidence exactly where they were.
@@ -3623,7 +4191,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         // The artifact came from this adapter's own `fork`, so handing it
         // back is the one place the erased type is reconstituted.
         (options.staging as StagingAdapter<unknown>).reconcile(
-          found.artifact,
+          artifact,
           parsed.resolution,
         );
       } catch (err) {
@@ -3642,6 +4210,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         };
       }
       unreconciled.settle(found.record.id);
+      persist(() => persistence!.settleRecord(found.record.id));
       audit.append({
         kind: "staged_reconciled",
         capability: found.record.capability,
@@ -3680,11 +4249,17 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         at: now(),
       });
       emit();
-      return toToolResult({
+      const rejected = toToolResult({
         status: "REJECTED",
         approval_id: actionId,
         capability: action.capability,
       });
+      const held = approvalClaims.get(actionId);
+      if (held !== undefined) {
+        held.settle(rejected);
+        approvalClaims.delete(actionId);
+      }
+      return rejected;
     },
   };
 }

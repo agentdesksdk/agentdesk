@@ -310,9 +310,16 @@ was checked against and why it did not apply, as
 `nowPossible` includes every capability holding a live grant, so the answer
 can point at a sibling the person already authorized, and there is no
 `repair`, because the fix is a person deciding rather than a capability the
-agent can call. When several grants exist the considered one is the one
-whose state a person can act on first: a live grant the call fell outside
-of, then an exhausted one, then a revoked one, then an expired one.
+agent can call. The same considered grant is recorded on the pending
+action as `PendingAction.grant`, so an approval card reads it directly
+rather than reconstructing it from the audit. When several grants exist, a
+live grant the call fell outside of is named first, because it alone could
+still apply to a different input; among the rest the one whose state most
+recently changed is named, by the timestamp of the spend, revoke, or expiry
+that put it there, with a change ticket breaking a same-millisecond tie.
+That is the grant the person most recently acted on, so someone who just
+pressed Revoke is told about that grant and not about one that ran out
+earlier.
 
 **Revoke is immediate.** `revokeGrant` moves a live grant to `revoked` with
 the human who did it, and the next use goes to a person with
@@ -508,6 +515,261 @@ is being prepared queues nothing.
 `queryReceipts`, `listUnreconciled`, the pending action a person approves,
 and the presentation stream carry the whole application. Only what crosses
 to the agent is projected.
+
+## An approval is bound to a gesture
+
+`approve` and `approvePlan` took `{ kind: "human" }` as an assertion: a
+claim the runtime had to take on trust. They now take a gesture the
+runtime can verify. Page code mints a token on a human click, from its
+click handler, through `issueApprovalGesture`; the runtime verifies and
+consumes it at approve time; and an approval without a valid token is
+refused wherever a runtime requires one.
+
+```ts
+// in the click handler, and nowhere else
+const token = runtime.issueApprovalGesture({ actionId: action.id }, OPERATOR);
+await runtime.approve(action.id, token);
+```
+
+**What a token is.** `{ kind: "page-token", id, secret }`, issued by
+`GestureStore` with a random secret, bound to exactly one action id or one
+plan id, valid for sixty seconds (`GESTURE_TTL_MS`), and single use. Any
+verification attempt that presents the right secret spends it, whatever
+the verdict, so a token tried against the wrong action cannot then be tried
+against the right one. A token is not one this runtime issued, was already
+used, has expired, or was issued for a different approval: each is a
+refusal with that reason, and the pending action or plan is untouched.
+
+**Who can mint one, and when.** The issuer goes through `adoptHumanActor`,
+the same boundary a grant's issuer crosses, so an agent identity, the
+ambient actor when it is the agent, and a malformed identity all throw
+`TypeError`. Then the runtime asks whether a user activation is in
+progress, through `gesture.userActivation`, which defaults to the browser's
+own `navigator.userActivation.isActive` and answers no wherever there is no
+navigator, so a Node or jsdom process cannot mint without injecting the
+seam. Minting outside an activation throws. The demo's Approve handler runs
+inside the click, so it mints unchanged; its tests inject the seam. A token
+stands for a person's click, and the runtime records that person as the
+approver when the token is consumed, not whoever presented it.
+
+**What the token proves, and what it does not.** A token proves that a call
+was made during a user activation, by code with access to the runtime
+object, carrying a human identity. It does not prove which human: the
+identity is still what the page asserted, and binding it to a person is
+what the WebAuthn seam below is for. And it proves nothing at all on a page
+that hands its runtime to untrusted script: any code that can reach
+`issueApprovalGesture` during a click can mint. So a page keeps the method
+where only its own approval control closes over it. The demo exposes an
+inspectable runtime on `window.agentdesk` with `issueApprovalGesture`
+removed; only the card's click handler holds the minting method.
+
+**What the audit records.** `approval_approved` and `plan_approved` carry
+`gestureId` when a token carried the approval, alongside the human it
+recorded, so a record can say which click authorized what. An asserted
+identity leaves no `gestureId`. Issuing is not itself audited; the token's
+only meaning is the approval it carries.
+
+**Migration without a flag day.** `approvalGesture` on the runtime is
+`optional` by default: an asserted human identity is still accepted, so
+every existing caller keeps working while page code migrates to minting.
+`required` refuses an asserted identity with a reason naming
+`issueApprovalGesture`. The demo's approval card mints a token on click and
+its runtime stays `optional`, because a test still approves through that
+instance with an asserted identity; flipping it to `required` is the demo
+lane's follow-up once every caller mints.
+
+**The seam WebAuthn plugs into.** `resolveApprover` is the one place an
+approver is established. A gesture is a member of `ApprovalGesture`; today
+the only member is the page token, verified by `GestureStore`. A WebAuthn
+assertion is a second member with a second verifier behind the same
+function, and `approve`, `approvePlan`, and their callers do not change.
+
+**Untrusted content in context.** Every completed read of a capability
+flagged `untrustedContentHint` is recorded with a tick, and each approval
+remembers the tick it was requested at (a plan, the tick it was prepared
+at). At approve time only the flagged reads between the request and the
+approval count: those are the ones that could have shaped what the agent
+asked for and what the person was shown. An approval with any records
+`untrusted_content_ignored`, naming the approval and the sources, just
+before `approval_approved` or `plan_approved`, so the record says the
+runtime saw the content and treated it as data rather than as authority. A
+note read before the request does not mark it, and two pending approvals
+each answer for their own window, so the signal stays a signal. This is
+the audit half of the adversarial note; the approval itself proceeds,
+because the person decided. `reset` clears the record.
+
+## A receipt says where its proof can be seen
+
+"Show me proof" is a place in the application: a page to navigate to and
+an element to highlight. A receipt carries that as `evidence`, a list of
+`EvidenceLink`s, and the same links ride on the result protocol's
+`evidence` list as `{ kind: "link", label, route, reveal }`, so the answer
+is identical whether it is read off a result or off a stored receipt.
+
+```ts
+type AuthoredEvidenceLink = {
+  label: string;   // what a person will see: "Shipping line on the invoice"
+  route: string;   // a page in the application, starting with "/"
+  reveal?: string; // an opaque anchor the application registered, never a selector
+};
+type EvidenceLink = AuthoredEvidenceLink & { source: "authored" | "derived" };
+```
+
+**The type says which is which.** `source` is set by the runtime when it
+settles the receipt, never by the capability: an author's link is stamped
+`authored` and anything an author put in `source` is overwritten. An
+authored link is the value: the author knew where the changed value lives
+and pointed at it. A derived link is page-level: a presentation hint names
+the write's page and its anchor, not necessarily the field that changed. A
+consequential capability should author its links, and the roadmap gate
+that a link resolves to the value that changed applies to authored ones.
+
+The shape is exactly what the demo's `reveal.ts` needs to navigate and
+highlight, and nothing more. `reveal` is the same registered token the
+presentation stream already carries, so the page that highlights a
+completed write highlights its proof the same way.
+
+**Authored wins; otherwise derived; otherwise empty.** A capability may
+author `evidence` on its `receipt()`, and `receipt()` refuses a malformed
+link at authoring time, because a link a page cannot follow is the author's
+mistake and the author is the one who can fix it. When nothing is authored
+the runtime derives one link from the capability's `presentation.route`
+and `reveal`, with the receipt's `entity` as the label: those hints already
+name the page and the anchor the demo navigates to for the write, so they
+are the proof's address too. Nothing is guessed from the entity text or the
+field names. A capability with no route declared has no derived link, and
+its receipt carries an empty list rather than a link that goes nowhere.
+The list is settled once, in `runExecution`, before the receipt reaches
+the audit event, the store, or the result, so all three carry the same
+links.
+
+**A link crosses through the agent view like every other field.** Its
+`reveal` is treated as a field name and passed through the view the way a
+change is; its route is checked segment by segment against the hidden
+values and then through the same two tiers as any text; its label too. A
+link that names a hidden route or a hidden field is dropped from the
+agent's copy rather than withheld with a hole in it, because a route with a
+hole navigates nowhere. The stored receipt keeps every link for the person.
+
+The demo half, a "show me proof" control on the receipt that follows the
+link, is the demo lane's item.
+
+## An unknown outcome survives a restart
+
+The accepted-risk record of 2026-08-31 stated what a restart lost: the
+unreconciled record with its `operationKey`, so the repeat guard was gone;
+the approved changes and the ids binding the record to an approval or a
+plan, so nothing surfaced it; and the adapter's artifact, held by identity,
+so `reconcile` had nothing to hand back. A runtime that declares
+`persistence` keeps all three.
+
+```ts
+const runtime = createAgentDeskRuntime({
+  capabilities,
+  staging: meridianStaging,
+  persistence: indexedDbPersistence({
+    name: "meridian-ops",
+    resolveArtifact: (record) =>
+      record.artifact.kind === "reference" ? reopenBranch(record.artifact.reference) : undefined,
+  }),
+});
+```
+
+**The shapes.** A `PersistedRecord` carries everything the accepted-risk
+record listed as lost and everything wave 1 added: `id`, `kind`,
+`capability`, `detail`, the approved `changes`, `at`, `operationKey`,
+`actionId`, `planId`, `operationIndex`, the `executedBy` actor, the
+`stateVersion` the approval was bound to, the `grantId` when a grant
+authorized the write, the `artifact`, and a `seal`. A
+`PersistedIdempotencyClaim` carries the `slot` and the input `fingerprint`
+a key was claimed for. The adapter is
+`{ saveRecord, settleRecord, loadOpenRecords, saveIdempotencyClaim,
+loadIdempotencyClaims, clear, resolveArtifact? }`; every method may be
+synchronous or return a promise, and the roadmap's four names grew by
+three because a settled record has to be removed, a claim has to be
+loaded, and a page's Reset has to be able to forget durable state with one
+call that does not name the adapter's stores by hand. The runtime never
+calls `clear`.
+
+**How an artifact is written down.** `describeArtifact` clones the staging
+adapter's artifact and stores it as `{ kind: "value" }`. An artifact that
+cannot be cloned is handed to the staging adapter's optional `identify`,
+and what comes back is stored as `{ kind: "reference" }`: a durable key the
+application can rebuild from. An artifact that is neither is stored as
+`{ kind: "lost" }`. All three surface the record and guard the repeat; only
+a value can be handed straight back. `resolveArtifact` on the persistence
+adapter is synchronous, because `reconcile` is: it is given the loaded
+record and returns the live artifact the staging adapter can settle, or
+`undefined`. A reference or a lost artifact that the resolver cannot
+rebuild leaves the record open, audits `staged_reconcile_failed` with the
+reason, and `reconcile` returns it, because closing a record whose artifact
+nobody can hand back would settle nothing in the application.
+
+**What survives and what does not.** The record is saved the moment it is
+made and again when an approval or a plan attaches its ids; it is removed
+when `reconcile` settles it. An idempotency claim is saved when it is won
+and again, with the receipt id, when the execution records a receipt. A
+key travelling the approval path is claimed at the request, not at the
+execution the approval releases later, so a repeat with the same key while
+the action is pending replays the same approval rather than opening a
+second one, and a claim that survives a restart refuses the repeat before
+any approval is asked; the open record's `operationKey` guard runs ahead
+of the approval branch too, so a repeat of an unknown commit is refused on
+every path with the record named. Only the claim survives, not the result
+it produced. That is a stated
+limit, decided rather than defaulted: a repeat of the same call after
+reload is refused with `IDEMPOTENCY_CONFLICT` and `cause: "after_restart"`,
+never replayed and never re-executed, because the write may have landed
+and nothing can hand back what it returned, and persisting results would
+mean persisting handler output the agent view has not projected. The
+refusal is in the result protocol. No capability repairs it, so it carries
+no `repair`; the receipt the earlier write recorded rides as evidence when
+there is one, `next` names the receipts query for the capability, and
+`nowPossible` lists the capability itself when it is callable. A claim
+never maps to a pending action, because the approval path returns before
+the idempotency claim is made and approvals deduplicate by input rather
+than by key, so `get_action_status` is never the repair. `reset` clears the
+in-memory claims as it always did and leaves the adapter alone.
+
+**On start.** `rehydrate` runs before the tool surface is built. Every
+loaded record is verified: the version must be the one the runtime writes,
+and the `seal`, a digest over every field but itself computed at save, must
+match. A record that fails is refused at load and audited as
+`staged_reconcile_failed` naming it, rather than trusted. A verified record
+is put back with `UnreconciledStore.hydrate` under its saved id, so an
+approval's `actionId` still finds it and the counter moves past it;
+`listUnreconciled` surfaces it, `operationKey` guards the repeat, and a
+reconcile takes the same path a live record takes. Loaded claims are
+remembered by slot.
+
+**Byte for byte.** What is loaded is what was saved, to the extent an
+unkeyed seal can say so. The seal is an integrity check against corruption
+and accidental change, not authentication: `sealOf` is a plain digest with
+no key, so anything with write access to the store can rewrite a record
+and recompute its seal, and page-controlled storage such as IndexedDB is
+writable by anything that can write the page. A record that comes back
+with a matching seal is one the store did not corrupt and nobody edited by
+hand; it is not one nobody could have forged. The upgrade, if that matters
+for a deployment, is a keyed seal with the key held outside the store,
+behind the same `sealOf` and `verifyRecord` seam. A hydrated record is
+cloned and deep frozen at the store boundary exactly as a live one is, so
+it is as immutable through the public API. Saves are queued in order and
+never awaited by the path that made the record; an adapter that throws
+cannot change an outcome, only lose its own copy, and says so on the
+console.
+
+**Two adapters ship.** `memoryPersistence` is the in-memory one, the double
+the tests use, and what a runtime that declares nothing behaves like: a
+fresh runtime with no `persistence` is byte for byte what it was. Two
+runtimes that share one memory adapter share a restart.
+`indexedDbPersistence({ name, indexedDB?, resolveArtifact? })` is the
+browser one: one database per application, two object stores, opened once
+and lazily, one transaction per operation. Its factory is injectable, and
+the tests drive it through a small in-test double of the API surface it
+uses, because no fake-indexeddb shim is in the workspace lockfile.
+
+The demo half, an interrupted operation, a reload, the record recovered,
+the repeat refused, and a reconcile, is the demo lane's item.
 
 ## Execution lifecycle
 
@@ -1499,10 +1761,19 @@ packages/webmcp/src/runtime.ts reconcileRollback markRolledBack proveRollback ow
 packages/webmcp/src/audit.ts rollback_indeterminate rollback_reconciled rollback_performed grant_issued grant_revoked grant_applied grant_not_applied
 packages/webmcp/src/protocol.ts Repair Evidence Situation Refusal Settled ResultProtocol RefusalStatus
 packages/webmcp/src/results.ts completed capabilityUnavailable approvalRequired executionIndeterminate
-packages/webmcp/src/grants.ts Grant LiveGrant GrantRequest ScopeRule ConsideredGrant GrantOutcome GrantStore parseScope parseGrantRequest matchesScope consult spend revoke liveCapabilities
+packages/webmcp/src/grants.ts Grant LiveGrant GrantRequest ScopeRule ConsideredGrant GrantOutcome GrantStore parseScope parseGrantRequest matchesScope consult spend revoke liveCapabilities changedAt touch
 packages/webmcp/src/runtime.ts adoptHumanActor authorizing considered queueApproval revokeGrant listGrants getGrant currentDigest hasPreviewSource
 packages/webmcp/src/staging.ts stateDigest
-packages/webmcp/src/results.ts approvalStale viewUnavailable
+packages/webmcp/src/results.ts approvalStale viewUnavailable EvidenceLink AuthoredEvidenceLink evidence source
+packages/webmcp/src/runtime.ts deriveEvidence linksThroughView settledReceipt
+packages/webmcp/src/protocol.ts link
+packages/webmcp/src/gesture.ts ApprovalGesture GestureBinding GestureStore GESTURE_TTL_MS isApprovalGesture consume
+packages/webmcp/src/runtime.ts resolveApprover issueApprovalGesture userActivation untrustedReads untrustedSince requestedAtTick approvalGesture
+packages/webmcp/src/audit.ts untrusted_content_ignored gestureId
+packages/webmcp/src/persistence.ts PersistedRecord PersistedIdempotencyClaim PersistedArtifact PersistenceAdapter memoryPersistence indexedDbPersistence sealOf verifyRecord
+packages/webmcp/src/runtime.ts persistOpen rehydrate describeArtifact restoredClaims approvalClaims
+packages/webmcp/src/staging.ts hydrate identify digestOf
+packages/webmcp/src/results.ts after_restart
 packages/webmcp/src/capability.ts AgentView agentView
 packages/webmcp/src/runtime.ts throughView changesThroughView hiddenStrings withhold crossing agentText viewFailed runInvocation approveInner
 packages/webmcp/src/approval.ts stateVersion
