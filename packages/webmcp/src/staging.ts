@@ -135,6 +135,62 @@ export function parseResolution(
 }
 
 /**
+ * The digest an approval is bound to.
+ *
+ * It covers the state the preview was derived from and nothing else: each
+ * change's field and its `before` value, in field order. That is the set of
+ * facts a person read when they approved, so a write to anything outside it
+ * leaves the digest intact and a write to anything inside it changes it.
+ * Digesting the whole store instead would fire a stale approval on every
+ * unrelated write, and a stale approval that fires on unrelated writes
+ * teaches people to re-approve without reading.
+ *
+ * `after` is deliberately not covered. A capability whose output depends on
+ * a clock or a counter produces a different `after` from the same state, and
+ * that is not drift. What the human authorized is a change *from* this
+ * state; the runtime re-derives the change at commit and compares the from.
+ *
+ * One function for single approvals and for plans, so the two cannot drift
+ * apart on what "the same state" means. Nothing an author or an adapter
+ * returns reaches it except `field` and `before`, so a digest they hand in
+ * on a change is ignored rather than trusted.
+ */
+export function stateDigest(changes: readonly Change[]): string {
+  const facts = [...changes]
+    .map((change) => [change.field, canonical(change.before)] as const)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([field, before]) => `${JSON.stringify(field)}:${before}`)
+    .join("|");
+  return `sv-${fnv1a(facts, 0x811c9dc5)}${fnv1a(facts, 0x01000193)}`;
+}
+
+/** Stable across property insertion order; `undefined` is spelled out. */
+function canonical(value: unknown): string {
+  if (value === undefined) {
+    return "undefined";
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonical).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? String(value);
+}
+
+function fnv1a(text: string, seed: number): string {
+  let hash = seed >>> 0;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+/**
  * A capability's proposed write. Built by the runtime from one staged
  * artifact, never assembled by a capability author, which is what entitles
  * it to `approvalEvidence: "derived"`.

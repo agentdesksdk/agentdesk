@@ -69,6 +69,7 @@ export class ApprovalManager {
     summary: string,
     preview: Change[],
     createdAt: number,
+    stateVersion?: string,
   ): PendingAction {
     const snapshot = structuredClone(input);
     const storedPreview = structuredClone(preview) as Change[];
@@ -90,6 +91,7 @@ export class ApprovalManager {
       risk,
       summary,
       preview: storedPreview,
+      ...(stateVersion !== undefined ? { stateVersion } : {}),
       createdAt,
     };
     this.records.set(id, { status: "PENDING", action });

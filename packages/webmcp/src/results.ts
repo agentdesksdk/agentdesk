@@ -131,6 +131,7 @@ export function approvalRequired(
   approvalEvidence: "derived" | "diff" | "summary",
   situation: Settled,
   considered?: ConsideredGrant,
+  stateVersion?: string,
 ): ToolResult {
   const data: Record<string, unknown> = {
     status: "APPROVAL_REQUIRED",
@@ -151,7 +152,43 @@ export function approvalRequired(
   if (considered !== undefined) {
     data.grant = { ...considered };
   }
+  // Written last, by the runtime, so nothing a preview carried can set it.
+  if (stateVersion !== undefined) {
+    data.stateVersion = stateVersion;
+  }
   return coded("APPROVAL_REQUIRED", answered(data, situation), false);
+}
+
+/**
+ * The state the person approved is not the state that is there now. Nothing
+ * was written. The repair is the same request again, because the fix is a
+ * new preview of current state for a person to look at.
+ */
+export function approvalStale(
+  capability: string,
+  actionId: string,
+  versions: { expected: string; observed: string },
+  situation: Refusal,
+): ToolResult {
+  return coded(
+    "APPROVAL_STALE",
+    answered(
+      {
+        status: "APPROVAL_STALE",
+        code: "APPROVAL_STALE",
+        capability,
+        approval_id: actionId,
+        reasonCode: "APPROVAL_STALE",
+        reason:
+          "The state this approval was reviewed against has moved, so the approved change no longer describes what would happen. Nothing was written.",
+        requiresNewPreview: true,
+        stateVersion: { ...versions },
+        next: "Request the action again to get a preview of current state, then approve that.",
+      },
+      situation,
+    ),
+    true,
+  );
 }
 
 /**
