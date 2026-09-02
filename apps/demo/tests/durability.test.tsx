@@ -13,7 +13,6 @@ const ORDER = "10428";
 /** One key for the one call, so the second attempt is the same call. */
 const KEY = `durability-${ORDER}`;
 const OPERATOR = { id: "operator", name: "Operator", kind: "human" as const };
-const HUMAN = { id: "operator-1", name: "Amein", kind: "human" as const };
 
 type Runtime = ReturnType<typeof createMeridianRuntime>;
 
@@ -24,16 +23,31 @@ function adapterInMemory() {
   return adapter;
 }
 
+/** The call, sent the way a client sends it: by name, with an idempotency key. */
+const THE_CALL = { name: "refund_shipping", input: { order_id: ORDER }, idempotency_key: KEY };
+
+/**
+ * The operator's mandate. Under a grant the call takes the unapproved path,
+ * the one the runtime guards by operation key and by idempotency claim;
+ * the record then carries the grant that authorized the write.
+ */
+function grantRefund(runtime: Runtime) {
+  const issued = runtime.grant(
+    { capability: "refund_shipping", scope: { order_id: ORDER }, uses: 2, expiresAt: Date.now() + 600_000 },
+    OPERATOR,
+  );
+  expect(issued.ok, JSON.stringify(issued)).toBe(true);
+}
+
 /**
  * The interrupted operation: a shipping refund whose commit writes and then
  * throws. The runtime cannot know whether the write landed, so it records
  * an unreconciled outcome instead of a success or a failure.
  */
 async function interrupt(runtime: Runtime): Promise<ToolResult> {
+  grantRefund(runtime);
   armCommitFault("refund_shipping");
-  const asked = await runtime.invoke("refund_shipping", { order_id: ORDER, idempotency_key: KEY });
-  expect(asked.code, asked.content[0]?.text).toBe("APPROVAL_REQUIRED");
-  const done = await runtime.approve(runtime.getSnapshot().pending[0]!.id, OPERATOR);
+  const done = await runtime.invoke("invoke_capability", THE_CALL);
   expect(done.code, done.content[0]?.text).toBe("EXECUTION_INDETERMINATE");
   return done;
 }
@@ -56,6 +70,7 @@ describe("an unknown outcome survives a restart of Meridian Ops", () => {
     expect(record.capability).toBe("refund_shipping");
     expect(record.operationKey).toBeDefined();
     expect(record.executedBy).toBeDefined();
+    expect(record.grantId).toMatch(/^GRT-/);
     expect(record.changes.map((c) => c.field)).toContain(`Order #${ORDER} shipping refunded`);
     // The fork is not cloneable, so it was written down by the identity the
     // staging adapter gave it, not as two copies of the document.
@@ -73,6 +88,7 @@ describe("an unknown outcome survives a restart of Meridian Ops", () => {
     expect(after[0]!.id).toBe(record.id);
     expect(after[0]!.operationKey).toBe(record.operationKey);
     expect(after[0]!.executedBy).toEqual(record.executedBy);
+    expect(after[0]!.grantId).toBe(record.grantId);
     expect(JSON.stringify(after[0]!.changes)).toBe(JSON.stringify(record.changes));
     await second.stop();
   });
@@ -84,13 +100,31 @@ describe("an unknown outcome survives a restart of Meridian Ops", () => {
     await interrupt(first);
     await first.stop();
 
+    // The reload: a fresh runtime on the same adapter, and the document back
+    // at its seed, which is what a page gets.
+    resetStore();
     const second = createMeridianRuntime({ persistence: adapter });
     await second.start();
-    const again = await second.invoke("refund_shipping", { order_id: ORDER, idempotency_key: KEY });
+    // Grants do not survive a reload; the operator issues one again, which
+    // is what the page's control does. The call then meets the guard.
+    grantRefund(second);
+    // Refused twice over. While the record is open, its operation key guards
+    // the same call: the runtime names the record and executes nothing.
+    const id = second.listUnreconciled()[0]!.id;
+    const guarded = await second.invoke("invoke_capability", THE_CALL);
+    expect(guarded.code, guarded.content[0]?.text).toBe("EXECUTION_INDETERMINATE");
+    expect(guarded.data?.record_id).toBe(id);
+    expect(second.getSnapshot().pending).toEqual([]);
+    expect(getState().orders.find((o) => o.id === ORDER)!.shippingRefunded).toBe(false);
+    // Once a person settles the record, the claim on the key still survives,
+    // and the same call is refused for that reason, never replayed.
+    expect(second.reconcile(id, { kind: "commit_not_applied" }, OPERATOR)).toEqual({ ok: true });
+    const again = await second.invoke("invoke_capability", THE_CALL);
     expect(again.code).toBe("IDEMPOTENCY_CONFLICT");
     expect(again.data?.cause).toBe("after_restart");
     expect(String(again.data?.reason)).toMatch(/restart/);
     expect(second.getSnapshot().pending).toEqual([]);
+    expect(getState().orders.find((o) => o.id === ORDER)!.shippingRefunded).toBe(false);
     await second.stop();
   });
 
@@ -102,6 +136,9 @@ describe("an unknown outcome survives a restart of Meridian Ops", () => {
     const id = first.listUnreconciled()[0]!.id;
     await first.stop();
 
+    // The reload: the fork is rebuilt from the identity the record kept,
+    // against the document as the page finds it, its seed.
+    resetStore();
     const second = createMeridianRuntime({ persistence: adapter });
     await second.start();
     const settled = second.reconcile(id, { kind: "commit_not_applied" }, OPERATOR);
@@ -152,7 +189,7 @@ async function frames(count: number) {
   }
 }
 
-/** Presses the card's control, then approves the card the way a person does. */
+/** Presses the card's control: one click issues the grant and runs the call. */
 async function interruptThroughThePage(view: RenderResult) {
   const card = view.getByRole("region", { name: `Interrupted operations on order #${ORDER}` });
   await act(async () => {
@@ -160,14 +197,8 @@ async function interruptThroughThePage(view: RenderResult) {
       within(card).getByRole("button", { name: `Interrupt a shipping refund on order #${ORDER}` }),
     );
   });
-  const pending = agentdesk.getSnapshot().pending[0];
-  expect(pending, "the interrupt should ask for approval first").toBeDefined();
-  await act(async () => {
-    await agentdesk.approve(
-      pending!.id,
-      agentdesk.issueApprovalGesture({ actionId: pending!.id }, HUMAN),
-    );
-  });
+  await frames(1);
+  expect(agentdesk.getSnapshot().pending, "the call runs under a grant, not an approval").toEqual([]);
   return card;
 }
 
@@ -206,7 +237,7 @@ describe("the page shows the record, refuses the repeat, and lets a person settl
     expect(text).toContain(record.operationKey!);
     expect(text).toContain(record.executedBy!.name!);
     expect(text).toContain(`Order #${ORDER} shipping refunded`);
-    expect(text).toMatch(/approved by a person|no grant/i);
+    expect(text).toMatch(new RegExp(`grant ${record.grantId}`));
     expect(text).toMatch(/unknown/i);
     expect(view.container.querySelector("[data-unreconciled]")?.textContent).toBe("1");
   });
@@ -214,14 +245,14 @@ describe("the page shows the record, refuses the repeat, and lets a person settl
   it("shows the refusal of the same call again, in words, with its cause", async () => {
     const view = mountAt(`/agentdesk/orders/${ORDER}`);
     const card = await interruptThroughThePage(view);
-    const before = agentdesk.getSnapshot().pending.length;
     await act(async () => {
       fireEvent.click(
         within(card).getByRole("button", { name: `Interrupt a shipping refund on order #${ORDER}` }),
       );
     });
-    // Refused before any approval is asked for: nothing new is pending.
-    expect(agentdesk.getSnapshot().pending.length).toBe(before);
+    await frames(1);
+    // Refused outright: nothing is pending and nothing ran again.
+    expect(agentdesk.getSnapshot().pending).toEqual([]);
     const result = card.querySelector("[data-durability-result]")!.textContent ?? "";
     expect(result).toMatch(/refused/i);
     expect(result).toMatch(/because|cause/i);
