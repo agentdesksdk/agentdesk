@@ -1,0 +1,52 @@
+name: Release
+
+# Publishes @agentdesk/webmcp to npm when a version tag is pushed:
+#
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# Nothing here bumps a version. The tag must equal the version in
+# packages/webmcp/package.json, and the first step refuses the run if it
+# does not, so the published version is always the one someone tagged.
+#
+# Needs one repository secret: NPM_TOKEN, an npm granular access token with
+# publish rights on the @agentdesk scope. Provenance comes from the OIDC
+# token this job is granted below, not from the secret.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  # --provenance signs the tarball with this job's OIDC identity.
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Fails fast, before install, on a tag that names a different version
+      # from the package. Prints both values so the run log says which.
+      - run: node .github/workflows/check-release-tag.mjs "$GITHUB_REF_NAME"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      # Same order as ci.yml, and for the same reason: the apps typecheck
+      # and test against packages/webmcp/dist, so build first. Unlike CI these
+      # steps are not independent, because a single failure has to stop the
+      # publish, and the default step behaviour does exactly that.
+      - run: pnpm build
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm test:pack
+      - run: pnpm run check:docs
+      # prepack rebuilds the package; pnpm is on PATH from the setup above.
+      - run: npm publish --provenance --access public
+        working-directory: packages/webmcp
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
