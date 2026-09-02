@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { ROUTING_WEIGHTS, type RuntimeSnapshot } from "@agentdesk/webmcp";
 import { BOOTSTRAP } from "../instrumentation/sideBySide.ts";
 import { agentdesk, webmcpNative } from "../runtime/agentdesk.ts";
 import { useAnnouncer } from "./announcer.ts";
-import { authorityLine } from "./grant-text.ts";
+import { authorityClauses } from "./grant-text.ts";
 import { useRuntime } from "./hooks.ts";
 
 /**
@@ -104,7 +104,17 @@ export function Inspector() {
         <div className="stat-row">
           <span>Current authority</span>
           <span className="num authority" data-authority>
-            {authorityLine(snapshot.grants)}
+            {authorityClauses(snapshot.grants).map((parts, clause) => (
+              <Fragment key={clause}>
+                {clause > 0 ? "; " : null}
+                {parts.map((part, index) => (
+                  <Fragment key={index}>
+                    {index > 0 ? " " : null}
+                    <span className="nowrap">{part}</span>
+                  </Fragment>
+                ))}
+              </Fragment>
+            ))}
           </span>
         </div>
         <div className="stat-row">
