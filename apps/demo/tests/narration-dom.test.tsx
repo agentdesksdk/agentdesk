@@ -2,7 +2,8 @@
 import { act, cleanup, render, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { Inspector } from "../src/components/Inspector.tsx";
+import { agentVisibleTools, Inspector } from "../src/components/Inspector.tsx";
+import { BOOTSTRAP, BOOTSTRAP_TOOLS } from "../src/instrumentation/sideBySide.ts";
 import { Overview } from "../src/routes/Overview.tsx";
 import { agentdesk } from "../src/runtime/agentdesk.ts";
 import { resetStore } from "../src/data/store.ts";
@@ -11,13 +12,6 @@ const HUMAN = { id: "operator-1", name: "Amein", kind: "human" as const };
 
 const HERO_QUERY =
   "Find Alice Johnson's unshipped order. If she paid shipping, refund the shipping fee.";
-
-const BOOTSTRAP = new Set([
-  "find_capabilities",
-  "invoke_capability",
-  "get_context",
-  "get_action_status",
-]);
 
 function renderOverview() {
   return render(
@@ -132,6 +126,15 @@ describe("the overview narrates the demo from the live snapshot", () => {
     expect(counter(view.container, "agent-visible-tools")).toBe(
       String(visible.length),
     );
+
+    // The Inspector subtracts the instrumentation's bootstrap set, the same
+    // four names the side-by-side measurement subtracts, and no other.
+    expect([...BOOTSTRAP].sort()).toEqual([...BOOTSTRAP_TOOLS].sort());
+    const bootstrapOnWire = flat.nativeTools.filter((name) =>
+      (BOOTSTRAP_TOOLS as readonly string[]).includes(name),
+    );
+    expect(bootstrapOnWire).toHaveLength(BOOTSTRAP_TOOLS.length);
+    expect(agentVisibleTools(flat)).toBe(flat.nativeTools.length - BOOTSTRAP_TOOLS.length);
   });
 });
 

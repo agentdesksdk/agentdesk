@@ -145,20 +145,33 @@ by hand: an entry records a run somebody watched, or it does not exist.
 The eval's two arms run the catalog in `scripts/evals/catalog.mjs`
 headlessly: seven named capabilities (`refund_shipping`, `close_account`,
 `delete_all_orders`, `find_order`, `read_invoice`, `list_customers`,
-`add_order_note`) plus 41 `report_NN` filler tools. No page serves that
-catalog today. The Meridian Ops demo serves a different, 78-capability
-catalog, and of the names the task set expects only `refund_shipping` and
-`add_order_note` exist there: the demo has `get_invoice` where the task set
-expects `read_invoice`, `anonymize_customer` where it has `close_account`,
-nothing resembling `delete_all_orders`, and order 20991 is not in its seed.
-Scoring is by exact name, so on those four tasks a transcript captured
-against the demo measures the page's vocabulary rather than the model's
-judgement. Record what the client actually called anyway. Serving the eval
-catalog from a page is the other half of this work; it is not something a
-transcript may paper over.
+`add_order_note`) plus 41 `report_NN` filler tools. The same catalog is
+served as a page, `apps/p0/eval.html`, one arm per URL:
+
+- `/p0/eval.html?arm=baseline` for the flat arm
+- `/p0/eval.html?arm=agentdesk` for the routed arm
+
+The page mounts the catalog `buildCatalog` builds, imported from
+`scripts/evals/catalog.mjs`, on `document.modelContext` under the exposure
+the arm table in `scripts/evals/arms.mjs` names, with the arm read from the
+URL; the task set is imported from `v2.tasks.jsonl` the same way, so nothing
+is copied. With no `?arm=` it mounts nothing and offers the two links. It is
+served by the p0 app (`pnpm p0`, then
+`http://127.0.0.1:4177/p0/eval.html?arm=baseline`) and copied into
+`apps/demo/dist/p0/` by the assemble script on `pnpm build`, so a deployed
+site carries it at `/p0/eval.html` next to the demo.
+
+Drive the tasks there, not on the Meridian Ops demo. The demo serves a
+different, 78-capability catalog, and of the names the task set expects only
+`refund_shipping` and `add_order_note` exist there: the demo has
+`get_invoice` where the task set expects `read_invoice`,
+`anonymize_customer` where it has `close_account`, nothing resembling
+`delete_all_orders`, and order 20991 is not in its seed. Scoring is by exact
+name, so a transcript captured against the demo would measure the demo's
+vocabulary rather than the model's judgement.
 
 Before you start: `pnpm build` (the eval reads `packages/webmcp/dist`), then
-`pnpm dev` and open `http://127.0.0.1:4178`.
+`pnpm p0` and open the arm's URL above in your client.
 
 ### Clients that speak WebMCP
 
@@ -178,9 +191,15 @@ From the matrix in `docs/testing.md`:
 
 One transcript file per client and model, both in the file name.
 
+In a plain browser with no WebMCP client the page still mounts: the surface
+is registered into an in-page sink, the same shape `arms.mjs` records into,
+so the counters stay observable, and the banner reads "WebMCP native: NO"
+and says so. That is for checking the page, not for recording; nothing
+typed into it came from a model, so no transcript comes out of it.
+
 ### The six prompts, in order, per arm
 
-Drive all six on `/baseline`, then all six on `/agentdesk`. Type each
+Drive all six on `?arm=baseline`, then all six on `?arm=agentdesk`. Type each
 prompt exactly as written. `scripts/evals/tasks/v2.tasks.jsonl` is the
 source of truth and `scripts/evals/test/transcript-runbook.test.mjs` fails
 if this table stops quoting it.
@@ -196,13 +215,14 @@ if this table stops quoting it.
 
 ### Reset between tasks
 
-1. Click **Reset Demo** on the page. It restores seed state, refund state,
-   pending approvals, and the audit timeline.
+1. Press **Reset store to seed** on the page. It stops the runtime and
+   builds a fresh catalog on a fresh runtime, the unit `run.mjs` builds per
+   task, so one task's writes cannot decide the next task's availability.
 2. Start a new conversation in the client, so its cached tool list and
    context are fresh. On the routed arm the working set is rebuilt by the
    next `find_capabilities`; a stale client would otherwise hit tombstones
    and record `TOOL_RETIRED` calls that belong to the previous task.
-3. Between arms, navigate to the other route and do both steps again.
+3. Between arms, open the other arm's URL and do both steps again.
 
 ### The entry shape
 

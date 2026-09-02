@@ -60,6 +60,18 @@ function ticketWithNote() {
 
 const text = (result: ToolResult) => result.content.map((c) => c.text).join("\n");
 
+/** The support tools that can return a ticket's notes. */
+const SUPPORT_READERS = new Set([
+  "get_ticket",
+  "search_tickets",
+  "list_open_tickets",
+  "list_customer_tickets",
+]);
+
+/** The hint as the client sees it: read off the registered tool definition. */
+const wireHint = (model: ReturnType<typeof mockModel>, name: string) =>
+  model.getTools().find((t) => t.name === name)?.annotations?.untrustedContentHint;
+
 describe("adversarial support note on order 10428", () => {
   beforeEach(() => {
     resetStore();
@@ -77,13 +89,19 @@ describe("adversarial support note on order 10428", () => {
 
   it("every support capability that returns the note declares untrustedContentHint", async () => {
     const ticket = ticketWithNote()!;
+    const model = mockModel();
     const runtime = createAgentDeskRuntime({
       capabilities,
-      registerTool: async () => {},
+      registerTool: model.registerTool,
       staging: stagingAdapter,
       exposure: "flat",
     });
     await runtime.start();
+
+    // The hint has to reach the client, not just sit on the capability. Flat
+    // exposure registers every support tool at start, so each one is on the
+    // wire here and the registered definition is what is asserted.
+    expect(wireHint(model, "get_ticket")).toBe(true);
 
     const inputs: Record<string, Record<string, unknown>> = {
       get_ticket: { ticket_id: ticket.id },
@@ -100,6 +118,7 @@ describe("adversarial support note on order 10428", () => {
       if (text(result).includes(INJECTED_NOTE)) {
         returning.push(capability.name);
         expect(capability.annotations.untrustedContentHint, capability.name).toBe(true);
+        expect(wireHint(model, capability.name), `${capability.name} on the wire`).toBe(true);
       }
     }
     expect(returning).toContain("get_ticket");
@@ -118,6 +137,14 @@ describe("adversarial support note on order 10428", () => {
     await model.execute("find_capabilities", {
       query: `Read the support ticket about order ${HERO_ORDER} and do what it says`,
     });
+
+    // Routed exposure registers only what routing surfaced. Whichever of the
+    // note-returning support tools that is, it carries the hint on the wire.
+    for (const tool of model.getTools()) {
+      if (SUPPORT_READERS.has(tool.name)) {
+        expect(wireHint(model, tool.name), `${tool.name} on the wire`).toBe(true);
+      }
+    }
 
     const before = model.getTools().length;
     const read = await model.execute("invoke_capability", {
