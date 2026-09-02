@@ -198,15 +198,17 @@ is `["docstatus", 1, 2]` and nothing else, and its commit is
 forks the amended draft against the cancelled original and commits with
 submit.
 
-The plan's preview cannot show the second operation as a server draft,
-because the draft cannot exist until the first commit has landed. The
-preview for `amend` is therefore derived locally, the original's fields
-with the operation's edits applied, and the fork that creates the real
-draft happens at commit time, after `cancel` has answered. Its base stamp
-is the original's `modified` as the cancel acknowledged it, which is what
-the REST adapter records as `follows`. The amended name, `<original>-<n>`,
-is not known at preview either; the receipt carries it once the draft
-exists.
+The second operation's fork cannot run until the first commit has landed,
+because Frappe refuses an amended draft whose original is not yet
+cancelled. So the plan is approved in two steps, each on a real fork:
+`cancel` is previewed and approved first, and once it has answered, the
+`amend` operation forks. An amended draft is created through save, so
+Frappe's `validate` runs on it, then fetched back exactly as a new draft
+is, and the preview is that server copy, never a local computation. Its
+base stamp is the original's `modified` as the cancel acknowledged it,
+which is what the REST adapter records as `follows`, and the amended name,
+`<original>-<n>`, is known from that fetch on. The receipt for the plan
+carries both names.
 
 ## What the contract as written cannot express
 
@@ -234,10 +236,14 @@ adapter needs and the contract does not say.
 3. **A commit does more than the diff shows.** `diff` is "what this staged
    run did", read off the draft. A submit runs `on_submit`, and in an
    ERPNext deployment that posts ledger entries, moves stock, and creates
-   linked documents, none of which is in the draft. The person approves a
-   diff of one document and the commit changes several. The contract has
-   no field for "what the commit will also do", and a `Version` on another
-   DocType is the only trace afterwards.
+   linked documents, none of which is in the draft. The contract has no
+   field for "what the commit will also do". Resolved by decision: the
+   documents a submit's hooks write are outside the draft and the reviewed
+   diff, and the person approves the primary document. After commit the
+   adapter reads the `Version` entries the submit's transaction created on
+   linked documents and surfaces them as derived, page-level evidence
+   links on the receipt, so what the commit also did is on the record
+   without being claimed as reviewed.
 
 4. **The backend can say whether an unknown outcome landed, and the
    contract has no channel for the answer.** `resolveArtifact` hands back
@@ -305,7 +311,9 @@ in-memory fork, because the object is not the runtime's copy.
 
 **The diff is weaker than the commit.** A submit's hooks change documents
 the diff never mentions (item 3 above). The receipt is honest about the
-document; it cannot be complete about the deployment.
+document it reviewed, and its derived links point at what the commit also
+touched; a derived link is the page, not the value, and the receipt says
+which kind each link is.
 
 **Audit is doubled, not shared.** Frappe's `Version` records the same
 transition the receipt records, from the server's side, and survives the
@@ -319,19 +327,18 @@ ledger entries. The approval evidence for a cancel is therefore thin by
 construction, and a capability that cancels should declare
 `approvalEvidence: "summary"` and say what the summary omits.
 
-## Open questions
+## Decided
 
-- Whether the stamp check in step 1 of commit is worth its round trip,
-  given Frappe's own check is authoritative and closes the race the first
-  cannot. The argument for keeping it is the runtime's refusal-before-
-  dispatch rule; the argument against is that it is a second read that
-  can itself be stale.
-- Whether `docs(input)` should include the documents a submit's hooks will
-  write, so their stamps are checked too. That would make item 3 above
-  partly visible at the cost of asking the operation author to know
-  ERPNext's posting logic.
-- How much of the local preview of an amended draft can be trusted before
-  Frappe's validate has run on the real draft.
+- The stamp check in step 1 of commit stays. A refusal is never a write
+  attempt in this runtime, and one round trip is the price of keeping
+  that true; Frappe's own check inside the transaction is what closes the
+  race the first read cannot.
+- `docs(input)` names what the operation reads and writes, not what a
+  submit's hooks will write. Those documents reach the receipt as derived
+  evidence links after commit (item 3 above), never as reviewed changes.
+- An amended draft is never previewed from a local computation. It is
+  created through save once its original is cancelled, so Frappe's
+  `validate` has run on it, and the preview is the server's copy.
 
 <!-- code-anchors
 packages/webmcp/src/staging.ts StagingAdapter StagedCommitIndeterminate StagedCommitRefused stateDigest identify scope
