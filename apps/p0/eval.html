@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232456c8'/%3E%3Ctext x='16' y='22' font-family='sans-serif' font-size='14' font-weight='700' fill='white' text-anchor='middle'%3EEV%3C/text%3E%3C/svg%3E"
+    />
+    <title>AgentDesk eval page — the eval catalog on document.modelContext</title>
+    <style>
+      :root {
+        color: #1a2233;
+        background: #f6f7f9;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-size: 15px;
+      }
+      body {
+        max-width: 62rem;
+        margin: 1.5rem auto 4rem;
+        padding: 0 1rem;
+      }
+      h1 {
+        font-size: 1.4rem;
+        margin-bottom: 0.2rem;
+      }
+      h2 {
+        font-size: 0.95rem;
+        margin: 1.4rem 0 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #5b6577;
+      }
+      button {
+        margin: 0 0.4rem 0.4rem 0;
+        padding: 0.5rem 0.8rem;
+        background: #fff;
+        color: #1a2233;
+        border: 1px solid #cdd4de;
+        border-radius: 8px;
+        cursor: pointer;
+        font: inherit;
+        font-size: 0.9rem;
+      }
+      button:hover {
+        border-color: #2456c8;
+        color: #2456c8;
+      }
+      a {
+        color: #2456c8;
+      }
+      pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.8rem;
+        background: #fff;
+        border: 1px solid #e3e7ee;
+        border-radius: 10px;
+        padding: 0.8rem;
+        overflow: auto;
+        white-space: pre-wrap;
+        margin: 0;
+      }
+      .arm {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin: 0.6rem 0;
+      }
+      .arm .label {
+        font-size: 1.15rem;
+        font-weight: 700;
+      }
+      .arm .exposure {
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 0.85rem;
+        color: #5b6577;
+      }
+      .banner {
+        padding: 0.7rem 1rem;
+        border-radius: 10px;
+        margin: 1rem 0;
+        font-size: 0.9rem;
+      }
+      .banner.ok {
+        background: #e3f4ea;
+        border: 1px solid #94d3b2;
+        color: #1a7f4e;
+      }
+      .banner.warn {
+        background: #fdf3d7;
+        border: 1px solid #ecd9a0;
+        color: #9a6700;
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 10px;
+        margin: 0.8rem 0 1rem;
+      }
+      .stat {
+        background: #fff;
+        border: 1px solid #e3e7ee;
+        border-radius: 10px;
+        padding: 0.6rem 0.8rem;
+      }
+      .stat .label {
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #5b6577;
+      }
+      .stat .value {
+        font-size: 1.4rem;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      .cols {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      .pending-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 0;
+      }
+      .pending-row span {
+        flex: 1;
+        font-size: 0.85rem;
+      }
+      #pending {
+        background: #fff;
+        border: 1px solid #e3e7ee;
+        border-radius: 10px;
+        padding: 0.8rem;
+        font-size: 0.85rem;
+      }
+      ol {
+        line-height: 1.5;
+        font-size: 0.9rem;
+      }
+      #tasks li {
+        margin-bottom: 0.7rem;
+      }
+      #tasks blockquote {
+        margin: 0;
+        padding: 0.4rem 0.8rem;
+        border-left: 3px solid #2456c8;
+        background: #e8eefb;
+        border-radius: 0 8px 8px 0;
+        user-select: all;
+      }
+      .task-meta {
+        font-size: 0.8rem;
+        color: #5b6577;
+        margin-top: 2px;
+      }
+      code {
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        background: #eef1f6;
+        border-radius: 4px;
+        padding: 0 4px;
+        font-size: 0.85em;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>AgentDesk eval page</h1>
+    <p>
+      This page mounts the catalog <code>scripts/evals/catalog.mjs</code> builds,
+      the same one <code>pnpm eval</code> runs, on
+      <code>document.modelContext</code>. Connect a WebMCP client, paste one task
+      prompt at a time, approve or reject here when asked, and reset between
+      tasks. The arm comes from the URL.
+    </p>
+    <div class="arm" role="status" aria-live="polite">
+      <span class="label" id="arm-label">Reading arm…</span>
+      <span class="exposure" id="arm-exposure"></span>
+      <span id="arm-switch"></span>
+    </div>
+    <div id="support" class="banner warn">Checking WebMCP…</div>
+
+    <div id="runtime-panels">
+      <h2>Controls</h2>
+      <div>
+        <button id="btn-reset">Reset store to seed</button>
+        <span id="reset-status" role="status" aria-live="polite"></span>
+      </div>
+
+      <h2>Counters</h2>
+      <div class="stats">
+        <div class="stat"><div class="label">Catalog size</div><div class="value" id="stat-catalog">0</div></div>
+        <div class="stat"><div class="label">Native tools</div><div class="value" id="stat-native">0</div></div>
+        <div class="stat"><div class="label">Schema bytes</div><div class="value" id="stat-bytes">0</div></div>
+        <div class="stat"><div class="label">Pending approvals</div><div class="value" id="stat-pending">0</div></div>
+        <div class="stat"><div class="label">Orders refunded</div><div class="value" id="stat-refunded">0</div></div>
+        <div class="stat"><div class="label">Accounts closed</div><div class="value" id="stat-closed">0</div></div>
+      </div>
+
+      <div class="cols">
+        <div>
+          <h2>Active tools</h2>
+          <pre id="active-tools"></pre>
+        </div>
+        <div>
+          <h2>Retired tools (tombstones)</h2>
+          <pre id="retired-tools"></pre>
+        </div>
+      </div>
+
+      <h2>Pending approvals</h2>
+      <div id="pending">(no pending approvals)</div>
+
+      <h2>The task set (scripts/evals/tasks/v2.tasks.jsonl)</h2>
+      <ol id="tasks"></ol>
+
+      <h2>Invocation log</h2>
+      <pre id="invocations">(none yet)</pre>
+
+      <h2>Audit events</h2>
+      <pre id="events"></pre>
+    </div>
+    <script type="module" src="./eval.ts"></script>
+  </body>
+</html>

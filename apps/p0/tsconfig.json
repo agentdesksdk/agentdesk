@@ -9,7 +9,9 @@
     "noEmit": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "allowJs": true,
+    "types": ["vite/client"]
   },
   "include": ["*.ts", "tests"]
 }
