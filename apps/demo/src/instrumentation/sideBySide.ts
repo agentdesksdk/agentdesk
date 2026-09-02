@@ -16,6 +16,9 @@ export const BOOTSTRAP_TOOLS = [
   "get_action_status",
 ] as const;
 
+/** The same names as a set, for the places that filter a tool list by them. */
+export const BOOTSTRAP: ReadonlySet<string> = new Set<string>(BOOTSTRAP_TOOLS);
+
 /** The subset of an eval task fixture the probe needs. */
 export type SideBySideTask = {
   id: string;
@@ -47,9 +50,7 @@ export type ArmMeasurement = {
 };
 
 const applicationTools = (snapshot: RuntimeSnapshot): number =>
-  snapshot.nativeTools.filter(
-    (name) => !(BOOTSTRAP_TOOLS as readonly string[]).includes(name),
-  ).length;
+  snapshot.nativeTools.filter((name) => !BOOTSTRAP.has(name)).length;
 
 /**
  * Runs one task under the runtime's current exposure and reports the

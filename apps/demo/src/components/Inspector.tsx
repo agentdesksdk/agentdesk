@@ -1,15 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { ROUTING_WEIGHTS, type RuntimeSnapshot } from "@agentdesk/webmcp";
+import { BOOTSTRAP } from "../instrumentation/sideBySide.ts";
 import { agentdesk, webmcpNative } from "../runtime/agentdesk.ts";
 import { useAnnouncer } from "./announcer.ts";
 import { useRuntime } from "./hooks.ts";
-
-export const BOOTSTRAP = new Set([
-  "find_capabilities",
-  "invoke_capability",
-  "get_context",
-  "get_action_status",
-]);
 
 /**
  * How many application tools the agent can call right now, bootstrap aside.

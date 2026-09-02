@@ -81,6 +81,14 @@ describe("the eval page mounts the eval catalog", () => {
     expect([...first.store.refunded]).toEqual(["10428"]);
     expect(first.store.log).toEqual(["refund_shipping"]);
     expect(first.runtime.queryReceipts()).toHaveLength(1);
+
+    // The catalog's own guard sees the write: a second refund on the same
+    // order is refused at the runtime, not only visible in the store.
+    const again = await first.runtime.invoke("refund_shipping", { order_id: "10428" });
+    expect(again.code).toBe("CAPABILITY_UNAVAILABLE");
+    expect(again.data?.reasonCode).toBe("ALREADY_REFUNDED");
+    expect([...first.store.refunded]).toEqual(["10428"]);
+    expect(first.store.log).toEqual(["refund_shipping"]);
     await first.runtime.stop();
 
     // A fresh catalog carries a fresh store, exactly what run.mjs builds per
