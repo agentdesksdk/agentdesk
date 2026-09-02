@@ -1,5 +1,6 @@
 import { deepFreeze } from "./audit.ts";
 import { CapabilityUnavailableError, type Change } from "./capability.ts";
+import type { Actor } from "./plan.ts";
 
 /**
  * How an application stages, describes, and lands its own writes.
@@ -68,6 +69,13 @@ export type StagingAdapter<S> = {
    * condition is not resolved by failing to resolve it.
    */
   reconcile: (staged: S, resolution: StagedResolution) => void;
+  /**
+   * A durable key for an artifact that cannot be cloned, so a record of an
+   * unknown commit can name its artifact across a restart and the
+   * application's `resolveArtifact` can rebuild it. Optional; an adapter
+   * whose artifacts clone needs none.
+   */
+  identify?: (staged: S) => unknown;
 };
 
 /**
@@ -500,6 +508,12 @@ export type Unreconciled = {
   detail: string;
   /** What the human approved, kept as the thing to reconcile against. */
   changes: readonly Change[];
+  /** Who ran the capability whose commit became unknown. */
+  executedBy?: Actor;
+  /** The state digest the approval was bound to, when it had one. */
+  stateVersion?: string;
+  /** The grant that authorized the execution, when one did. */
+  grantId?: string;
   at: number;
 };
 
