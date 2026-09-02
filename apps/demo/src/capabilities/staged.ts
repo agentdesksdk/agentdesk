@@ -2,6 +2,7 @@ import {
   CapabilityUnavailableError,
   unavailable,
   type Change,
+  type Forked,
   type StagingAdapter,
 } from "@agentdesk/webmcp";
 import {
@@ -256,7 +257,8 @@ export const stagingAdapter: StagingAdapter<StagedBranch> = {
     release(staged);
 
     if (staged.mode === "rederive") {
-      const fresh = restage();
+      // This adapter's fork is synchronous, so its restage is too.
+      const fresh = restage() as Forked<StagedBranch>;
       const rederived = deriveChanges(
         fresh.staged.branch.base,
         fresh.staged.branch.head,

@@ -81,8 +81,6 @@ export type RestStagingOptions = {
 
 export type RestStagingAdapter = StagingAdapter<RestFork> & {
   identify: (fork: RestFork) => { fork: string; operation: string; input: Record<string, unknown> };
-  /** Fetches the rows `operation` names for `input`, so the fork that follows can be synchronous. */
-  prepare: (operation: string, input: Record<string, unknown>) => Promise<void>;
   /** Rebuilds a fork from the reference `identify` gave a persisted record. */
   resolveArtifact: (record: PersistedRecord) => RestFork | undefined;
 };
@@ -224,22 +222,7 @@ export function restStaging(options: RestStagingOptions): RestStagingAdapter {
     return seen;
   };
 
-  const adapter: RestStagingAdapter = {
-    operations: new Set(Object.keys(options.operations)),
-
-    scope: (run) => {
-      const outermost = overlay === null;
-      overlay ??= new Map();
-      try {
-        return run();
-      } finally {
-        if (outermost) {
-          overlay = null;
-        }
-      }
-    },
-
-    prepare: async (operation, input) => {
+  const prepare = async (operation: string, input: Record<string, unknown>): Promise<void> => {
       const declared = options.operations[operation];
       if (declared === undefined) {
         throw new Error(`no staged operation named ${operation}`);
@@ -265,10 +248,25 @@ export function restStaging(options: RestStagingOptions): RestStagingAdapter {
         rows.push({ resource: ref.resource, id: ref.id, version, row: body });
       }
       prepared.set(prepareKey(operation, input), rows);
+    };
+
+  const adapter: RestStagingAdapter = {
+    operations: new Set(Object.keys(options.operations)),
+
+    scope: (run) => {
+      const outermost = overlay === null;
+      overlay ??= new Map();
+      try {
+        return run();
+      } finally {
+        if (outermost) {
+          overlay = null;
+        }
+      }
     },
 
     // `previous` is ignored: nothing here is pinned to a clock or a seed.
-    fork(operation, input) {
+    fork: async (operation, input) => {
       const declared = options.operations[operation];
       if (declared === undefined) {
         throw new Error(`no staged operation named ${operation}`);

@@ -17,6 +17,9 @@ import type { Actor } from "./plan.ts";
  * own fork, can still lie. Placing all of it here makes that a single audited
  * integration point chosen at composition time rather than per-operation code.
  */
+/** What a fork produces: the adapter's artifact and the operation's result. */
+export type Forked<S> = { staged: S; result: unknown };
+
 export type StagingAdapter<S> = {
   /**
    * Names this adapter is willing to stage. Checked at `start`, so a
@@ -40,7 +43,7 @@ export type StagingAdapter<S> = {
     operation: string,
     input: Record<string, unknown>,
     previous?: S,
-  ) => { staged: S; result: unknown };
+  ) => Forked<S> | Promise<Forked<S>>;
   /** What this staged run did. The only source of a `derived` diff. */
   diff: (staged: S) => Change[];
   /**
@@ -58,7 +61,10 @@ export type StagingAdapter<S> = {
    * rejected with. Both mean the commit stopped before it wrote, which only
    * the adapter can establish.
    */
-  commit: (staged: S, restage: () => { staged: S; result: unknown }) => unknown;
+  commit: (
+    staged: S,
+    restage: () => Forked<S> | Promise<Forked<S>>,
+  ) => unknown;
   /**
    * Releases a staged run that will never land. Called at most once, and
    * only a successful return, or a promise that resolves, establishes
@@ -347,7 +353,8 @@ export function buildStageHandler<S>(
   };
 
   const stageOnce = (input: Record<string, unknown>, previous?: S) => {
-    const forked = adapter.fork(operation, input, previous);
+    // stub: a promise from fork flows through as if it were the artifact
+    const forked = adapter.fork(operation, input, previous) as Forked<S>;
     if (isThenable(forked?.result)) {
       (forked.result as Promise<unknown>).catch?.(() => {});
       releaseAndRethrow(
