@@ -77,6 +77,7 @@ export class ApprovalManager {
     preview: Change[],
     createdAt: number,
     stateVersion?: string,
+    grant?: ConsideredGrant,
   ): PendingAction {
     const snapshot = structuredClone(input);
     const storedPreview = structuredClone(preview) as Change[];
@@ -99,6 +100,7 @@ export class ApprovalManager {
       summary,
       preview: storedPreview,
       ...(stateVersion !== undefined ? { stateVersion } : {}),
+      ...(grant !== undefined ? { grant: structuredClone(grant) } : {}),
       createdAt,
     };
     this.records.set(id, { status: "PENDING", action });

@@ -285,7 +285,18 @@ export function matchesScope(
  */
 export class GrantStore {
   private readonly grants = new Map<string, Grant>();
+  /**
+   * The order in which grants last changed state. Two changes can land in
+   * the same millisecond, and "most recent" has to be a total order for
+   * the consult to be deterministic, so each change also takes a ticket.
+   */
+  private readonly changed = new Map<string, number>();
+  private ticket = 0;
   private nextId = 1;
+
+  private touch(id: string): void {
+    this.changed.set(id, ++this.ticket);
+  }
 
   issue(parsed: ParsedGrantRequest, by: HumanActor, at: number): LiveGrant {
     const grant: LiveGrant = deepFreeze({
@@ -300,6 +311,7 @@ export class GrantStore {
       state: "live",
     });
     this.grants.set(grant.id, grant);
+    this.touch(grant.id);
     return grant;
   }
 
@@ -325,10 +337,13 @@ export class GrantStore {
 
   /**
    * The first live grant whose scope covers the call wins. When none does,
-   * the considered grant is the one whose state best explains why, in this
-   * order: a live grant the call falls outside of, then an exhausted one,
-   * then a revoked one, then an expired one. That order puts the reason a
-   * person can act on first.
+   * a live grant the call falls outside of is named first, because it alone
+   * could still apply to a different input. Among the rest, the one whose
+   * state most recently changed is named, by the timestamp of the spend,
+   * revoke, or expiry that put it there: that is the grant the person most
+   * recently acted on, and the one an approval card should explain. A
+   * person who just pressed Revoke must not be told about the grant that
+   * ran out an hour ago.
    */
   consult(
     capability: string,
@@ -353,15 +368,21 @@ export class GrantStore {
     if (outside) {
       return { kind: "not_applied", grant: outside };
     }
-    for (const state of ["exhausted", "revoked", "expired"] as const) {
-      const grant = candidates.find((candidate) => candidate.state === state);
-      if (grant) {
-        return { kind: "not_applied", grant: { id: grant.id, outcome: state } };
-      }
+    const settled = candidates
+      .filter((grant) => grant.state !== "live")
+      .sort((a, b) => {
+        const byTime = changedAt(b) - changedAt(a);
+        return byTime !== 0
+          ? byTime
+          : (this.changed.get(b.id) ?? 0) - (this.changed.get(a.id) ?? 0);
+      });
+    const latest = settled[0];
+    if (latest === undefined) {
+      // Every candidate is live and every live one matched or was recorded
+      // above, so this line is unreachable; the type needs a return.
+      return { kind: "none" };
     }
-    // Every candidate is live and every live one matched or was recorded
-    // above, so this line is unreachable; the type needs a return.
-    return { kind: "none" };
+    return { kind: "not_applied", grant: { id: latest.id, outcome: latest.state } };
   }
 
   /**
@@ -381,6 +402,7 @@ export class GrantStore {
         ? { ...grant, state: "exhausted", remaining: 0, exhaustedAt: at }
         : { ...grant, remaining };
     this.grants.set(id, deepFreeze(next));
+    this.touch(id);
     return next;
   }
 
@@ -403,11 +425,13 @@ export class GrantStore {
       revokedBy: { ...by },
     });
     this.grants.set(id, revoked);
+    this.touch(id);
     return { ok: true, grant: revoked };
   }
 
   clear(): void {
     this.grants.clear();
+    this.changed.clear();
   }
 
   private settle(grant: Grant, at: number): Grant {
@@ -416,6 +440,21 @@ export class GrantStore {
     }
     const expired: Grant = deepFreeze({ ...grant, state: "expired", expiredAt: at });
     this.grants.set(grant.id, expired);
+    this.touch(grant.id);
     return expired;
+  }
+}
+
+/** When a grant entered its current state. A live grant's is its issue. */
+function changedAt(grant: Grant): number {
+  switch (grant.state) {
+    case "live":
+      return grant.issuedAt;
+    case "exhausted":
+      return grant.exhaustedAt;
+    case "revoked":
+      return grant.revokedAt;
+    case "expired":
+      return grant.expiredAt;
   }
 }
