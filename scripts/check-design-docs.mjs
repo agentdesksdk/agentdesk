@@ -193,6 +193,12 @@ const CLAIMS = [
   ["docs/architecture.md", /Commit is the exception: an adapter's\s+`commit` may return a promise, and the runtime awaits it/, "present", "architecture says a staged commit is awaited before the outcome is recorded"],
   ["docs/architecture.md", /the mirror moves when a commit's\s+transaction completes and not before/, "present", "architecture says the IndexedDB mirror follows the transaction"],
   ["docs/architecture.md", /A fork opened while a commit is in flight derives against the rows as\s+they were, without waiting/, "present", "architecture decides what a fork in the same tick derives against"],
+  ["docs/architecture.md", /A third adapter, over REST/, "present", "architecture describes the REST staging adapter"],
+  ["docs/architecture.md", /refused at prepare rather than\s+guessed at/, "present", "architecture says a resource with no version source is refused, not guessed"],
+  ["docs/architecture.md", /a 412 after a row\s+was acknowledged is `RestCommitPartial`, which the runtime records as\s+indeterminate/, "present", "architecture says partial application over REST is recorded as indeterminate with the acknowledged rows"],
+  ["docs/architecture.md", /\*Nothing is retried\*/, "present", "architecture says the REST adapter never retries a write"],
+  ["adapter-contract.md", /###\s*What the REST adapter needed/, "present", "adapter contract lists what the REST adapter needed"],
+  ["adapter-contract.md", /Partial application has no vocabulary/, "present", "adapter contract records the partial-application leak"],
   ["adapter-contract.md", /`identify` is consulted only when the artifact does not clone/, "present", "adapter contract records the identify-by-clone-failure leak"],
 ];
 
