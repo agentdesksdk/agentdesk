@@ -3,7 +3,6 @@ import { useNavigate, useParams } from "react-router-dom";
 import type { PresentationEvent } from "@agentdesk/webmcp";
 import { agentdesk } from "../runtime/agentdesk.ts";
 import { useAnnouncer } from "./announcer.ts";
-import { subscribeProof } from "./evidence.ts";
 import { revealTarget, shouldHandOffFocus } from "./reveal.ts";
 
 export type PresenceMode = "fast" | "guided";
@@ -48,6 +47,25 @@ export function AgentPresence({ mode }: { mode: PresenceMode }) {
   useEffect(() => {
     const unsubscribe = agentdesk.subscribePresentation(
       (event: PresentationEvent) => {
+        // A replay: the page asked the runtime to present an evidence link
+        // through `present`, which carries no execution id because nothing
+        // executed. A person pressed the control that asked, so the page
+        // moves, the anchor lights and takes focus, and the request is
+        // announced, in every presence mode. The runtime's own events keep
+        // their rules below: navigation and highlight only when guided,
+        // focus only through the handoff.
+        if (event.phase === "capability_completed" && event.executionId === undefined) {
+          if (event.route) {
+            navigateRef.current(`/${baseRef.current}${event.route}`);
+          }
+          if (event.reveal) {
+            revealTarget(event.reveal, revealTimer, { highlight: true, focus: true });
+          }
+          if (event.message) {
+            announceRef.current(event.message);
+          }
+          return;
+        }
         const guided = modeRef.current === "guided";
         // Focus handoff outlives fast mode. The Approve button that held
         // focus has just unmounted, so suppressing this alongside the
@@ -85,20 +103,6 @@ export function AgentPresence({ mode }: { mode: PresenceMode }) {
       window.clearTimeout(revealTimer.current);
     };
   }, []);
-
-  // A person pressed "Show me proof". That is an explicit request, so the
-  // anchor takes focus as well as the highlight, in every presence mode.
-  useEffect(
-    () =>
-      subscribeProof(({ link }) => {
-        navigateRef.current(`/${baseRef.current}${link.route}`);
-        if (link.reveal !== undefined) {
-          revealTarget(link.reveal, revealTimer, { highlight: true, focus: true });
-        }
-        announceRef.current(`Showing ${link.label}.`);
-      }),
-    [],
-  );
 
   return (
     <>

@@ -1,35 +1,21 @@
 import type { EvidenceLink } from "@agentdesk/webmcp";
-
-/** A person asked to be shown a link's proof. */
-export type ProofRequest = { link: EvidenceLink; at: number };
-
-export type ProofListener = (request: ProofRequest) => void;
-
-const listeners = new Set<ProofListener>();
+import { agentdesk } from "../runtime/agentdesk.ts";
 
 /**
- * The proof stream. Every "Show me proof" control publishes here, and the
- * presence component is the one subscriber, so a request takes the same
- * navigate-and-reveal path the runtime's presentation events take. The SDK
- * exposes no way to emit a presentation event on demand; this is the seam
- * that closes when it does.
+ * A person asked to be shown a link's proof. The request goes through the
+ * runtime's own presentation bus, as a replay of the navigate-and-reveal
+ * event the runtime emits for a completed write, so the one consumer that
+ * reveals a write reveals its proof by the same path. A replay carries no
+ * execution id, because nothing executed; that is how the consumer tells
+ * a person's request from the runtime's own events.
  */
-export function subscribeProof(listener: ProofListener): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-}
-
-export function showProof(link: EvidenceLink): void {
-  const request: ProofRequest = { link, at: Date.now() };
-  for (const listener of listeners) {
-    try {
-      listener(request);
-    } catch (err) {
-      console.error("agentdesk proof listener threw", err);
-    }
-  }
+export function presentProof(capability: string, link: EvidenceLink): void {
+  agentdesk.present({
+    capability,
+    route: link.route,
+    ...(link.reveal !== undefined ? { reveal: link.reveal } : {}),
+    message: `Showing ${link.label}.`,
+  });
 }
 
 /**

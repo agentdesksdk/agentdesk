@@ -462,7 +462,7 @@ export function ActivityPanel() {
                 {row.meta ? <div className="meta">{row.meta}</div> : null}
                 {!row.receipt && entry ? (
                   <div className="receipt-actions proof-row">
-                    <EvidenceControls links={entry.receipt.evidence ?? []} />
+                    <EvidenceControls capability={entry.capability} links={entry.receipt.evidence ?? []} />
                   </div>
                 ) : null}
                 {row.receipt ? (
@@ -500,7 +500,7 @@ export function ActivityPanel() {
                             {verificationLabel(entry.verification)}
                           </span>
                           <div className="receipt-actions">
-                            <EvidenceControls links={entry.receipt.evidence ?? []} />
+                            <EvidenceControls capability={entry.capability} links={entry.receipt.evidence ?? []} />
                             {(entry.receipt.affected ?? []).map((object) => (
                               <button
                                 key={`${object.kind}-${object.id}`}
