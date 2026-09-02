@@ -175,5 +175,6 @@ export {
   validationFailed,
   viewUnavailable,
   type AffectedObject,
+  type EvidenceLink,
   type Receipt,
 } from "./results.ts";
