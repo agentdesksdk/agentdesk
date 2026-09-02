@@ -4,6 +4,7 @@ export {
   defineCapability,
   parseCapabilityName,
   unavailable,
+  type AgentView,
   type AppContext,
   type Availability,
   type Capability,
@@ -172,6 +173,7 @@ export {
   receipt,
   toolRetired,
   validationFailed,
+  viewUnavailable,
   type AffectedObject,
   type Receipt,
 } from "./results.ts";

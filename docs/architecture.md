@@ -424,6 +424,91 @@ unapproved execution path, so there is no `stateVersion` on its result and
 nothing to check. The person bound their authority to a scope and a use
 count when they issued the grant, not to a state.
 
+## The agent sees a projection
+
+The human sees the whole application. The agent sees a role-shaped
+projection of it, declared once as `agentView({ state, actor })` and
+applied by the runtime on its side of the boundary to everything that
+crosses to the agent, so a capability cannot skip it.
+
+```ts
+const runtime = createAgentDeskRuntime({
+  capabilities,
+  agentView: ({ state, actor }) => {
+    const { paymentToken: _hidden, ...visible } = state;
+    return actor?.kind === "human" ? state : visible;
+  },
+});
+```
+
+**Where it is declared.** On the runtime, and optionally on a capability.
+The runtime's view is the outer bound. It runs first, so a capability's
+`agentView` sees only what the runtime's let through and can only narrow
+it, and it runs again after, so a capability's view that puts a key back
+does not get it across. A capability with no view of its own gets the
+runtime's. A runtime with no view declared behaves exactly as it did
+before this section existed.
+
+**What it applies to.** Tool results, including a handler's return value,
+the receipt on a completed result, and the `changes` on an indeterminate
+one; the approval preview on `APPROVAL_REQUIRED`; the routing report;
+`get_context`, including the application state it carries and whatever
+`describeContext` produces; `get_action_status`, including the stored
+result; and tombstone results. The view is applied to every plain record
+at every depth of a value and to every element of an array, so a handler
+that nests state does not slip it past a view written for the root. That
+is why a view has to be a subtraction over whatever it is handed: the
+runtime hands it every record that crosses, not only the root state, and a
+view that keeps a fixed set of keys would empty a handler's result. A
+change crosses only if the field it names would cross: each change is
+rebuilt as the one-field state it describes and passed through the view,
+and a field the view removes takes its change with it, before and after.
+
+**A hidden value is withheld wherever it appears.** A key view cannot see
+a handler that copies a hidden value under another name, or an author who
+writes it into a receipt's `entity` or a refusal's `reason`. So every
+result leaves through one seam, `crossing`, which projects the current
+state, takes every string that was in the state and is not in the
+projection as a hidden value, and withholds each occurrence in the
+result's text and data, in any key and inside any sentence. This is what
+makes "never appears" true rather than "not under that key". There are
+two tiers. Every hidden string is withheld by whole-value equality, at any
+depth under any key, which keeps the re-label case closed for a value of
+any length. Inside free text only a hidden string of at least eight
+characters is matched, longest first, because a shorter one is too common
+a substring: a hidden `US` would tear `STATUS` and `USB-C Dock`, a hidden
+`ok` would mangle `token`. So a secret shorter than eight characters is
+protected structurally and by whole value, not inside free text, and an
+author who needs a short value protected inside sentences must not write
+it into sentences. Only strings are matched: a hidden number or boolean is
+too short and too common to withhold by value without withholding the rest
+of the result, so a secret has to be a string to get this protection. The
+cost that remains is that a long hidden value which also legitimately
+appears elsewhere is withheld there too.
+
+**Exception text is withheld when a view is declared.** An exception
+message is written by whoever threw, and it can carry a field the view
+excludes, so a handler's error text, a preview's error, an indeterminate
+commit's detail, and a failed availability check's message stay on the
+human side, in the audit record and the unreconciled record, and the agent
+gets the fact and the execution to ask about. A reason an author wrote
+deliberately with `unavailable()` still crosses, subject to the hidden
+value check. With no view declared the runtime is what it was.
+
+**A throwing view fails closed and is audited.** The refusal is
+`VIEW_UNAVAILABLE`, in the result protocol, with reason code
+`AGENT_VIEW_FAILED` and a `capability_unavailable` audit event carrying the
+same code. It carries `completed`, so an agent whose write landed before
+its view failed is told not to retry it, with the execution and the receipt
+as evidence. Nothing the view would have projected is shown; the raw value
+never stands in for a failed projection. A view that fails while a preview
+is being prepared queues nothing.
+
+**The human side is not projected.** `getSnapshot()`, `subscribeAudit`,
+`queryReceipts`, `listUnreconciled`, the pending action a person approves,
+and the presentation stream carry the whole application. Only what crosses
+to the agent is projected.
+
 ## Execution lifecycle
 
 Every execution gets an `executionId` that correlates its
@@ -1417,7 +1502,9 @@ packages/webmcp/src/results.ts completed capabilityUnavailable approvalRequired 
 packages/webmcp/src/grants.ts Grant LiveGrant GrantRequest ScopeRule ConsideredGrant GrantOutcome GrantStore parseScope parseGrantRequest matchesScope consult spend revoke liveCapabilities
 packages/webmcp/src/runtime.ts adoptHumanActor authorizing considered queueApproval revokeGrant listGrants getGrant currentDigest hasPreviewSource
 packages/webmcp/src/staging.ts stateDigest
-packages/webmcp/src/results.ts approvalStale
+packages/webmcp/src/results.ts approvalStale viewUnavailable
+packages/webmcp/src/capability.ts AgentView agentView
+packages/webmcp/src/runtime.ts throughView changesThroughView hiddenStrings withhold crossing agentText viewFailed runInvocation approveInner
 packages/webmcp/src/approval.ts stateVersion
 packages/webmcp/src/plan.ts stateVersion
 packages/webmcp/src/receipts.ts grantId

@@ -13,7 +13,8 @@ export type ToolCode =
   | "PREVIEW_UNAVAILABLE"
   | "EXECUTION_CANCELLED"
   | "EXECUTION_INDETERMINATE"
-  | "APPROVAL_STALE";
+  | "APPROVAL_STALE"
+  | "VIEW_UNAVAILABLE";
 
 export type ToolResult = {
   content: Array<{ type: string; text: string }>;
@@ -402,6 +403,38 @@ export function executionCancelled(
         reason:
           "The runtime was stopped or reset while this execution was in flight.",
         next: "Re-check application state before retrying; the write may or may not have landed.",
+      },
+      situation,
+    ),
+    true,
+  );
+}
+
+/**
+ * The agent view projection failed, so nothing it would have projected is
+ * shown. `completed` says whether a write landed before the view failed,
+ * so an agent does not retry a write whose only failure was in showing it.
+ */
+export function viewUnavailable(
+  capability: string,
+  completed: boolean,
+  situation: Refusal,
+): ToolResult {
+  return coded(
+    "VIEW_UNAVAILABLE",
+    answered(
+      {
+        status: "VIEW_UNAVAILABLE",
+        code: "VIEW_UNAVAILABLE",
+        capability,
+        completed,
+        reasonCode: "AGENT_VIEW_FAILED",
+        reason: completed
+          ? "The execution completed. Its result is withheld because the agent view projection failed; a person can read it in the receipt."
+          : "The agent view projection failed, so nothing is shown.",
+        next: completed
+          ? "Do not retry the write. Ask a person to check the receipt and the projection."
+          : "Ask a person to check the projection, then call again.",
       },
       situation,
     ),
