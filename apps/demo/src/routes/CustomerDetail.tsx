@@ -111,6 +111,7 @@ export function CustomerDetail() {
                 <tbody>
                   {credits.map((credit) => (
                     <tr key={credit.id}>
+                      <td>{credit.id}</td>
                       <td>{credit.reason}</td>
                       <td>{fmtMoney(credit.amount)}</td>
                     </tr>
