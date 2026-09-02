@@ -225,7 +225,7 @@ export type AuthoredEvidenceLink = {
  * its links.
  */
 export type EvidenceLink = Omit<AuthoredEvidenceLink, "source"> & {
-  source?: "authored" | "derived";
+  source: "authored" | "derived";
 };
 
 /**

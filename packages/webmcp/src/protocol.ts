@@ -31,7 +31,7 @@ export type Evidence =
       label: string;
       route: string;
       reveal?: string;
-      source?: "authored" | "derived";
+      source: "authored" | "derived";
     };
 
 /**
