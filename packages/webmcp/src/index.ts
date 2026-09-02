@@ -26,6 +26,7 @@ export {
 } from "./capability.ts";
 export { CapabilityCatalog } from "./catalog.ts";
 export {
+  digestOf,
   stateDigest,
   StagedCommitIndeterminate,
   StagedCommitRefused,
@@ -137,6 +138,8 @@ export type { AuditEvent, AuditListener } from "./audit.ts";
 export {
   indexedDbPersistence,
   memoryPersistence,
+  sealOf,
+  verifyRecord,
   type IndexedDbLike,
   type IndexedDbPersistenceOptions,
   type PersistedArtifact,

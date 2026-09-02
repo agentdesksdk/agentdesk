@@ -58,7 +58,13 @@ import {
   type VerificationResult,
 } from "./plan.ts";
 import type { EvidenceLink, Receipt } from "./results.ts";
-import type { PersistenceAdapter } from "./persistence.ts";
+import {
+  sealOf,
+  verifyRecord,
+  type PersistedArtifact,
+  type PersistedRecord,
+  type PersistenceAdapter,
+} from "./persistence.ts";
 import {
   GestureStore,
   isApprovalGesture,
@@ -431,6 +437,140 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   // Staged outcomes nobody can call settled: a commit that threw after it may
   // have written, and a disposal that failed and left the artifact open.
   const unreconciled = new UnreconciledStore();
+  /**
+   * Where records and claims outlive this process. Absent means in memory
+   * and nothing below runs, so a runtime that declares none is what it was.
+   * Saves are queued in order and never awaited by the path that made the
+   * record: a persistence adapter that throws cannot change an outcome,
+   * only lose its own copy, and says so on the console.
+   */
+  const persistence: PersistenceAdapter | undefined = options.persistence;
+  let persisting: Promise<void> = Promise.resolve();
+  let persistsInFlight = 0;
+  function persist(work: () => void | Promise<void>): void {
+    if (persistence === undefined) {
+      return;
+    }
+    // Started at once when nothing is in flight, so a synchronous adapter
+    // has taken effect by the time the caller returns, and chained behind
+    // an asynchronous one still running, so saves land in order.
+    const start = (): Promise<void> => {
+      persistsInFlight += 1;
+      let settled: Promise<void>;
+      try {
+        settled = Promise.resolve(work()).then(() => undefined);
+      } catch (err) {
+        settled = Promise.reject(err);
+      }
+      return settled
+        .catch((err) => {
+          console.error("agentdesk persistence adapter threw", err);
+        })
+        .finally(() => {
+          persistsInFlight -= 1;
+        });
+    };
+    persisting = persistsInFlight === 0 ? start() : persisting.then(start);
+  }
+  /**
+   * A loaded artifact that is not the live object: the persisted
+   * description, kept until `reconcile` asks the adapter to rebuild it.
+   */
+  const PERSISTED = Symbol.for("agentdesk.persisted-artifact");
+  type PersistedHolder = { [PERSISTED]: PersistedRecord };
+  function isPersistedHolder(value: unknown): value is PersistedHolder {
+    return typeof value === "object" && value !== null && PERSISTED in value;
+  }
+  /** Idempotency keys claimed before a restart, by slot, with the input they were claimed for. */
+  const restoredClaims = new Map<string, string>();
+
+  /**
+   * How an artifact is written down. The object itself when it clones; the
+   * staging adapter's durable key when it does not; `lost` when it has
+   * neither. A lost artifact still surfaces and still guards, and only a
+   * resolver that can rebuild from the record alone can close it.
+   */
+  function describeArtifact(artifact: unknown): PersistedArtifact {
+    try {
+      return { kind: "value", value: structuredClone(artifact) };
+    } catch {
+      const identify = (options.staging as StagingAdapter<unknown> | undefined)?.identify;
+      if (identify !== undefined) {
+        try {
+          return { kind: "reference", reference: structuredClone(identify(artifact)) };
+        } catch {
+          return { kind: "lost" };
+        }
+      }
+      return { kind: "lost" };
+    }
+  }
+
+  /** Writes an open record down, with everything the runtime knows about it. */
+  function persistOpen(id: string): void {
+    if (persistence === undefined) {
+      return;
+    }
+    const found = unreconciled.open(id);
+    if (found === undefined) {
+      return;
+    }
+    const artifact = isPersistedHolder(found.artifact)
+      ? found.artifact[PERSISTED].artifact
+      : describeArtifact(found.artifact);
+    // The live record's own field order is kept, so the record that comes
+    // back serializes byte for byte as the one listed before the restart.
+    const unsealed: Omit<PersistedRecord, "seal"> = {
+      version: 1,
+      ...found.record,
+      changes: [...found.record.changes],
+      artifact,
+    };
+    const record: PersistedRecord = { ...unsealed, seal: sealOf(unsealed) };
+    persist(() => persistence.saveRecord(record));
+  }
+
+  /**
+   * Puts back what the adapter kept. A record that fails verification is
+   * refused and audited rather than trusted; a claim is remembered by slot
+   * so the same key is refused rather than replayed.
+   */
+  async function rehydrate(): Promise<void> {
+    if (persistence === undefined) {
+      return;
+    }
+    const loaded = await persistence.loadOpenRecords();
+    for (const candidate of loaded) {
+      const verified = verifyRecord(candidate);
+      if (!verified.ok) {
+        const id =
+          typeof candidate === "object" && candidate !== null && "id" in candidate
+            ? String((candidate as { id: unknown }).id)
+            : "unknown";
+        audit.append({
+          kind: "staged_reconcile_failed",
+          capability:
+            typeof candidate === "object" && candidate !== null && "capability" in candidate
+              ? String((candidate as { capability: unknown }).capability)
+              : "unknown",
+          recordId: id,
+          detail: `refused at load: ${verified.reason}`,
+          at: now(),
+        });
+        continue;
+      }
+      const { version: _version, seal: _seal, artifact, ...fields } = verified.record;
+      const record: Unreconciled = { ...fields, changes: [...fields.changes] };
+      const holder: unknown =
+        artifact.kind === "value" ? artifact.value : { [PERSISTED]: verified.record };
+      unreconciled.hydrate(record, holder);
+    }
+    for (const claim of await persistence.loadIdempotencyClaims()) {
+      if (claim.version === 1 && typeof claim.slot === "string") {
+        restoredClaims.set(claim.slot, claim.fingerprint);
+      }
+    }
+  }
   // Detached and frozen on the way in, so a caller mutating the object it
   // handed over cannot retroactively rewrite provenance already recorded,
   // and so a getter-backed property is read exactly once. The clone failure
@@ -1820,6 +1960,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
             detail: failure.detail,
             at: now(),
           });
+          persistOpen(record.id);
         },
       },
     );
@@ -1905,6 +2046,8 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     planId?: string | undefined;
     /** The grant that authorized this execution in place of an approval. */
     grantId?: string | undefined;
+    /** The state digest the approval was bound to, kept on an unknown outcome. */
+    stateVersion?: string | undefined;
     /**
      * An idempotency slot the caller already claimed. Present when the
      * caller had to know it owned this execution before doing work that
@@ -2050,6 +2193,21 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     }
     const slot = `${capability.name}:${idempotencyKey}`;
     const fingerprint = fingerprintInput(input);
+    // A key claimed before a restart has a claim and no result. Replaying
+    // is impossible and re-executing is the double-apply the key exists to
+    // prevent, so the call is refused either way, with the cause.
+    const restored = restoredClaims.get(slot);
+    if (restored !== undefined) {
+      return {
+        kind: "refused",
+        result: idempotencyConflict(
+          capability.name,
+          idempotencyKey,
+          refusal(capability),
+          restored === fingerprint ? "after_restart" : "different_input",
+        ),
+      };
+    }
     const previous = idempotency.get(slot);
     if (previous) {
       if (previous.fingerprint !== fingerprint) {
@@ -2083,6 +2241,9 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       settled: false,
     };
     idempotency.set(slot, entry);
+    persist(() =>
+      persistence!.saveIdempotencyClaim({ version: 1, slot, fingerprint, at: now() }),
+    );
     return {
       kind: "won",
       settle: (result) => {
@@ -2124,6 +2285,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       idempotencyKey,
       planId,
       grantId,
+      stateVersion,
       humanInitiated = false,
       actor: actingActor,
     } = opts;
@@ -2375,10 +2537,14 @@ export function createAgentDeskRuntime<S = unknown>(options: {
             detail: message,
             changes: err.changes,
             ...(planId !== undefined ? { planId } : {}),
+            ...(actingActor !== undefined ? { executedBy: actingActor } : {}),
+            ...(stateVersion !== undefined ? { stateVersion } : {}),
+            ...(grantId !== undefined ? { grantId } : {}),
             at: now(),
           },
           err.artifact,
         );
+        persistOpen(record.id);
         audit.append({
           kind: "execution_indeterminate",
           capability: capability.name,
@@ -2507,6 +2673,9 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       const outcome = await executeNow(routed, operation.input, {
         planId,
         actor: executor,
+        ...(operation.stateVersion !== undefined
+          ? { stateVersion: operation.stateVersion }
+          : {}),
         ...(proposal ? { commit: proposal.commit } : {}),
       });
       if (!outcome.ok && !outcome.indeterminate) {
@@ -2524,6 +2693,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
             planId,
             operationIndex: index,
           });
+          persistOpen(outcome.indeterminate.recordId);
           return {
             capability: operation.capability,
             ...correlation,
@@ -2946,6 +3116,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     const outcome = await executeNow(routed, action.input, {
       actor: actingActor,
       humanInitiated: true,
+      ...(action.stateVersion !== undefined ? { stateVersion: action.stateVersion } : {}),
       ...(proposal ? { commit: proposal.commit } : {}),
     });
     // approvals.resolve inserts, so resolving after a reset put the cleared
@@ -2968,6 +3139,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       // The artifact is deliberately not discarded. It is the evidence a
       // human reconciles against, and nothing here proves it did not land.
       unreconciled.attach(outcome.indeterminate.recordId, { actionId });
+    persistOpen(outcome.indeterminate.recordId);
       approvals.resolve(actionId, {
         status: "INDETERMINATE",
         action,
@@ -3061,6 +3233,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           );
         }
       }
+      await rehydrate();
       await surface.reconcile(desiredNative());
       started = true;
       emit();
@@ -3122,6 +3295,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       proposals.discardAll();
       approvals.clear();
       idempotency.clear();
+      restoredClaims.clear();
       plans.clear();
       receipts.clear();
       grants.clear();
@@ -3903,6 +4077,34 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       if (!parsed.ok) {
         return { ok: false, reason: parsed.reason };
       }
+      // An artifact that came back from persistence as a description rather
+      // than the object is rebuilt here, by the application's resolver. One
+      // that cannot be rebuilt leaves the record open and says so, because
+      // closing a record whose artifact nobody can hand back would settle
+      // nothing in the application.
+      let artifact = found.artifact;
+      if (isPersistedHolder(artifact)) {
+        const rebuilt = persistence?.resolveArtifact?.(artifact[PERSISTED]);
+        if (rebuilt === undefined) {
+          const detail =
+            persistence?.resolveArtifact === undefined
+              ? "the artifact was persisted as a reference and the persistence adapter has no resolveArtifact to rebuild it"
+              : "the persistence adapter's resolveArtifact could not rebuild the artifact";
+          audit.append({
+            kind: "staged_reconcile_failed",
+            capability: found.record.capability,
+            recordId: found.record.id,
+            detail,
+            at: now(),
+          });
+          emit();
+          return {
+            ok: false,
+            reason: `${found.record.id} stays open: ${detail}`,
+          };
+        }
+        artifact = rebuilt;
+      }
       // Only the adapter can make the artifact terminal, and only a
       // successful return says it did. A throw leaves the record and its
       // evidence exactly where they were.
@@ -3910,7 +4112,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         // The artifact came from this adapter's own `fork`, so handing it
         // back is the one place the erased type is reconstituted.
         (options.staging as StagingAdapter<unknown>).reconcile(
-          found.artifact,
+          artifact,
           parsed.resolution,
         );
       } catch (err) {
@@ -3929,6 +4131,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         };
       }
       unreconciled.settle(found.record.id);
+      persist(() => persistence!.settleRecord(found.record.id));
       audit.append({
         kind: "staged_reconciled",
         capability: found.record.capability,
