@@ -1,31 +1,55 @@
-import { createWebMcpClient, type Actor, type ToolResult } from "@agentdesk/webmcp";
-import { ARMS } from "../../scripts/evals/arms.mjs";
 import {
-  armFromSearch,
+  createWebMcpClient,
+  type Actor,
+  type NativeToolDefinition,
+  type RegisterToolOptions,
+  type ToolResult,
+} from "@agentdesk/webmcp";
+import {
+  cellFromSearch,
+  cellHref,
   createEvalRuntime,
+  EVAL_CELLS,
   EVAL_TASKS,
-  type ArmName,
+  type Cell,
 } from "./eval-page.ts";
 
 /** The person driving the tasks. Approving is a human act, not the agent's. */
 const OPERATOR: Actor = { id: "evaluator", name: "Evaluator", kind: "human" };
 
-type ModelContextHost = { modelContext?: { registerTool?: unknown } };
+type NativeRegisterTool = (
+  tool: NativeToolDefinition,
+  options?: RegisterToolOptions,
+) => Promise<void> | void;
+type ModelContextHost = { modelContext?: { registerTool?: NativeRegisterTool } };
 
-/** True when the browser exposes real WebMCP. */
-const webmcpNative =
-  typeof (document as unknown as ModelContextHost).modelContext?.registerTool ===
-  "function";
+/** The browser's own registration, when it exposes real WebMCP. */
+const nativeRegisterTool = (document as unknown as ModelContextHost).modelContext?.registerTool;
+const webmcpNative = typeof nativeRegisterTool === "function";
 
 /**
- * Without native WebMCP the surface is registered into an in-page sink, the
- * same shape of sink arms.mjs records into, so the counts a client would be
- * handed stay observable. The banner says which of the two is in effect.
+ * The page always supplies the runtime's `registerTool`, because that is
+ * where the cell's shape is applied: `createEvalRuntime` wraps every tool
+ * before it reaches the sink below or, when the browser has WebMCP, the
+ * page's `document.modelContext`. A client on a bare cell therefore holds
+ * bare tools; the runtime is never handed the native surface directly.
+ * Without native WebMCP the surface goes into an in-page sink, the same
+ * shape of sink arms.mjs records into, so the counts stay observable.
  */
-function newSession(arm: ArmName) {
+function newSession(cell: Cell) {
+  const register: NativeRegisterTool = webmcpNative
+    ? (tool, options) => nativeRegisterTool!.call(
+        (document as unknown as ModelContextHost).modelContext,
+        tool,
+        options,
+      )
+    : async () => {};
   return createEvalRuntime({
-    arm,
-    ...(webmcpNative ? {} : { registerTool: async () => {} }),
+    arm: cell.arm,
+    shape: cell.shape,
+    registerTool: async (tool, options) => {
+      await register(tool, options);
+    },
   });
 }
 
@@ -37,42 +61,44 @@ function el(id: string): HTMLElement {
   return node;
 }
 
-function armLink(name: ArmName): HTMLAnchorElement {
+function cellLink(cell: Cell): HTMLAnchorElement {
   const link = document.createElement("a");
-  link.href = `?arm=${name}`;
-  link.textContent = ARMS[name].label;
+  link.href = cellHref(cell);
+  link.textContent = cell.label;
   return link;
 }
 
-const arm = armFromSearch(location.search);
+const cell = cellFromSearch(location.search);
 
-if (arm === null) {
-  // No arm, no runtime. Picking one silently would leave a person driving
-  // tasks against an exposure they did not choose.
-  el("arm-label").textContent = "No arm selected";
+if (cell === null) {
+  // No cell, no runtime. Picking an arm or a shape silently would leave a
+  // person driving tasks against a cell they did not choose, and recording
+  // the transcript under the wrong one.
+  el("arm-label").textContent = "No cell selected";
   el("arm-exposure").textContent = "";
   el("support").textContent =
-    "Add ?arm=baseline or ?arm=agentdesk to the URL. Nothing is mounted until an arm is chosen.";
+    "Add ?arm=baseline or ?arm=agentdesk and ?shape=structured or ?shape=bare to the URL. Nothing is mounted until both are chosen.";
   el("support").className = "banner warn";
   const chooser = el("arm-switch");
   chooser.textContent = "";
-  for (const name of Object.keys(ARMS) as ArmName[]) {
-    chooser.append(armLink(name), document.createTextNode(" "));
+  for (const option of Object.values(EVAL_CELLS)) {
+    chooser.append(cellLink(option), document.createTextNode(" "));
   }
   el("runtime-panels").hidden = true;
 } else {
-  const armName = arm.arm as ArmName;
-  let session = newSession(armName);
+  // Narrowed once; the closures below outlive the check above.
+  const current: Cell = cell;
+  let session = newSession(current);
   let unsubscribe = () => {};
   const invocationLog: string[] = [];
 
-  el("arm-label").textContent = arm.label;
-  el("arm-exposure").textContent = `exposure: ${arm.exposure}`;
+  el("arm-label").textContent = current.label;
+  el("arm-exposure").textContent = `exposure: ${current.exposure} · shape: ${current.shape}`;
   const switcher = el("arm-switch");
   switcher.textContent = "";
-  for (const name of Object.keys(ARMS) as ArmName[]) {
-    if (name !== armName) {
-      switcher.append(document.createTextNode("Switch to "), armLink(name));
+  for (const option of Object.values(EVAL_CELLS)) {
+    if (option !== current) {
+      switcher.append(document.createTextNode("Switch to "), cellLink(option), document.createTextNode(" "));
     }
   }
 
@@ -91,8 +117,8 @@ if (arm === null) {
     const { runtime } = session;
     const snapshot = runtime.getSnapshot();
     el("support").textContent = webmcpNative
-      ? "WebMCP native: YES. document.modelContext.registerTool is live; connect a client and paste a task prompt."
-      : "WebMCP native: NO. The surface is registered into an in-page sink so the counts below are what a client would be handed. For a real run open this page in a WebMCP-capable client (Codex in-app browser, or Chrome with chrome://flags/#enable-webmcp-testing). window.agentdesk works in-page either way.";
+      ? `WebMCP native: YES. document.modelContext.registerTool is live and every tool is handed over in the ${current.shape} shape; connect a client and paste a task prompt.`
+      : `WebMCP native: NO. The surface is registered into an in-page sink in the ${current.shape} shape, so the counts below are what a client would be handed. For a real run open this page in a WebMCP-capable client (Codex in-app browser, or Chrome with chrome://flags/#enable-webmcp-testing). window.agentdesk works in-page either way and is not projected.`;
     el("support").className = `banner ${webmcpNative ? "ok" : "warn"}`;
 
     el("stat-catalog").textContent = String(snapshot.catalogSize);
@@ -153,7 +179,9 @@ if (arm === null) {
     unsubscribe = session.runtime.subscribe(() => paint());
     await session.runtime.start();
     // The consumer surface, for manual getTools/executeTool checks, as on the
-    // compatibility harness.
+    // compatibility harness. `window.agentdesk` is the runtime itself and is
+    // not projected; a client reaches the projected tools through
+    // document.modelContext.
     Object.assign(window, {
       agentdesk: session.runtime,
       agentdeskClient: createWebMcpClient(),
@@ -168,7 +196,7 @@ if (arm === null) {
       unsubscribe();
       unsubscribe = () => {};
       await session.runtime.stop();
-      session = newSession(armName);
+      session = newSession(current);
       invocationLog.length = 0;
       await mount();
       el("reset-status").textContent = `Store reset to seed at ${new Date().toLocaleTimeString([], { hour12: false })}.`;

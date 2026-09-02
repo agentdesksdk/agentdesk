@@ -5,6 +5,7 @@ import {
   consideredGrantText,
   grantOrderId,
   grantStateText,
+  grantUsesText,
   outcomeWords,
   receiptAuthorityText,
 } from "../src/components/grant-text.ts";
@@ -53,6 +54,21 @@ describe("grant words", () => {
         grant({ id: "GRT-2", remaining: 4, scope: [] } as unknown as Partial<Grant>),
       ]),
     ).toBe("refund shipping ≤ 1 use on order 10428; refund shipping ≤ 4 uses");
+  });
+
+  it("the Uses row keeps its live wording, and reads unused of granted once the grant is not live", () => {
+    expect(grantUsesText(grant({ remaining: 2 }))).toBe("2 of 3 uses left");
+    expect(grantUsesText(grant({ state: "exhausted", remaining: 0, exhaustedAt: 9 } as Partial<Grant>))).toBe(
+      "all 3 uses spent",
+    );
+    expect(grantUsesText(grant({ state: "expired", remaining: 1, expiredAt: 9 } as Partial<Grant>))).toBe(
+      "1 use unused of 3 granted",
+    );
+    expect(
+      grantUsesText(
+        grant({ state: "revoked", remaining: 2, revokedAt: 9, revokedBy: OPERATOR } as Partial<Grant>),
+      ),
+    ).toBe("2 uses unused of 3 granted");
   });
 
   it("every grant state is words, never a colour", () => {

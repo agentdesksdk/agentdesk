@@ -9,8 +9,8 @@ import {
   grantRevokedAnnouncement,
   grantSentence,
   grantStateText,
+  grantUsesText,
   isGrantOnOrder,
-  usesText,
 } from "./grant-text.ts";
 import { useRuntime } from "./hooks.ts";
 
@@ -178,9 +178,7 @@ export function GrantCard({ orderId }: { orderId: string }) {
             </div>
             <div className="stat-row">
               <span>Uses</span>
-              <span className="num">
-                {grant.remaining} of {usesText(grant.uses)} left
-              </span>
+              <span className="num">{grantUsesText(grant)}</span>
             </div>
             <div className="stat-row">
               <span>Time</span>

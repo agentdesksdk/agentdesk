@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RuntimeSnapshot, ToolResult, Unreconciled } from "@agentdesk/webmcp";
 import { armCommitFault, disarmCommitFault } from "../capabilities/staged.ts";
 import { agentdesk } from "../runtime/agentdesk.ts";
@@ -104,6 +104,19 @@ export function DurabilityCard({ orderId }: { orderId: string }) {
   /** The approval this card asked for and nobody has decided yet. */
   const [asked, setAsked] = useState<string | undefined>(undefined);
   const open = agentdesk.listUnreconciled().filter((r) => r.capability === "refund_shipping");
+
+  // Reset Demo. The audit only ever grows, or holds at its bound, except
+  // when the runtime is reset, which empties it and emits before anything
+  // is appended; a snapshot with a shorter audit than the last one seen is
+  // that reset, and the card's last result goes with the state it described.
+  const seenAudit = useRef(snapshot.audit.length);
+  useEffect(() => {
+    if (snapshot.audit.length < seenAudit.current) {
+      setOutcome("");
+      setAsked(undefined);
+    }
+    seenAudit.current = snapshot.audit.length;
+  }, [snapshot.audit.length]);
 
   // The decision arrives on the approval card, so it is read off the first
   // snapshot that carries it, and announced once.
