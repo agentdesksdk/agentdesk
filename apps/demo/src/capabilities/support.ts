@@ -21,6 +21,13 @@ import {
 
 const domain = "support";
 
+/**
+ * A ticket thread is written by customers. Every capability that returns
+ * one hands the model text nobody on this side authored, and says so, so a
+ * note that reads like an instruction arrives labelled as content.
+ */
+const untrustedContentHint = true;
+
 export const supportCapabilities: Capability[] = [
   createReadCapability({
     name: "list_open_tickets",
@@ -30,6 +37,7 @@ export const supportCapabilities: Capability[] = [
     intents: ["open tickets", "support queue"],
     keywords: ["ticket", "open", "queue", "support"],
     routes: ["/support"],
+    untrustedContentHint,
     inputSchema: obj({}),
     execute: () => {
       const weight = { high: 0, normal: 1, low: 2 } as const;
@@ -47,6 +55,7 @@ export const supportCapabilities: Capability[] = [
     keywords: ["ticket", "thread"],
     entities: ["ticketId"],
     routes: ["/support"],
+    untrustedContentHint,
     inputSchema: obj({ ticket_id: s("Ticket id like T-2001") }, ["ticket_id"]),
     execute: (input) => requireTicket(input),
   }),
@@ -57,6 +66,7 @@ export const supportCapabilities: Capability[] = [
     domain,
     keywords: ["ticket", "search", "find"],
     routes: ["/support"],
+    untrustedContentHint,
     inputSchema: obj({ query: s("Subject fragment or customer name") }, ["query"]),
     execute: (input) => {
       const query = requireStr(input, "query").toLowerCase();
@@ -78,6 +88,7 @@ export const supportCapabilities: Capability[] = [
     domain,
     keywords: ["ticket", "customer"],
     entities: ["customerId"],
+    untrustedContentHint,
     inputSchema: obj({ customer_id: s("Customer id") }, ["customer_id"]),
     execute: (input) => {
       const customer = requireCustomer(input);
