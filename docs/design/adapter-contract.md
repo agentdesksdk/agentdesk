@@ -253,8 +253,82 @@ detection, which is about application state changing under a plan.
 `docs/architecture.md` covers that. This is about the contract itself
 moving, and the two are independent.
 
+## What the staging contract did not say
+
+Status: implemented. This section is about a different contract from the
+one above: `StagingAdapter` in `packages/webmcp/src/staging.ts`, the
+fork, diff, commit, release interface an application binds once so the
+runtime can derive the evidence a human approves. It had one
+implementation, the demo's in-memory store. The second, `indexedDbStaging`
+in `packages/webmcp/src/indexeddb-staging.ts`, is over a store that is
+neither in memory nor synchronous, and building it showed where the
+contract is silent. Each item is something the implementation needed and
+the contract did not say.
+
+1. **The contract is synchronous and says nothing about stores that are
+   not.** `fork`, `diff`, `commit`, and `release` return values, and the
+   runtime never awaits what `commit` returns. IndexedDB can only be read
+   or written through requests that settle later. The adapter therefore
+   needs an in-process mirror of the rows it governs, loaded before the
+   first fork, and the contract has no `open` or ready hook: the
+   application has to await the adapter's own `open()` before the runtime
+   starts, and a fork against an unloaded mirror is refused by the adapter
+   throwing, not by anything the runtime checks at `start`.
+
+2. **A commit that has returned cannot become refused or indeterminate.**
+   The only check that sees a second tab is the version check inside the
+   commit's own transaction, and its outcome arrives after `commit`
+   returned. The contract has no channel for a late outcome, so the runtime
+   has already recorded `execution_completed` when the database refuses the
+   write; the adapter reports it through `flush()`, outside the contract.
+   The corollary is that for a transactional store nothing synchronous in a
+   commit is ever indeterminate: a failure before return is a refusal,
+   because IndexedDB rolls back, and the indeterminacy the contract models
+   is exactly the part the contract cannot see.
+
+3. **A commit interrupted by an unload leaves no runtime record.**
+   `StagedCommitIndeterminate` exists only when `commit` throws. A page
+   that unloads between `commit` returning and its transaction completing
+   throws nothing, so the fork's row in the staging store is the only
+   trace, and the contract never asks an adapter what it found open at
+   start. The adapter loads those forks and `resolveArtifact` can hand
+   them back, but the runtime has no record to ask with.
+
+4. **`identify` is consulted only when the artifact does not clone.** An
+   artifact made of plain rows clones, so the record would carry a second
+   copy of the rows rather than the key, and the two copies could
+   disagree. The adapter makes its artifact deliberately uncloneable by
+   keeping the operation on it as a function. An adapter should be able to
+   say "key me" without that trick.
+
+5. **`resolveArtifact` assumes the artifact still exists.** The fork's row
+   is deleted in the commit's own transaction, because that is what makes
+   the commit atomic, so a landed commit's fork is gone by the time a
+   record of an unknown outcome asks for it. Here the absence is the
+   answer: a row deleted only by a completed commit or a release. The
+   adapter hands back an empty fork under the id so the record can still be
+   settled, and the reference carries the operation name too, because an
+   id alone rebuilds nothing.
+
+6. **`previous` and `restage` are offered without a way to decline them.**
+   Nothing here is pinned to a clock or a seed, so `previous` is ignored
+   and `restage` is never called. The contract should say that an adapter
+   may ignore both, and that ignoring them means a second run of the same
+   input against the same rows is the same run.
+
+7. **What "the state the human reviewed" is, is the adapter's to invent.**
+   The contract's `stateDigest` covers each change's field and `before`
+   value. Whether a row an operation only read is part of the reviewed
+   state, and what a row's version is, the contract leaves open. This
+   adapter puts every row the operation read or wrote in the fork's base
+   at its version, so a decision made on a row that later moved is refused
+   even when the diff did not mention that row.
+
 <!-- code-anchors
 packages/webmcp/src/receipts.ts ReceiptStore StoredReceipt
 packages/webmcp/src/capability.ts Change RiskLevel untrustedContentHint
 packages/webmcp/src/plan.ts expectedRevision
+packages/webmcp/src/staging.ts StagingAdapter StagedCommitIndeterminate stateDigest identify
+packages/webmcp/src/indexeddb-staging.ts indexedDbStaging open flush resolveArtifact STAGING_STORE
+packages/webmcp/src/runtime.ts describeArtifact
 -->

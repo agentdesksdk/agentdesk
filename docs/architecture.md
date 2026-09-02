@@ -1021,6 +1021,53 @@ Meridian Ops forks in `apps/demo/src/data/store.ts`, derives and merges in
 `apps/demo/src/data/branch.ts`, and stages in
 `apps/demo/src/capabilities/staged.ts`.
 
+**A second adapter, over IndexedDB.** `indexedDbStaging({ name, version?,
+indexedDB?, stores, operations })` in `packages/webmcp/src/indexeddb-staging.ts`
+holds the same contract against a store that is neither in memory nor
+synchronous, which is what makes it a test of the contract rather than of
+the demo. Its decisions, each of which the contract left to it:
+
+- *A row's version* is an integer the adapter owns on every row it governs.
+  An absent row is `null`, a row with no version reads as 0, and a row a
+  commit writes lands with its base version plus one. The landing version
+  is fixed at fork time, so a later operation in the same plan derives
+  against it and the commit writes exactly it.
+- *A fork snapshots only the rows the operation named*: every row it read or
+  wrote through the draft, each at its version, in `base`, and every row it
+  wrote in `head`. Reads are in the base because an operation's output can
+  depend on a row it did not write. The fork persists itself under its own
+  id in an `agentdesk_staging` object store the moment it opens.
+- *Diff* derives `Change[]` from the staged rows against the base rows, one
+  change per field that differs, named `store:id.field`.
+- *Commit* checks every base row's version against this process's mirror and
+  refuses `APPROVAL_STALE` before anything is dispatched. It then runs one
+  readwrite transaction that re-reads every base row, aborts if any moved
+  under a writer this process could not see, and otherwise puts every
+  staged row and deletes the fork in that same transaction. When the
+  transaction aborts after partial application, the adapter does nothing:
+  IndexedDB rolls back every write the transaction held, so there is
+  nothing to undo, and `flush()` reports the refusal.
+- *Release* drops the fork and its row. A commit after a release refuses
+  with `StagedCommitRefused`, which the runtime reads as a commit that never
+  dispatched.
+- *identify* hands out the fork id and its operation name; `resolveArtifact`
+  hands back the fork under that id after a reload, or an empty fork under
+  that id when the commit's own transaction already deleted the row, so a
+  record of an unknown commit can be settled either way. The fork holds its
+  operation as a function precisely so the artifact does not clone and the
+  record carries the key rather than a second copy of the rows.
+
+The contract is synchronous and IndexedDB is not. The adapter keeps an
+in-process mirror of the governed rows, loaded once by `open()`, which the
+application awaits before the runtime starts; every IndexedDB write goes
+through one serialized queue that `flush()` settles. The mirror is a single
+writer's view: a second tab's write is caught by the transaction's own
+version check and refused by the database, but the report arrives after
+`commit` returned, which is the leak `docs/design/adapter-contract.md`
+records. The tests drive it through an in-test double that buffers a
+transaction's writes and lands them together, because no fake-indexeddb
+shim is in the workspace lockfile.
+
 ### The human keeps working while an approval is pending
 
 Because the agent writes to a fork, nothing is locked. The human can edit the
@@ -1789,6 +1836,8 @@ packages/webmcp/src/audit.ts untrusted_content_ignored gestureId
 packages/webmcp/src/persistence.ts PersistedRecord PersistedIdempotencyClaim PersistedArtifact PersistenceAdapter memoryPersistence indexedDbPersistence sealOf verifyRecord
 packages/webmcp/src/runtime.ts persistOpen rehydrate describeArtifact restoredClaims approvalClaims
 packages/webmcp/src/staging.ts hydrate identify digestOf
+packages/webmcp/src/indexeddb-staging.ts indexedDbStaging IndexedDbFork IndexedDbDraft STAGING_STORE versionOf open flush resolveArtifact
+packages/webmcp/src/staging.ts StagedCommitRefused
 packages/webmcp/src/results.ts after_restart
 packages/webmcp/src/runtime.ts present PresentationRequest REVEAL_TOKEN
 packages/webmcp/src/capability.ts AgentView agentView

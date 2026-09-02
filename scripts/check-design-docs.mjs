@@ -184,6 +184,12 @@ const CLAIMS = [
   ["docs/architecture.md", /A page can replay a reveal/, "present", "architecture states runtime.present"],
   ["docs/architecture.md", /no\s+WebMCP tool reaches it/, "present", "architecture says present is not a tool"],
   ["docs/architecture.md", /adoptHumanActor/, "present", "architecture names the identity boundary a grant issuer crosses"],
+  ["docs/architecture.md", /A second adapter, over IndexedDB/, "present", "architecture describes the IndexedDB staging adapter"],
+  ["docs/architecture.md", /IndexedDB rolls back every write the transaction\s+held/, "present", "architecture says an aborted commit transaction is undone by IndexedDB, not the adapter"],
+  ["docs/architecture.md", /every row it read or\s+wrote through the draft, each at its version/, "present", "architecture says what a fork snapshots and what a version is"],
+  ["adapter-contract.md", /##\s*What the staging contract did not say/, "present", "adapter contract lists what the staging contract left unsaid"],
+  ["adapter-contract.md", /A commit that has returned cannot become refused or\s+indeterminate/, "present", "adapter contract records the synchronous-commit leak"],
+  ["adapter-contract.md", /`identify` is consulted only when the artifact does not clone/, "present", "adapter contract records the identify-by-clone-failure leak"],
 ];
 
 const failures = [];
