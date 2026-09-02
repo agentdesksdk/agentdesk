@@ -204,6 +204,18 @@ export type AffectedObject = {
 };
 
 /**
+ * Where a person can go and look. `route` is a page in the application,
+ * `reveal` an opaque anchor the application registered on one of its own
+ * elements, never a selector. This is exactly what a page needs to navigate
+ * and highlight, and nothing more.
+ */
+export type EvidenceLink = {
+  label: string;
+  route: string;
+  reveal?: string;
+};
+
+/**
  * Application-authored evidence of a completed write: which entity
  * changed, field-level before/after, and whether it can be undone. The
  * runtime carries receipts verbatim into the tool result, the audit
@@ -215,6 +227,11 @@ export type Receipt = {
   undoable?: boolean;
   note?: string;
   affected?: AffectedObject[];
+  /**
+   * Where the proof of this write can be seen. Authored here, or derived by
+   * the runtime from the capability's presentation hints when absent.
+   */
+  evidence?: EvidenceLink[];
 };
 
 const RECEIPT = Symbol.for("agentdesk.receipt");
