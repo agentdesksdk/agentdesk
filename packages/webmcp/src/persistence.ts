@@ -97,6 +97,12 @@ export type PersistenceAdapter = {
   loadIdempotencyClaims: () =>
     | PersistedIdempotencyClaim[]
     | Promise<PersistedIdempotencyClaim[]>;
+  /**
+   * Forgets every record and every claim. The runtime never calls it; a
+   * page's Reset does, so a reset that must also forget durable state has
+   * one call to make that does not name the adapter's stores by hand.
+   */
+  clear: () => void | Promise<void>;
   resolveArtifact?: (record: PersistedRecord) => unknown;
 };
 
@@ -159,6 +165,7 @@ export function memoryPersistence(): PersistenceAdapter & {
       claims.set(claim.slot, structuredClone(claim));
     },
     loadIdempotencyClaims: () => [...claims.values()].map((claim) => structuredClone(claim)),
+    clear: () => {},
   };
 }
 
@@ -236,6 +243,7 @@ export function indexedDbPersistence(
       run(CLAIMS, "readwrite", (s) => s.put(claim)).then(() => undefined),
     loadIdempotencyClaims: () =>
       run<PersistedIdempotencyClaim[]>(CLAIMS, "readonly", (s) => s.getAll()),
+    clear: () => {},
     ...(options.resolveArtifact !== undefined
       ? { resolveArtifact: options.resolveArtifact }
       : {}),

@@ -127,12 +127,20 @@ const touchThing: Capability = defineCapability({
   staging: { operation: "touch" },
 });
 
+/** The same write behind an approval, so a key travels the approval path. */
+const approveThing: Capability = defineCapability({
+  name: "approve_thing",
+  description: "Stages touch behind an approval.",
+  risk: "CONSEQUENTIAL",
+  staging: { operation: "touch" },
+});
+
 async function boot(
   adapter: StagingAdapter<Artifact>,
   persistence?: PersistenceAdapter,
 ) {
   const runtime = createAgentDeskRuntime({
-    capabilities: [touchThing],
+    capabilities: [touchThing, approveThing],
     registerTool: async () => {},
     actor: AGENT,
     staging: adapter,
@@ -357,6 +365,108 @@ describe("durability: an idempotency claim survives a restart", () => {
   });
 });
 
+describe("durability: a key through the approval path", () => {
+  const call = { name: "approve_thing", input: { id: "T-1" }, idempotency_key: "once" };
+
+  function approvalsRequested(runtime: Runtime): number {
+    return runtime
+      .getSnapshot()
+      .audit.filter((event) => event.kind === "approval_requested").length;
+  }
+
+  it("refuses the same call while the record is open, before any restart, without a second approval", async () => {
+    const persistence = memoryPersistence();
+    const first = makeAdapter({ throwAfterWrite: true });
+    const runtime = await boot(first.adapter, persistence);
+    const asked = await runtime.invoke("invoke_capability", call);
+    expect(asked.code).toBe("APPROVAL_REQUIRED");
+    const actionId = runtime.getSnapshot().pending[0]!.id;
+    const approved = await runtime.approve(actionId, HUMAN);
+    expect(approved.code).toBe("EXECUTION_INDETERMINATE");
+    const [record] = runtime.listUnreconciled();
+    expect(record).toBeDefined();
+    expect(approvalsRequested(runtime)).toBe(1);
+
+    const again = await runtime.invoke("invoke_capability", call);
+
+    expect(again.code).toBe("EXECUTION_INDETERMINATE");
+    expect(again.data?.record_id).toBe(record!.id);
+    expect(approvalsRequested(runtime)).toBe(1);
+    expect(runtime.getSnapshot().pending).toEqual([]);
+    expect(first.dispatches()).toBe(1);
+  });
+
+  it("refuses the same call with the same key after a restart, naming the record, before any approval is asked", async () => {
+    const persistence = memoryPersistence();
+    const first = makeAdapter({ throwAfterWrite: true });
+    const runtime = await boot(first.adapter, persistence);
+    await runtime.invoke("invoke_capability", call);
+    await runtime.approve(runtime.getSnapshot().pending[0]!.id, HUMAN);
+    const [record] = runtime.listUnreconciled();
+    expect(record).toBeDefined();
+    await runtime.stop();
+
+    const second = makeAdapter();
+    const again = await boot(second.adapter, persistence);
+    const repeat = await again.invoke("invoke_capability", call);
+
+    expect(repeat.code).toBe("EXECUTION_INDETERMINATE");
+    expect(repeat.data?.record_id).toBe(record!.id);
+    expect(approvalsRequested(again)).toBe(0);
+    expect(again.getSnapshot().pending).toEqual([]);
+    expect(second.dispatches()).toBe(0);
+    expect(persistence.claims.has("approve_thing:once")).toBe(true);
+  });
+
+  it("replays the pending approval for a repeat with the same key rather than opening a second one", async () => {
+    const persistence = memoryPersistence();
+    const runtime = await boot(makeAdapter().adapter, persistence);
+
+    const asked = await runtime.invoke("invoke_capability", call);
+    const repeat = await runtime.invoke("invoke_capability", call);
+
+    expect(asked.code).toBe("APPROVAL_REQUIRED");
+    expect(repeat.code).toBe("APPROVAL_REQUIRED");
+    expect(repeat.data?.approval_id).toBe(asked.data?.approval_id);
+    expect(approvalsRequested(runtime)).toBe(1);
+    expect(runtime.getSnapshot().pending).toHaveLength(1);
+  });
+
+  it("refuses the same key after a restart once the record is reconciled, rather than asking again", async () => {
+    const persistence = memoryPersistence();
+    const first = makeAdapter({ throwAfterWrite: true });
+    const runtime = await boot(first.adapter, persistence);
+    await runtime.invoke("invoke_capability", call);
+    await runtime.approve(runtime.getSnapshot().pending[0]!.id, HUMAN);
+    const [record] = runtime.listUnreconciled();
+    await runtime.stop();
+
+    const second = makeAdapter();
+    const again = await boot(second.adapter, persistence);
+    expect(again.reconcile(record!.id, { kind: "commit_applied" }, HUMAN)).toEqual({ ok: true });
+    const repeat = await again.invoke("invoke_capability", call);
+
+    expect(repeat.code).toBe("IDEMPOTENCY_CONFLICT");
+    expect(repeat.data?.cause).toBe("after_restart");
+    expect(approvalsRequested(again)).toBe(0);
+    expect(second.dispatches()).toBe(0);
+  });
+});
+
+describe("durability: clear forgets everything the adapter kept", () => {
+  it("empties the memory adapter", async () => {
+    const persistence = memoryPersistence();
+    await incident(persistence);
+    expect(persistence.records.size).toBe(1);
+    await persistence.saveIdempotencyClaim({ version: 1, slot: "touch_thing:k", fingerprint: "{}", at: 1 });
+
+    await persistence.clear();
+
+    expect(await persistence.loadOpenRecords()).toEqual([]);
+    expect(await persistence.loadIdempotencyClaims()).toEqual([]);
+  });
+});
+
 describe("durability: the IndexedDB adapter", () => {
   /**
    * A small double of the IndexedDB API surface the adapter uses: open with
@@ -408,6 +518,10 @@ describe("durability: the IndexedDB adapter", () => {
                 delete: (key: string) =>
                   request(() => {
                     table.delete(key);
+                  }),
+                clear: () =>
+                  request(() => {
+                    table.clear();
                   }),
               };
             },
@@ -461,5 +575,9 @@ describe("durability: the IndexedDB adapter", () => {
     expect(open.map((entry) => entry.id)).toEqual(["UNREC-2"]);
     expect(open[0]).toEqual(record("UNREC-2"));
     expect(claims).toEqual([{ version: 1, slot: "touch_thing:once", fingerprint: "{}", at: 1 }]);
+
+    await reopened.clear();
+    expect(await reopened.loadOpenRecords()).toEqual([]);
+    expect(await reopened.loadIdempotencyClaims()).toEqual([]);
   });
 });
