@@ -138,7 +138,7 @@ function makeAdapter(server = fakeRest(), options: { batch?: boolean } = {}) {
       orders: { path: (id) => `/orders/${id}`, version: "etag" },
       customers: { path: (id) => `/customers/${id}`, version: { field: "version" } },
     },
-    ...(options.batch ? { batch: { path: "/batch" } } : {}),
+    ...(options.batch ? { batch: { path: "/batch", atomic: true as const } } : {}),
     operations: {
       cancel: {
         rows: (input) => [{ resource: "orders", id: String(input.id) }],
@@ -489,5 +489,19 @@ describe("an interrupted REST commit is re-identifiable after a reload", () => {
     })).toBeUndefined();
     const settled = runtime.reconcile(record!.id, { kind: "commit_applied" }, HUMAN);
     expect(settled).toEqual({ ok: true });
+  });
+});
+
+describe("declaring a batch endpoint is declaring its all-or-none behaviour", () => {
+  it("refuses a batch without the integrator's word that it is atomic", () => {
+    const build = () =>
+      restStaging({
+        baseUrl: BASE,
+        resources: {},
+        operations: {},
+        // @ts-expect-error a batch endpoint has to be declared atomic, on the integrator's word
+        batch: { path: "/batch" },
+      });
+    expect(typeof build).toBe("function");
   });
 });
