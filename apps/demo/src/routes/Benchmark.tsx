@@ -1,10 +1,67 @@
+import { useState } from "react";
+import { createAgentDeskRuntime } from "@agentdesk/webmcp";
+import { capabilities } from "../capabilities/index.ts";
+import { stagingAdapter } from "../capabilities/staged.ts";
 import { StatCard } from "../components/bits.tsx";
 import { useBenchmark, useRuntime } from "../components/hooks.ts";
+import { resetStore } from "../data/store.ts";
 import { benchmark, estimateTokens } from "../instrumentation/benchmark.ts";
+import {
+  REFUND_SHIPPING_HAPPY,
+  runSideBySide,
+  type ArmMeasurement,
+} from "../instrumentation/sideBySide.ts";
+import { OPERATOR } from "../runtime/agentdesk.ts";
+
+type SideBySide =
+  | { status: "idle" }
+  | { status: "running" }
+  | { status: "done"; rows: ArmMeasurement[] }
+  | { status: "failed"; message: string };
 
 export function Benchmark() {
   const snapshot = useRuntime();
   const bench = useBenchmark();
+  const [sideBySide, setSideBySide] = useState<SideBySide>({ status: "idle" });
+
+  async function runBothModes() {
+    setSideBySide({ status: "running" });
+    // A probe runtime over the page's own catalog and staging adapter, built
+    // the way `pnpm eval` builds one. The page's runtime is left alone: its
+    // guided presence navigates on every invoke, which would unmount this
+    // page mid-run, and the shell re-asserts the route's exposure on each
+    // navigation, which would flip an arm halfway through its measurement.
+    const probe = createAgentDeskRuntime({
+      capabilities,
+      registerTool: async () => {},
+      staging: stagingAdapter,
+      actor: { id: "agent", name: "Agent", kind: "agent" },
+      exposure: snapshot.exposure,
+    });
+    try {
+      await probe.start();
+      const rows = await runSideBySide({
+        runtime: probe,
+        task: REFUND_SHIPPING_HAPPY,
+        approver: OPERATOR,
+        // The same seed for both arms, the way each eval arm gets a fresh
+        // catalog: the store back to its seed and the probe's own
+        // bookkeeping cleared.
+        reset: async () => {
+          resetStore();
+          await probe.reset();
+        },
+      });
+      setSideBySide({ status: "done", rows });
+    } catch (err) {
+      setSideBySide({
+        status: "failed",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      await probe.stop();
+    }
+  }
   const modeLabel = snapshot.exposure === "flat" ? "Baseline (flat)" : "AgentDesk (routed)";
   const BOOTSTRAP = new Set([
     "find_capabilities",
@@ -38,6 +95,65 @@ export function Benchmark() {
           value={snapshot.schemaBytes.toLocaleString()}
           hint={`≈ ${estimateTokens(snapshot.schemaBytes).toLocaleString()} tokens (estimated)`}
         />
+      </div>
+      <div className="panel">
+        <h2>Same task, both modes</h2>
+        <p className="page-sub" style={{ marginBottom: 12 }}>
+          Runs the eval task <code>{REFUND_SHIPPING_HAPPY.id}</code> (&ldquo;
+          {REFUND_SHIPPING_HAPPY.prompt}&rdquo;) under flat exposure, then
+          routed, on a runtime built from this page&apos;s catalog the way{" "}
+          <code>pnpm eval</code> builds one. Each arm starts from the demo
+          seed; the approval is granted by you as the operator, and the seed
+          is restored when the run ends. Both columns are the task-time peak:
+          sampled after routing and after execution, the larger reported.
+        </p>
+        <div className="bench-controls">
+          <button
+            className="primary"
+            disabled={sideBySide.status === "running" || bench.activeRun !== null}
+            onClick={() => void runBothModes()}
+          >
+            {sideBySide.status === "running"
+              ? "Running both modes…"
+              : "Run in both modes"}
+          </button>
+          {bench.activeRun ? (
+            <span className="est">Stop or discard the timed run first.</span>
+          ) : null}
+          {sideBySide.status === "failed" ? (
+            <span className="est">Run failed: {sideBySide.message}</span>
+          ) : null}
+        </div>
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Mode</th>
+              <th>Visible application tools (peak)</th>
+              <th>Schema bytes (peak)</th>
+              <th>Approval requested</th>
+              <th>Blocked</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sideBySide.status !== "done" ? (
+              <tr>
+                <td colSpan={5} className="empty">
+                  Not run yet.
+                </td>
+              </tr>
+            ) : (
+              sideBySide.rows.map((row) => (
+                <tr key={row.exposure}>
+                  <td>{row.exposure === "flat" ? "baseline" : "agentdesk"}</td>
+                  <td>{row.peakApplicationTools}</td>
+                  <td>{row.peakSchemaBytes.toLocaleString()}</td>
+                  <td>{row.approvalRequested ? "yes" : "no"}</td>
+                  <td>{row.blocked ? "yes" : "no"}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
       <div className="panel">
         <h2>Timed task run</h2>
