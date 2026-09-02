@@ -1,17 +1,16 @@
-import type { AuditEvent, Grant, GrantOutcome, StoredReceipt } from "@agentdesk/webmcp";
+import type { Grant, GrantOutcome, StoredReceipt } from "@agentdesk/webmcp";
 
 /** The one capability the order page issues grants for. */
 export const REFUND_SHIPPING = "refund_shipping";
 
-export type NotApplied = Extract<AuditEvent, { kind: "grant_not_applied" }>;
-
 /**
- * A considered grant as the approval card sees it. The audit event carries
- * the outcome and the field; a tool result also carries the bound. Either
- * shape fits, and a missing bound is read off the grant's own scope.
+ * A considered grant as the words see it: the shape the runtime sets on a
+ * pending action and carries in an APPROVAL_REQUIRED result, with the
+ * bound when the outcome has one. A missing bound is read off the grant's
+ * own scope.
  */
 export type ConsideredOutcome = {
-  grantId: string;
+  id: string;
   outcome: GrantOutcome["outcome"];
   field?: string;
   max?: number;
@@ -148,40 +147,10 @@ export function outcomeWords(considered: ConsideredOutcome, grant?: Grant): stri
 }
 
 export function consideredGrantText(considered: ConsideredOutcome, grant?: Grant): string {
-  return `Grant ${considered.grantId} was considered and did not apply: it ${outcomeWords(
+  return `Grant ${considered.id} was considered and did not apply: it ${outcomeWords(
     considered,
     grant,
   )}. A person decides.`;
-}
-
-/**
- * The grant the runtime considered for one pending approval. A pending
- * action does not carry it, but the runtime writes `grant_not_applied`
- * for the call immediately before its `approval_requested`, and opens
- * every call with `capability_invoked`, so the pairing walks back from the
- * approval to the call's start and takes nothing from an earlier call.
- */
-export function consideredGrantFor(
-  actionId: string,
-  capability: string,
-  audit: readonly AuditEvent[],
-): NotApplied | undefined {
-  const requested = audit.findIndex(
-    (event) => event.kind === "approval_requested" && event.actionId === actionId,
-  );
-  if (requested < 0) {
-    return undefined;
-  }
-  for (let i = requested - 1; i >= 0; i -= 1) {
-    const event = audit[i]!;
-    if (event.kind === "grant_not_applied" && event.capability === capability) {
-      return event;
-    }
-    if (event.kind === "capability_invoked" || event.kind === "approval_requested") {
-      return undefined;
-    }
-  }
-  return undefined;
 }
 
 export function grantIssuedAnnouncement(grant: Grant): string {
