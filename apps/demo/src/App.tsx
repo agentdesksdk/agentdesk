@@ -11,6 +11,7 @@ import { Overview } from "./routes/Overview.tsx";
 import { Reports } from "./routes/Reports.tsx";
 import { Shipping } from "./routes/Shipping.tsx";
 import { Support } from "./routes/Support.tsx";
+import { SupportTicket } from "./routes/SupportTicket.tsx";
 
 export function App() {
   return (
@@ -26,6 +27,7 @@ export function App() {
         <Route path="shipping" element={<Shipping />} />
         <Route path="billing" element={<Billing />} />
         <Route path="support" element={<Support />} />
+        <Route path="support/:id" element={<SupportTicket />} />
         <Route path="reports" element={<Reports />} />
         <Route path="benchmark" element={<Benchmark />} />
         <Route path="*" element={<Navigate to="." replace />} />

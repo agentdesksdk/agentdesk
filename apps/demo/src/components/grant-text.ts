@@ -48,19 +48,28 @@ function actorName(actor: { id: string; name?: string }): string {
 /**
  * What the agent may do right now without asking. With no live grant it
  * can read and propose, and every consequential call waits for a person.
- * Each live grant adds one clause, read from the snapshot every render.
+ * Each live grant adds one clause, read from the snapshot every render,
+ * as phrases: what, how many, where. A line breaks between phrases only.
  */
-export function authorityLine(grants: readonly Grant[]): string {
+export function authorityClauses(grants: readonly Grant[]): string[][] {
   const live = grants.filter((grant) => grant.state === "live");
   if (live.length === 0) {
-    return "read + propose";
+    return [["read + propose"]];
   }
-  return live
-    .map((grant) => {
-      const orderId = grantOrderId(grant);
-      const clause = `${capabilityWords(grant.capability)} ≤ ${usesText(grant.remaining)}`;
-      return orderId === undefined ? clause : `${clause} on order ${orderId}`;
-    })
+  return live.map((grant) => {
+    const parts = [capabilityWords(grant.capability), `≤ ${usesText(grant.remaining)}`];
+    const orderId = grantOrderId(grant);
+    if (orderId !== undefined) {
+      parts.push(`on order ${orderId}`);
+    }
+    return parts;
+  });
+}
+
+/** The clauses as one string: phrases joined by a space, clauses by a semicolon. */
+export function authorityLine(grants: readonly Grant[]): string {
+  return authorityClauses(grants)
+    .map((parts) => parts.join(" "))
     .join("; ");
 }
 

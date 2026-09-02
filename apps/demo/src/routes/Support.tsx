@@ -54,7 +54,9 @@ export function Support() {
               const customer = state.customers.find((c) => c.id === ticket.customerId);
               return (
                 <tr key={ticket.id}>
-                  <td>{ticket.id}</td>
+                  <td>
+                    <Link to={`/${mode}/support/${ticket.id}`}>{ticket.id}</Link>
+                  </td>
                   <td>{ticket.subject}</td>
                   <td>
                     <Link to={`/${mode}/customers/${ticket.customerId}`}>

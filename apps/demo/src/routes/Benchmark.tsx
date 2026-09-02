@@ -119,6 +119,7 @@ export function Benchmark() {
             <span className="est">Run failed: {sideBySide.message}</span>
           ) : null}
         </div>
+        <div className="table-scroll">
         <table className="data">
           <thead>
             <tr>
@@ -149,6 +150,7 @@ export function Benchmark() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
       <div className="panel">
         <h2>Timed task run</h2>
@@ -178,6 +180,7 @@ export function Benchmark() {
           )}
           <button onClick={() => benchmark.clearRuns()}>Clear saved runs</button>
         </div>
+        <div className="table-scroll">
         <table className="data">
           <thead>
             <tr>
@@ -225,6 +228,7 @@ export function Benchmark() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
       <div className="panel">
         <h2>What is and is not measured</h2>
