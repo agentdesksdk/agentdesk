@@ -565,6 +565,11 @@ input[type="text"]:focus {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  /* A fixed box does not scroll with the page, so when the cards outgrow
+     a short viewport (200% zoom, say) the overlay scrolls inside itself
+     rather than pushing its header above the top edge. */
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
 }
 
 @media (max-width: 1100px) {
@@ -1262,12 +1267,13 @@ input[type="text"]:focus {
 }
 
 /*
- * Narrow: one column. The sidebar becomes a row of links under the top bar,
+ * Narrow, under 600px: one column. The 640 rendering keeps its two columns.
+ * The sidebar becomes a row of links under the top bar,
  * the main column takes the full width, and the approval overlay becomes a
  * sheet anchored to the bottom edge. Nothing here may make the body scroll
  * sideways at 375px; the browser pass measures that.
  */
-@media (max-width: 720px) {
+@media (max-width: 600px) {
   .shell {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto auto minmax(0, 1fr) auto;
