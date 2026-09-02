@@ -323,7 +323,9 @@ export function indexedDbStaging(options: IndexedDbStagingOptions): IndexedDbSta
       for (const { store, id, row } of fork.head) {
         mirror.get(store)!.set(id, structuredClone(row));
       }
-      const touched = [...new Set(fork.head.map((row) => row.store))];
+      // Every store the fork read or wrote, since a read-only base row still
+      // has to be re-read inside the transaction.
+      const touched = [...new Set([...fork.base, ...fork.head].map((row) => row.store))];
       enqueue((database) => {
         const tx = database.transaction([...touched, STAGING_STORE], "readwrite");
         const done = settle(tx);
