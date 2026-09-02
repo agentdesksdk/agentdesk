@@ -169,6 +169,13 @@ const CLAIMS = [
   ["docs/architecture.md", /It does not prove which human/, "present", "architecture states what the token does not prove"],
   ["docs/architecture.md", /hands its runtime to untrusted script/, "present", "architecture says a page that exposes its runtime has no gesture guarantee"],
   ["docs/architecture.md", /only the flagged reads between the request and the\s+approval count/, "present", "architecture states the scope of untrusted_content_ignored"],
+
+  ["docs/architecture.md", /##\s*An unknown outcome survives a restart/, "present", "architecture states the durability contract"],
+  ["docs/architecture.md", /refused at load and audited/, "present", "architecture says a tampered record is refused rather than trusted"],
+  ["docs/architecture.md", /cause: "after_restart"/, "present", "architecture says a claimed key is refused after reload"],
+  ["docs/architecture.md", /leaves the record open/, "present", "architecture says an unrebuildable artifact keeps the record open"],
+  ["docs/architecture.md", /byte for byte what it was/, "present", "architecture says a runtime without persistence is unchanged"],
+  ["docs/reviews/2026-08-31-accepted-unreconciled-records-are-not-durable.md", /Status: \*\*RESOLVED\*\*/, "present", "the accepted-risk record is marked resolved"],
   ["docs/architecture.md", /adoptHumanActor/, "present", "architecture names the identity boundary a grant issuer crosses"],
 ];
 

@@ -1,6 +1,7 @@
 # Accepted risk: unreconciled records and artifacts do not survive a restart
 
-Status: **ACCEPTED**
+Status: **RESOLVED** in wave 1 item 1.7 (`feat/wave1-durability`), against the
+three requirements below.
 
 Raised at commit `16e405d`, during the review that found no remaining
 actionable defects. Corrected at the review that found the first version of
@@ -64,3 +65,32 @@ whatever store the adopting application already runs. Until all three exist,
 the SDK should not be described as production-stable. The limitation is stated
 on `UnreconciledStore` itself and in `docs/future-directions.md`, not only
 here.
+
+## Resolution
+
+All three requirements are met by a `persistence` adapter on the runtime
+options, described in `docs/architecture.md` under "An unknown outcome
+survives a restart".
+
+1. `PersistedRecord` carries every field on `Unreconciled`, the executing
+   actor, the state digest, and the grant id, sealed with a digest at save
+   and verified at load, so a record with tampered evidence is refused
+   rather than trusted.
+2. `rehydrate` runs at `start` and puts verified records back through
+   `UnreconciledStore.hydrate` under their saved ids, so `listUnreconciled`
+   surfaces them and `operationKey` guards the repeat; idempotency claims
+   are reloaded so a repeat of a claimed key after reload is refused rather
+   than re-executed.
+3. The staging adapter's optional `identify` names an artifact that cannot
+   be cloned with a durable key, stored as a reference, and the persistence
+   adapter's `resolveArtifact` rebuilds it at `reconcile`; a resolver that
+   cannot rebuild it leaves the record open and says so.
+
+Covered by `packages/webmcp/tests/durability.test.ts`: a staged commit that
+throws after writing survives a stop and a fresh start on the same adapter
+byte for byte and frozen, refuses the same `operationKey`, reconciles exactly
+once through the staging adapter audited with the human, and does not come
+back; an uncloneable artifact is re-identified and rebuilt, or left open with
+the reason; a tampered record is refused at load; a claimed idempotency key is
+refused after reload; a runtime with no persistence is unchanged. Nine of the
+ten fail against the runtime before the adapter existed.
