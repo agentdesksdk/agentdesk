@@ -1440,7 +1440,14 @@ input[type="text"]:focus {
   display: none;
 }
 
-/* "Show me proof": the kind (value or page) is part of the text. */
+/* "Show me proof": the kind (value or page) is part of the text. A long
+   label wraps inside the control; it never widens the rail. */
+.undo.proof {
+  white-space: normal;
+  text-align: left;
+  max-width: 100%;
+}
+
 .undo.proof .proof-kind {
   font-weight: 500;
   color: var(--ink-soft);
