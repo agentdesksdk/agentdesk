@@ -71,8 +71,12 @@ export type RestStagingOptions = {
   headers?: Record<string, string>;
   resources: Record<string, RestResource>;
   operations: Record<string, RestOperation>;
-  /** A batch endpoint that applies every write or none; absent, writes go one per row. */
-  batch?: { path: string };
+  /**
+   * A batch endpoint, declared atomic on the integrator's word: every write
+   * in it lands or none does, which is what lets its 412 be reported as a
+   * refusal with nothing written. Absent, writes go one per row.
+   */
+  batch?: { path: string; atomic: true };
 };
 
 export type RestStagingAdapter = StagingAdapter<RestFork> & {
