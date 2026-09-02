@@ -331,6 +331,30 @@ describe("durability: an idempotency claim survives a restart", () => {
     expect(differently.code).toBe("IDEMPOTENCY_CONFLICT");
     expect(second.dispatches()).toBe(0);
   });
+
+  it("carries the earlier write's receipt as evidence and points at the receipts query for the capability", async () => {
+    const persistence = memoryPersistence();
+    const first = makeAdapter();
+    const runtime = await boot(first.adapter, persistence);
+    const call = { name: "touch_thing", input: { id: "T-1" }, idempotency_key: "once" };
+    const done = await runtime.invoke("invoke_capability", call);
+    const receiptId = (done.data?.evidence as Array<{ kind: string; id: string }>).find(
+      (item) => item.kind === "receipt",
+    )?.id;
+    expect(receiptId).toMatch(/^RCPT-/);
+    await runtime.stop();
+
+    const again = await boot(makeAdapter().adapter, persistence);
+    const repeat = await again.invoke("invoke_capability", call);
+
+    expect(repeat.code).toBe("IDEMPOTENCY_CONFLICT");
+    expect(repeat.data?.cause).toBe("after_restart");
+    expect(repeat.data?.evidence).toEqual([{ kind: "receipt", id: receiptId }]);
+    expect(String(repeat.data?.next)).toMatch(/receipts? .*touch_thing|touch_thing.*receipts?/i);
+    expect(repeat.data?.nowPossible).toContain("touch_thing");
+    expect(repeat.data).not.toHaveProperty("repair");
+    expect(persistence.claims.get("touch_thing:once")?.receiptId).toBe(receiptId);
+  });
 });
 
 describe("durability: the IndexedDB adapter", () => {

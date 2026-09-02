@@ -71,6 +71,12 @@ export type PersistedIdempotencyClaim = {
   slot: string;
   fingerprint: string;
   at: number;
+  /**
+   * The receipt the claimed execution recorded, when it recorded one. After
+   * a restart the result is gone, but the receipt id is the evidence a
+   * refusal can point a person at.
+   */
+  receiptId?: string;
 };
 
 /**
