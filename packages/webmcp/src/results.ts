@@ -242,9 +242,34 @@ type ReceiptEnvelope = {
   value: unknown;
 };
 
-/** Wraps a handler's return value with a verifiable change receipt. */
+/**
+ * Wraps a handler's return value with a verifiable change receipt. Authored
+ * evidence is checked here, at authoring time, because a link a page cannot
+ * follow is an author's mistake and the author is the one who can fix it.
+ */
 export function receipt(spec: Receipt & { result: unknown }): unknown {
   const { result, ...rest } = spec;
+  if (rest.evidence !== undefined) {
+    if (!Array.isArray(rest.evidence)) {
+      throw new TypeError("receipt evidence must be an array of links");
+    }
+    for (const link of rest.evidence) {
+      if (typeof link !== "object" || link === null) {
+        throw new TypeError("a receipt evidence link must be an object");
+      }
+      if (typeof link.label !== "string" || link.label.trim() === "") {
+        throw new TypeError("a receipt evidence link needs a non-empty label");
+      }
+      if (typeof link.route !== "string" || !link.route.startsWith("/")) {
+        throw new TypeError(
+          `a receipt evidence link needs a route starting with "/", received ${JSON.stringify(link.route)}`,
+        );
+      }
+      if (link.reveal !== undefined && typeof link.reveal !== "string") {
+        throw new TypeError("a receipt evidence link's reveal must be a string when present");
+      }
+    }
+  }
   const envelope: ReceiptEnvelope = {
     [RECEIPT]: true,
     receipt: rest,
