@@ -1583,6 +1583,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         preview.changes,
         now(),
         stateVersion,
+        considered,
       );
     } catch (err) {
       // Nothing owns the proposal yet, so a failure to record the pending
