@@ -5,6 +5,14 @@ capability catalog once; publish only the relevant few as typed native
 tools, with structured availability reasons, human approval for
 consequential actions, and an audit trail.
 
+## Installing
+
+```bash
+npm install @agentdesk/webmcp
+```
+
+No runtime dependencies; Node 18 or newer.
+
 ```ts
 import { createAgentDeskRuntime, defineCapability } from "@agentdesk/webmcp";
 
