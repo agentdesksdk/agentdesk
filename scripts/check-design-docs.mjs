@@ -137,6 +137,8 @@ const CLAIMS = [
   ["docs/architecture.md", /GRANT_REFUSED/, "absent", "a grant that does not apply falls through to approval; there is no refusal code"],
   ["docs/architecture.md", /A grant that does not apply changes nothing/, "present", "architecture states the fall-through"],
   ["docs/architecture.md", /grant_not_applied/, "present", "architecture names the audit kind for a grant that did not apply"],
+  ["docs/architecture.md", /PendingAction\.grant/, "present", "architecture says the pending action carries the considered grant"],
+  ["docs/architecture.md", /whose state most\s+recently changed is named/, "present", "architecture states the recency rule for the considered grant"],
 
   ["docs/architecture.md", /##\s*An approval is bound to a state digest/, "present", "architecture states the state digest contract"],
   ["docs/architecture.md", /requiresNewPreview/, "present", "architecture names the stale approval result"],
