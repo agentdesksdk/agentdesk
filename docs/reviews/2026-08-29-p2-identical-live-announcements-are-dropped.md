@@ -1,6 +1,6 @@
 # P2: Repeated live-region announcements are dropped
 
-Status: OPEN
+Status: **RESOLVED** on `main` as #9 (`02e08c7`)
 
 Reviewed commit: `6a1745e`
 

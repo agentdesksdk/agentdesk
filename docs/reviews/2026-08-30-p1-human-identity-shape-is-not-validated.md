@@ -1,6 +1,6 @@
 # P1: human identity shape is not validated at the JavaScript boundary
 
-Status: **PARTIALLY FIXED on `fix/acting-identity`**
+Status: **RESOLVED** on `main` as #8 (`dd60ec4`); the ambient constructor and `setActor` paths parse through `adoptActor` and refuse an anonymous identity
 
 Reviewed branch: `fix/acting-identity` at `d7a4911`
 

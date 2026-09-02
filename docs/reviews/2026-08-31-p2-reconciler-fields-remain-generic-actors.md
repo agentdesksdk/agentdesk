@@ -1,6 +1,6 @@
 # P2: reconciler fields remain typed as generic actors
 
-Status: **OPEN**
+Status: **RESOLVED** on `main`: `ReceiptStore.reconcile` takes a `HumanActor`, `reconciledBy` is typed `HumanActor`, and `rollback_reconciled.actor` is `HumanActor` (`packages/webmcp/src/receipts.ts`, `audit.ts`)
 
 Reviewed branch: `fix/rollback-indeterminate-and-live-announcements` at `9a808ae`
 
