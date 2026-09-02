@@ -209,10 +209,23 @@ export type AffectedObject = {
  * elements, never a selector. This is exactly what a page needs to navigate
  * and highlight, and nothing more.
  */
-export type EvidenceLink = {
+export type AuthoredEvidenceLink = {
   label: string;
   route: string;
   reveal?: string;
+  /** Set by the runtime, never by a capability; the type says so. */
+  source?: never;
+};
+
+/**
+ * A link as the runtime records it. `source` says which it is: an authored
+ * link points at the value that changed, because the author knew where it
+ * lives; a derived link points at the write's page, because a presentation
+ * hint is all the runtime had. A consequential capability should author
+ * its links.
+ */
+export type EvidenceLink = Omit<AuthoredEvidenceLink, "source"> & {
+  source?: "authored" | "derived";
 };
 
 /**
@@ -247,7 +260,12 @@ type ReceiptEnvelope = {
  * evidence is checked here, at authoring time, because a link a page cannot
  * follow is an author's mistake and the author is the one who can fix it.
  */
-export function receipt(spec: Receipt & { result: unknown }): unknown {
+export function receipt(
+  spec: Omit<Receipt, "evidence"> & {
+    evidence?: AuthoredEvidenceLink[];
+    result: unknown;
+  },
+): unknown {
   const { result, ...rest } = spec;
   if (rest.evidence !== undefined) {
     if (!Array.isArray(rest.evidence)) {
@@ -272,7 +290,9 @@ export function receipt(spec: Receipt & { result: unknown }): unknown {
   }
   const envelope: ReceiptEnvelope = {
     [RECEIPT]: true,
-    receipt: rest,
+    // The author's links are carried as written; the runtime stamps their
+    // source when it settles the receipt, and nothing an author set survives.
+    receipt: rest as Receipt,
     value: result,
   };
   return envelope;

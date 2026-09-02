@@ -4,8 +4,8 @@ import {
   defineCapability,
   receipt,
   type AgentView,
+  type AuthoredEvidenceLink,
   type Capability,
-  type EvidenceLink,
 } from "../src/index.ts";
 import { createMockModelContext } from "./mock-model-context.ts";
 
@@ -17,7 +17,7 @@ const CHANGES = [{ field: "shipping_refunded", before: false, after: true }];
 /** A refund whose receipt carries whatever evidence the test hands it. */
 function refund(options: {
   presentation?: boolean;
-  evidence?: EvidenceLink[];
+  evidence?: AuthoredEvidenceLink[];
 }): Capability {
   return defineCapability({
     name: "refund_shipping",
@@ -62,7 +62,7 @@ function links(result: { data?: Record<string, unknown> }): unknown[] {
 }
 
 describe("evidence deep links: authored", () => {
-  const authored: EvidenceLink[] = [
+  const authored: AuthoredEvidenceLink[] = [
     { label: "Shipping line on the invoice", route: "/orders/10428/invoice", reveal: "invoice-shipping" },
   ];
 
@@ -71,10 +71,11 @@ describe("evidence deep links: authored", () => {
 
     const result = await runtime.invoke("refund_shipping", { order_id: "10428" });
 
+    const stamped = authored.map((link) => ({ ...link, source: "authored" }));
     const [stored] = runtime.queryReceipts();
-    expect(stored?.receipt.evidence).toEqual(authored);
-    expect((result.data?.receipt as { evidence?: unknown }).evidence).toEqual(authored);
-    expect(links(result)).toEqual([{ kind: "link", ...authored[0] }]);
+    expect(stored?.receipt.evidence).toEqual(stamped);
+    expect((result.data?.receipt as { evidence?: unknown }).evidence).toEqual(stamped);
+    expect(links(result)).toEqual([{ kind: "link", ...stamped[0] }]);
   });
 
   it("wins over what the runtime would derive", async () => {
@@ -113,7 +114,12 @@ describe("evidence deep links: derived", () => {
 
     const result = await runtime.invoke("refund_shipping", { order_id: "10428" });
 
-    const derived = { label: "Order #10428", route: "/orders/10428", reveal: "shipping-summary" };
+    const derived = {
+      label: "Order #10428",
+      route: "/orders/10428",
+      reveal: "shipping-summary",
+      source: "derived",
+    };
     const [stored] = runtime.queryReceipts();
     expect(stored?.receipt.evidence).toEqual([derived]);
     expect(links(result)).toEqual([{ kind: "link", ...derived }]);
@@ -137,7 +143,7 @@ describe("evidence deep links: through the agent view", () => {
   };
 
   it("never names a route or a field the agent view hides, while the receipt keeps everything", async () => {
-    const authored: EvidenceLink[] = [
+    const authored: AuthoredEvidenceLink[] = [
       { label: "Token", route: `/tokens/${TOKEN}`, reveal: "token-panel" },
       { label: "Customer", route: "/customers/CUS-104", reveal: "customer-card" },
       { label: "Field", route: "/orders/10428", reveal: "paymentToken" },
@@ -147,12 +153,56 @@ describe("evidence deep links: through the agent view", () => {
 
     const result = await runtime.invoke("refund_shipping", { order_id: "10428" });
 
-    const shown = { label: "Order", route: "/orders/10428", reveal: "shipping-summary" };
+    const shown = {
+      label: "Order",
+      route: "/orders/10428",
+      reveal: "shipping-summary",
+      source: "authored",
+    };
     expect(links(result)).toEqual([{ kind: "link", ...shown }]);
     expect((result.data?.receipt as { evidence?: unknown }).evidence).toEqual([shown]);
     expect(JSON.stringify(result)).not.toContain(TOKEN);
     expect(JSON.stringify(result)).not.toContain("CUS-104");
     const [stored] = runtime.queryReceipts();
-    expect(stored?.receipt.evidence).toEqual(authored);
+    expect(stored?.receipt.evidence).toEqual(
+      authored.map((link) => ({ ...link, source: "authored" })),
+    );
+  });
+});
+
+describe("evidence deep links: the type says which is which", () => {
+  it("an authored link carries source authored on the receipt and on the result", async () => {
+    const runtime = await booted(
+      refund({ evidence: [{ label: "Invoice", route: "/orders/10428/invoice" }] }),
+    );
+
+    const result = await runtime.invoke("refund_shipping", { order_id: "10428" });
+
+    expect(runtime.queryReceipts()[0]?.receipt.evidence?.[0]?.source).toBe("authored");
+    expect(links(result)[0]).toMatchObject({ source: "authored" });
+  });
+
+  it("a derived link carries source derived", async () => {
+    const runtime = await booted(refund({ presentation: true }));
+
+    const result = await runtime.invoke("refund_shipping", { order_id: "10428" });
+
+    expect(runtime.queryReceipts()[0]?.receipt.evidence?.[0]?.source).toBe("derived");
+    expect(links(result)[0]).toMatchObject({ source: "derived" });
+  });
+
+  it("a capability that sets source itself has it overwritten by the runtime", async () => {
+    const runtime = await booted(
+      refund({
+        evidence: [
+          { label: "Invoice", route: "/orders/10428/invoice", source: "derived" } as never,
+        ],
+      }),
+    );
+
+    const result = await runtime.invoke("refund_shipping", { order_id: "10428" });
+
+    expect(runtime.queryReceipts()[0]?.receipt.evidence?.[0]?.source).toBe("authored");
+    expect(links(result)[0]).toMatchObject({ source: "authored" });
   });
 });
