@@ -8,6 +8,7 @@ import {
   CapabilityUnavailableError,
   defineCapability,
   unavailable,
+  type AgentView,
   type AppContext,
   type Capability,
   type CapabilityName,
@@ -56,6 +57,7 @@ import {
   type PlannedOperation,
   type VerificationResult,
 } from "./plan.ts";
+import type { Receipt } from "./results.ts";
 import {
   ReceiptStore,
   type ReceiptQuery,
@@ -80,6 +82,7 @@ import {
   toolRetired,
   toToolResult,
   validationFailed,
+  viewUnavailable,
   type ToolResult,
 } from "./results.ts";
 import {
@@ -335,6 +338,14 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   staging?: StagingAdapter<S>;
   /** Who is acting. Recorded on audit events, receipts, and presentation. */
   actor?: Actor;
+  /**
+   * The projection of application state the agent may see. Applied by the
+   * runtime to everything that crosses to the agent: tool results, the
+   * routing report, approval previews, receipts on results, get_context.
+   * The human-facing snapshot and audit are not projected. A capability's
+   * own `agentView` narrows this further and never widens it.
+   */
+  agentView?: AgentView;
 }): AgentDeskRuntime {
   const audit = new AuditBus();
   const approvals = new ApprovalManager();
@@ -578,9 +589,14 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     () => emit(),
     options.exposedTo,
     (name) =>
-      toolRetired(
+      crossing(
+        toolRetired(
+          name,
+          refusal(catalog.get(name), { capability: FIND_CAPABILITIES }),
+        ),
+        catalog.get(name),
         name,
-        refusal(catalog.get(name), { capability: FIND_CAPABILITIES }),
+        actor,
       ),
   );
 
@@ -750,6 +766,280 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     return situationFor(subject, undefined, evidence);
   }
 
+  /**
+   * The agent view, applied on the runtime's side of the boundary.
+   *
+   * The runtime's view runs first and the capability's second, on what the
+   * runtime's let through, so a capability can only narrow it. It is applied
+   * to every plain record at every depth of a value that crosses, and to
+   * every element of an array, so a handler that nests state does not slip
+   * it past a view written for the root. That is also why a view has to be
+   * a subtraction over whatever it is handed: the runtime hands it every
+   * record that crosses, not only the root state, and a view that keeps a
+   * fixed set of keys would empty a handler's result.
+   *
+   * A throwing view is a refusal, never the raw value. The throw is wrapped
+   * so the paths that catch it can tell it from the application's own
+   * errors and answer VIEW_UNAVAILABLE.
+   */
+  class AgentViewFailed extends Error {
+    constructor(cause: unknown) {
+      super(
+        `the agent view projection threw: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+      this.name = "AgentViewFailed";
+    }
+  }
+
+  const runtimeView: AgentView | undefined = options.agentView;
+
+  function isPlainRecord(value: unknown): value is Record<string, unknown> {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return false;
+    }
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+  }
+
+  function throughView(
+    value: unknown,
+    capability: Capability | undefined,
+    viewer: Actor | undefined,
+  ): unknown {
+    // The runtime's view is the outer bound: it runs before the capability's,
+    // so the capability's sees only what it let through, and again after, so
+    // a capability's view that puts a key back does not get it across.
+    const views: AgentView[] = [];
+    if (runtimeView !== undefined) {
+      views.push(runtimeView);
+    }
+    if (capability?.agentView !== undefined) {
+      views.push(capability.agentView);
+      if (runtimeView !== undefined) {
+        views.push(runtimeView);
+      }
+    }
+    if (views.length === 0) {
+      return value;
+    }
+    const project = (node: unknown): unknown => {
+      if (Array.isArray(node)) {
+        return node.map(project);
+      }
+      if (!isPlainRecord(node)) {
+        return node;
+      }
+      let seen: Record<string, unknown> = node;
+      for (const view of views) {
+        let next: unknown;
+        try {
+          next = view({ state: seen, ...(viewer !== undefined ? { actor: viewer } : {}) });
+        } catch (err) {
+          throw new AgentViewFailed(err);
+        }
+        if (!isPlainRecord(next)) {
+          throw new AgentViewFailed(
+            new Error("the view returned something other than a plain object"),
+          );
+        }
+        seen = next;
+      }
+      const out: Record<string, unknown> = {};
+      for (const [key, nested] of Object.entries(seen)) {
+        out[key] = project(nested);
+      }
+      return out;
+    };
+    return project(value);
+  }
+
+  /**
+   * A change crosses only if the field it names would cross. Each change is
+   * rebuilt as the one-field state it describes and passed through the
+   * view; a field the view removes takes its change with it, before and
+   * after, so a preview or a receipt cannot name a value the state view
+   * hides.
+   */
+  function changesThroughView(
+    changes: readonly Change[],
+    capability: Capability | undefined,
+    viewer: Actor | undefined,
+  ): Change[] {
+    const kept: Change[] = [];
+    for (const change of changes) {
+      const before = throughView({ [change.field]: change.before }, capability, viewer);
+      if (!isPlainRecord(before) || !(change.field in before)) {
+        continue;
+      }
+      const after = throughView({ [change.field]: change.after }, capability, viewer);
+      kept.push({
+        ...change,
+        before: before[change.field],
+        after: isPlainRecord(after) ? after[change.field] : undefined,
+      });
+    }
+    return kept;
+  }
+
+  /**
+   * Exception text crossing to the agent. An exception message is written
+   * by whoever threw, and it can carry a field the view excludes, so when a
+   * view is declared the text stays on the human side and the agent gets
+   * the fact and the execution to ask about. With no view declared the
+   * runtime is what it was.
+   */
+  function agentText(text: string): string {
+    return runtimeView === undefined
+      ? text
+      : "The error text is withheld from the agent view; a person can read it in the audit record.";
+  }
+
+  /**
+   * The values the view hides, by example. The current state is projected
+   * and every string that was in it and is not in what came back is a
+   * hidden value. A key view cannot see a handler that copies a hidden
+   * value under another name or writes it into a sentence, so on the way
+   * out every result is checked for these values, in any key and in any
+   * text, and each occurrence is withheld. This is what makes "never
+   * appears" true rather than "not under that key".
+   *
+   * Only strings are matched. A hidden number or boolean is too short and
+   * too common to withhold by value without withholding the rest of the
+   * result, so a secret has to be a string to get this protection.
+   */
+  function hiddenStrings(
+    capability: Capability | undefined,
+    viewer: Actor | undefined,
+  ): string[] {
+    const shown = throughView(context.state, capability, viewer);
+    const visible = new Set<string>();
+    collectStrings(shown, visible);
+    const raw = new Set<string>();
+    collectStrings(context.state, raw);
+    return [...raw]
+      .filter((text) => text.length > 0 && !visible.has(text))
+      .sort((a, b) => b.length - a.length);
+  }
+
+  function collectStrings(value: unknown, into: Set<string>): void {
+    if (typeof value === "string") {
+      into.add(value);
+    } else if (Array.isArray(value)) {
+      for (const item of value) {
+        collectStrings(item, into);
+      }
+    } else if (isPlainRecord(value)) {
+      for (const item of Object.values(value)) {
+        collectStrings(item, into);
+      }
+    }
+  }
+
+  const WITHHELD = "[withheld]";
+
+  /**
+   * Below this length a hidden value is protected structurally and by
+   * whole value, not inside free text. A shorter value is too common a
+   * substring: a hidden "US" would tear STATUS and "USB-C Dock", a hidden
+   * "ok" would mangle "token". An author who needs a short value protected
+   * inside sentences must not write it into sentences.
+   */
+  const IN_TEXT_MIN_LENGTH = 8;
+
+  /**
+   * Two tiers. Every hidden string is withheld by whole-value equality, at
+   * any depth under any key, which keeps the re-label case closed for a
+   * value of any length. Inside free text only a hidden string of at least
+   * `IN_TEXT_MIN_LENGTH` characters is matched, longest first.
+   */
+  function withhold(value: unknown, hidden: readonly string[]): unknown {
+    if (typeof value === "string") {
+      if (hidden.includes(value)) {
+        return WITHHELD;
+      }
+      let text = value;
+      for (const secret of hidden) {
+        if (secret.length >= IN_TEXT_MIN_LENGTH && text.includes(secret)) {
+          text = text.split(secret).join(WITHHELD);
+        }
+      }
+      return text;
+    }
+    if (Array.isArray(value)) {
+      return value.map((item) => withhold(item, hidden));
+    }
+    if (isPlainRecord(value)) {
+      const out: Record<string, unknown> = {};
+      for (const [key, item] of Object.entries(value)) {
+        out[key] = withhold(item, hidden);
+      }
+      return out;
+    }
+    return value;
+  }
+
+  /**
+   * The one seam every result crosses on its way to the agent. A result
+   * that is already a failed view carries nothing projected and passes as
+   * is; anything else is checked for hidden values. A view that throws
+   * here refuses the whole result, saying whether the write completed so
+   * the agent does not retry it.
+   */
+  function crossing(
+    result: ToolResult,
+    capability: Capability | undefined,
+    name: string,
+    viewer: Actor | undefined,
+  ): ToolResult {
+    if (
+      (runtimeView === undefined && capability?.agentView === undefined) ||
+      result.code === "VIEW_UNAVAILABLE"
+    ) {
+      return result;
+    }
+    let hidden: string[];
+    try {
+      hidden = hiddenStrings(capability, viewer);
+    } catch (err) {
+      if (err instanceof AgentViewFailed) {
+        return viewFailed(capability, name, result.data?.status === "COMPLETED");
+      }
+      throw err;
+    }
+    if (hidden.length === 0) {
+      return result;
+    }
+    return {
+      ...result,
+      content: result.content.map((item) => ({
+        ...item,
+        text: withhold(item.text, hidden) as string,
+      })),
+      ...(result.data !== undefined
+        ? { data: withhold(result.data, hidden) as Record<string, unknown> }
+        : {}),
+    };
+  }
+
+  /** Records a failed view and builds the refusal that stands in for the value. */
+  function viewFailed(
+    capability: Capability | undefined,
+    name: string,
+    completed: boolean,
+    evidence: readonly Evidence[] = [],
+  ): ToolResult {
+    audit.append({
+      kind: "capability_unavailable",
+      capability: name,
+      reasonCode: "AGENT_VIEW_FAILED",
+      at: now(),
+    });
+    emit();
+    return viewUnavailable(name, completed, refusal(capability, undefined, evidence));
+  }
+
   /** The audit record of a grant that was considered and did not apply. */
   function notApplied(
     capability: string,
@@ -843,6 +1133,11 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     emit();
   }
 
+  /**
+   * Every invocation leaves through `crossing`, so no path inside can hand
+   * the agent a value the view hides. The acting identity is resolved once
+   * here and handed down, for the invocation and for the view.
+   */
   async function runCapability(
     capability: Capability,
     input: Record<string, unknown>,
@@ -850,25 +1145,67 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     signal?: AbortSignal,
     idempotencyKey?: string,
   ): Promise<ToolResult> {
-    // Resolved at the invocation boundary, before anything can observe the
-    // invocation. Presentation listeners dispatch synchronously, so a
-    // listener reacting to `capability_started` can call `setActor` and
-    // would otherwise split one invocation across two actors.
     const invocationActor = actor;
+    const result = await runInvocation(
+      capability,
+      input,
+      via,
+      invocationActor,
+      signal,
+      idempotencyKey,
+    );
+    return crossing(
+      result,
+      BUILTIN_NAMES.has(capability.name) ? undefined : capability,
+      capability.name,
+      invocationActor,
+    );
+  }
+
+  async function runInvocation(
+    capability: Capability,
+    input: Record<string, unknown>,
+    via: "native" | "invoke",
+    invocationActor: Actor | undefined,
+    signal?: AbortSignal,
+    idempotencyKey?: string,
+  ): Promise<ToolResult> {
 
     if (capability.name === FIND_CAPABILITIES) {
       const raw = readString(input, "query") ?? readString(input, "task") ?? "";
       // Bound what enters routing, lastRouting, and the audit log.
-      return toToolResult(await findCapabilities(raw.slice(0, 400)));
+      const report = await findCapabilities(raw.slice(0, 400));
+      try {
+        return toToolResult(throughView(report, undefined, invocationActor));
+      } catch (err) {
+        if (err instanceof AgentViewFailed) {
+          return viewFailed(undefined, FIND_CAPABILITIES, false);
+        }
+        throw err;
+      }
     }
     if (capability.name === INVOKE_CAPABILITY) {
       return dispatchInvoke(input);
     }
     if (capability.name === GET_CONTEXT) {
-      return toToolResult(contextPayload());
+      try {
+        return toToolResult(throughView(contextPayload(), undefined, invocationActor));
+      } catch (err) {
+        if (err instanceof AgentViewFailed) {
+          return viewFailed(undefined, GET_CONTEXT, false);
+        }
+        throw err;
+      }
     }
     if (capability.name === GET_ACTION_STATUS) {
-      return actionStatus(input);
+      try {
+        return actionStatus(input, invocationActor);
+      } catch (err) {
+        if (err instanceof AgentViewFailed) {
+          return viewFailed(undefined, GET_ACTION_STATUS, false);
+        }
+        throw err;
+      }
     }
 
     audit.append({
@@ -904,7 +1241,9 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       emit();
       return capabilityUnavailable(
         capability.name,
-        availability,
+        availability.reasonCode === "AVAILABILITY_CHECK_FAILED"
+          ? { reasonCode: availability.reasonCode, reason: agentText(availability.reason) }
+          : availability,
         refusal(capability, availability.repair),
       );
     }
@@ -987,8 +1326,8 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       return executionIndeterminate(
         capability.name,
         unresolved.id,
-        unresolved.detail,
-        unresolved.changes,
+        agentText(unresolved.detail),
+        changesThroughView(unresolved.changes, capability, invocationActor),
         settled(capability, [{ kind: "record", id: unresolved.id }]),
       );
     }
@@ -1024,7 +1363,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       });
       emit();
       return settle(
-        previewUnavailable(capability.name, direct.error, refusal(capability)),
+        previewUnavailable(capability.name, agentText(direct.error), refusal(capability)),
       );
     }
     // The use is spent here, synchronously, at the moment the runtime
@@ -1104,7 +1443,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       emit();
       return previewUnavailable(
         capability.name,
-        staged.error,
+        agentText(staged.error),
         refusal(capability),
       );
     }
@@ -1122,9 +1461,22 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       emit();
       return previewUnavailable(
         capability.name,
-        preview.error,
+        agentText(preview.error),
         refusal(capability),
       );
+    }
+    // The agent's copy of the preview is projected before anything is
+    // queued, so a failed view queues nothing and shows nothing. The person
+    // approving still sees the whole preview on the pending action.
+    let shown: Change[];
+    try {
+      shown = changesThroughView(preview.changes, capability, invocationActor);
+    } catch (err) {
+      if (err instanceof AgentViewFailed) {
+        staged.proposal?.discard();
+        return viewFailed(capability, capability.name, false);
+      }
+      throw err;
     }
     // The digest is computed here, by the runtime, from the preview the
     // adapter or the author just derived, and only where there was a preview
@@ -1175,7 +1527,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       action.id,
       capability.risk,
       summary,
-      action.preview,
+      shown,
       capability.approvalEvidence,
       settled(capability, [{ kind: "approval", id: action.id }]),
       considered,
@@ -1705,10 +2057,40 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         ...(stored ? [{ kind: "receipt" as const, id: stored.id }] : []),
         { kind: "execution", id: executionId },
       ];
-      const toolResult = completed(recordable, pending?.receipt, {
-        ...settled(capability, evidence),
-        changes: pending?.receipt.changes ?? [],
-      });
+      // Everything that crosses to the agent goes through the view here, on
+      // the runtime's side. The receipt the store holds and the audit event
+      // above are the human's and stay whole.
+      let toolResult: ToolResult;
+      try {
+        const receiptShown =
+          pending === undefined
+            ? undefined
+            : (throughView(
+                {
+                  ...pending.receipt,
+                  changes: changesThroughView(
+                    pending.receipt.changes,
+                    capability,
+                    actingActor,
+                  ),
+                },
+                capability,
+                actingActor,
+              ) as Receipt);
+        toolResult = completed(
+          throughView(recordable, capability, actingActor),
+          receiptShown,
+          {
+            ...settled(capability, evidence),
+            changes: receiptShown?.changes ?? [],
+          },
+        );
+      } catch (err) {
+        if (!(err instanceof AgentViewFailed)) {
+          throw err;
+        }
+        toolResult = viewFailed(capability, capability.name, true, evidence);
+      }
       try {
         present(capability, "capability_completed", input, actingActor, {
           executionId,
@@ -1799,8 +2181,8 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           result: executionIndeterminate(
             capability.name,
             record.id,
-            message,
-            err.changes,
+            agentText(message),
+            changesThroughView(err.changes, capability, actingActor),
             settled(capability, [{ kind: "record", id: record.id }, ...attempted]),
           ),
         };
@@ -1818,7 +2200,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         humanInitiated,
       });
       emit();
-      return { ok: false, executionId, result: errorResult(message) };
+      return { ok: false, executionId, result: errorResult(agentText(message)) };
     } finally {
       linked.dispose();
     }
@@ -2090,7 +2472,10 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     };
   }
 
-  function actionStatus(input: Record<string, unknown>): ToolResult {
+  function actionStatus(
+    input: Record<string, unknown>,
+    viewer: Actor | undefined,
+  ): ToolResult {
     const id =
       readString(input, "approval_id") ??
       readString(input, "actionId") ??
@@ -2107,22 +2492,25 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       capability: record.action.capability,
       status: record.status,
     };
+    const owner = catalog.get(record.action.capability);
     if (record.status === "APPROVED_EXECUTED") {
-      base.result = record.result;
+      base.result = throughView(record.result, owner, viewer);
     }
     if (record.status === "FAILED") {
-      base.error = record.error;
+      base.error = agentText(record.error);
     }
     if (record.status === "FAILED_UNAVAILABLE") {
       base.reasonCode = record.reasonCode;
       base.reason = record.reason;
     }
     if (record.status === "INDETERMINATE") {
-      base.detail = record.detail;
+      base.detail = agentText(record.detail);
       base.record_id = record.recordId;
-      base.changes = unreconciled
+      const open = unreconciled
         .list()
         .find((entry) => entry.id === record.recordId)?.changes;
+      base.changes =
+        open === undefined ? undefined : changesThroughView(open, owner, viewer);
       base.hint =
         "The commit threw after it may already have written. Check the application, then call reconcile with what you found. Do not retry.";
     }
@@ -2138,6 +2526,250 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       }
     }
     routedNames = next;
+  }
+
+  async function approveInner(actionId: string, by?: Actor): Promise<ToolResult> {
+    const session = claimSession();
+    const authorizer = resolveHumanActor(
+      by ?? actor,
+      "an approval must name a human; pass one explicitly rather than relying on the acting actor",
+    );
+    if (!authorizer.ok) {
+      return errorResult(authorizer.reason);
+    }
+    // Same boundary rule as `runCapability`. The execution this releases
+    // belongs to whoever was acting when the approval was claimed, not to
+    // whoever happens to be acting once the re-checks below finish.
+    const actingActor = actor;
+    const action = approvals.claim(actionId);
+    if (!action) {
+      const record = approvals.get(actionId);
+      if (!record) {
+        return errorResult(`unknown pending action: ${actionId}`);
+      }
+      return toToolResult({
+        status: record.status,
+        approval_id: actionId,
+        capability: record.action.capability,
+        note: "This approval was already claimed or resolved; the action did not run again.",
+      });
+    }
+    const routed = routeCapability(catalog, action.capability);
+    if (isRouteError(routed)) {
+      proposals.discard(actionId);
+      approvals.resolve(actionId, {
+        status: "FAILED",
+        action,
+        error: `unknown capability: ${action.capability}`,
+        resolvedAt: now(),
+      });
+      return errorResult(`unknown capability: ${action.capability}`);
+    }
+    try {
+    // Every refusal from here names the approval it refused as evidence.
+    const claimed: Evidence[] = [{ kind: "approval", id: actionId }];
+    // Policy is re-evaluated here, not just at request time: a rule that
+    // started denying while the action sat pending must block it.
+    const decision = policy({
+      capability: routed,
+      input: action.input,
+      context,
+    });
+    if (decision.kind === "deny") {
+      proposals.discard(actionId);
+      approvals.resolve(actionId, {
+        status: "FAILED",
+        action,
+        error: decision.reason,
+        resolvedAt: now(),
+      });
+      audit.append({
+        kind: "policy_denied",
+        capability: action.capability,
+        reason: decision.reason,
+        at: now(),
+      });
+      emit();
+      return policyDenied(
+        action.capability,
+        decision.reason,
+        refusal(routed, undefined, claimed),
+      );
+    }
+
+    const availability = evaluateAvailability(routed, context);
+    const inputCheck = availability.available
+      ? routed.checkInput?.(action.input, context)
+      : undefined;
+    const blocker = !availability.available
+      ? availability
+      : inputCheck && !inputCheck.available
+        ? inputCheck
+        : null;
+    if (blocker) {
+      proposals.discard(actionId);
+      approvals.resolve(actionId, {
+        status: "FAILED_UNAVAILABLE",
+        action,
+        reasonCode: blocker.reasonCode,
+        reason: blocker.reason,
+        resolvedAt: now(),
+      });
+      audit.append({
+        kind: "capability_unavailable",
+        capability: action.capability,
+        reasonCode: blocker.reasonCode,
+        at: now(),
+      });
+      emit();
+      return capabilityUnavailable(
+        action.capability,
+        blocker,
+        refusal(routed, blocker.repair, claimed),
+      );
+    }
+    // The person approved a change from an exact state. If that state has
+    // moved, the approval no longer describes what would happen, so
+    // nothing runs and the artifact is released. The check is the same
+    // one a plan runs per operation.
+    if (action.stateVersion !== undefined) {
+      const observed = currentDigest(routed, action.input);
+      if (observed !== action.stateVersion) {
+        proposals.discard(actionId);
+        const versions = {
+          expected: action.stateVersion,
+          observed: observed ?? "unreadable",
+        };
+        approvals.resolve(actionId, {
+          status: "FAILED_UNAVAILABLE",
+          action,
+          reasonCode: "APPROVAL_STALE",
+          reason: `the state this approval was reviewed against has moved (expected ${versions.expected}, observed ${versions.observed})`,
+          resolvedAt: now(),
+        });
+        audit.append({
+          kind: "capability_unavailable",
+          capability: action.capability,
+          reasonCode: "APPROVAL_STALE",
+          at: now(),
+        });
+        emit();
+        return approvalStale(
+          action.capability,
+          actionId,
+          versions,
+          refusal(
+            routed,
+            { capability: routed.name, input: action.input },
+            claimed,
+          ),
+        );
+      }
+    }
+    // The staged artifact is the only thing that may land for a staged
+    // capability. Missing it is a fail-closed refusal, never a fallback
+    // to running the handler outside the fork the human reviewed.
+    const proposal = proposals.take(actionId);
+    if (routed.stagedOperation && !proposal) {
+      // The repair is the same request again, with the input the human
+      // already saw, so a new proposal is staged for a new approval.
+      const missing = unavailable(
+        "STAGED_PROPOSAL_MISSING",
+        `The staged change behind ${actionId} is no longer held by the runtime, so approving it would run a write nobody reviewed. Request the action again.`,
+        { capability: routed.name, input: action.input },
+      );
+      approvals.resolve(actionId, {
+        status: "FAILED_UNAVAILABLE",
+        action,
+        reasonCode: missing.reasonCode,
+        reason: missing.reason,
+        resolvedAt: now(),
+      });
+      audit.append({
+        kind: "capability_unavailable",
+        capability: action.capability,
+        reasonCode: missing.reasonCode,
+        at: now(),
+      });
+      emit();
+      return capabilityUnavailable(
+        action.capability,
+        missing,
+        refusal(routed, missing.repair, claimed),
+      );
+    }
+    audit.append({
+      kind: "approval_approved",
+      actionId,
+      capability: action.capability,
+      approvedBy: authorizer.actor,
+      at: now(),
+    });
+    const outcome = await executeNow(routed, action.input, {
+      actor: actingActor,
+      humanInitiated: true,
+      ...(proposal ? { commit: proposal.commit } : {}),
+    });
+    // approvals.resolve inserts, so resolving after a reset put the cleared
+    // action back into the fresh session. Nothing here belongs to it.
+    if (session.expired()) {
+      proposal?.discard();
+      return executionCancelled(
+        action.capability,
+        refusal(routed, undefined, claimed),
+      );
+    }
+    if (outcome.ok) {
+      approvals.resolve(actionId, {
+        status: "APPROVED_EXECUTED",
+        action,
+        result: outcome.value,
+        resolvedAt: now(),
+      });
+    } else if (outcome.indeterminate) {
+      // The artifact is deliberately not discarded. It is the evidence a
+      // human reconciles against, and nothing here proves it did not land.
+      unreconciled.attach(outcome.indeterminate.recordId, { actionId });
+      approvals.resolve(actionId, {
+        status: "INDETERMINATE",
+        action,
+        detail: outcome.indeterminate.detail,
+        recordId: outcome.indeterminate.recordId,
+        resolvedAt: now(),
+      });
+    } else {
+      proposal?.discard();
+      approvals.resolve(actionId, {
+        status: "FAILED",
+        action,
+        error: firstText(outcome.result),
+        resolvedAt: now(),
+      });
+    }
+    emit();
+    return outcome.result;
+    } catch (err) {
+      // The action is already claimed, so a throw anywhere in these
+      // checks would otherwise strand it in EXECUTING with no retry.
+      proposals.discard(actionId);
+      const message = err instanceof Error ? err.message : String(err);
+      approvals.resolve(actionId, {
+        status: "FAILED",
+        action,
+        error: message,
+        resolvedAt: now(),
+      });
+      audit.append({
+        kind: "execution_failed",
+        capability: action.capability,
+        executionId: `${actionId}-approval-check`,
+        error: message,
+        at: now(),
+      });
+      emit();
+      return errorResult(agentText(message));
+    }
+  
   }
 
   return {
@@ -2945,246 +3577,17 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       return runCapability(routed, input, "invoke");
     },
     async approve(actionId, by) {
-      const session = claimSession();
-      const authorizer = resolveHumanActor(
-        by ?? actor,
-        "an approval must name a human; pass one explicitly rather than relying on the acting actor",
+      // The acting identity is read once, here, for the approval and for
+      // the view its result crosses.
+      const viewer = actor;
+      const owner = approvals.get(actionId)?.action.capability;
+      const result = await approveInner(actionId, by);
+      return crossing(
+        result,
+        owner === undefined ? undefined : catalog.get(owner),
+        owner ?? "approve",
+        viewer,
       );
-      if (!authorizer.ok) {
-        return errorResult(authorizer.reason);
-      }
-      // Same boundary rule as `runCapability`. The execution this releases
-      // belongs to whoever was acting when the approval was claimed, not to
-      // whoever happens to be acting once the re-checks below finish.
-      const actingActor = actor;
-      const action = approvals.claim(actionId);
-      if (!action) {
-        const record = approvals.get(actionId);
-        if (!record) {
-          return errorResult(`unknown pending action: ${actionId}`);
-        }
-        return toToolResult({
-          status: record.status,
-          approval_id: actionId,
-          capability: record.action.capability,
-          note: "This approval was already claimed or resolved; the action did not run again.",
-        });
-      }
-      const routed = routeCapability(catalog, action.capability);
-      if (isRouteError(routed)) {
-        proposals.discard(actionId);
-        approvals.resolve(actionId, {
-          status: "FAILED",
-          action,
-          error: `unknown capability: ${action.capability}`,
-          resolvedAt: now(),
-        });
-        return errorResult(`unknown capability: ${action.capability}`);
-      }
-      try {
-      // Every refusal from here names the approval it refused as evidence.
-      const claimed: Evidence[] = [{ kind: "approval", id: actionId }];
-      // Policy is re-evaluated here, not just at request time: a rule that
-      // started denying while the action sat pending must block it.
-      const decision = policy({
-        capability: routed,
-        input: action.input,
-        context,
-      });
-      if (decision.kind === "deny") {
-        proposals.discard(actionId);
-        approvals.resolve(actionId, {
-          status: "FAILED",
-          action,
-          error: decision.reason,
-          resolvedAt: now(),
-        });
-        audit.append({
-          kind: "policy_denied",
-          capability: action.capability,
-          reason: decision.reason,
-          at: now(),
-        });
-        emit();
-        return policyDenied(
-          action.capability,
-          decision.reason,
-          refusal(routed, undefined, claimed),
-        );
-      }
-
-      const availability = evaluateAvailability(routed, context);
-      const inputCheck = availability.available
-        ? routed.checkInput?.(action.input, context)
-        : undefined;
-      const blocker = !availability.available
-        ? availability
-        : inputCheck && !inputCheck.available
-          ? inputCheck
-          : null;
-      if (blocker) {
-        proposals.discard(actionId);
-        approvals.resolve(actionId, {
-          status: "FAILED_UNAVAILABLE",
-          action,
-          reasonCode: blocker.reasonCode,
-          reason: blocker.reason,
-          resolvedAt: now(),
-        });
-        audit.append({
-          kind: "capability_unavailable",
-          capability: action.capability,
-          reasonCode: blocker.reasonCode,
-          at: now(),
-        });
-        emit();
-        return capabilityUnavailable(
-          action.capability,
-          blocker,
-          refusal(routed, blocker.repair, claimed),
-        );
-      }
-      // The person approved a change from an exact state. If that state has
-      // moved, the approval no longer describes what would happen, so
-      // nothing runs and the artifact is released. The check is the same
-      // one a plan runs per operation.
-      if (action.stateVersion !== undefined) {
-        const observed = currentDigest(routed, action.input);
-        if (observed !== action.stateVersion) {
-          proposals.discard(actionId);
-          const versions = {
-            expected: action.stateVersion,
-            observed: observed ?? "unreadable",
-          };
-          approvals.resolve(actionId, {
-            status: "FAILED_UNAVAILABLE",
-            action,
-            reasonCode: "APPROVAL_STALE",
-            reason: `the state this approval was reviewed against has moved (expected ${versions.expected}, observed ${versions.observed})`,
-            resolvedAt: now(),
-          });
-          audit.append({
-            kind: "capability_unavailable",
-            capability: action.capability,
-            reasonCode: "APPROVAL_STALE",
-            at: now(),
-          });
-          emit();
-          return approvalStale(
-            action.capability,
-            actionId,
-            versions,
-            refusal(
-              routed,
-              { capability: routed.name, input: action.input },
-              claimed,
-            ),
-          );
-        }
-      }
-      // The staged artifact is the only thing that may land for a staged
-      // capability. Missing it is a fail-closed refusal, never a fallback
-      // to running the handler outside the fork the human reviewed.
-      const proposal = proposals.take(actionId);
-      if (routed.stagedOperation && !proposal) {
-        // The repair is the same request again, with the input the human
-        // already saw, so a new proposal is staged for a new approval.
-        const missing = unavailable(
-          "STAGED_PROPOSAL_MISSING",
-          `The staged change behind ${actionId} is no longer held by the runtime, so approving it would run a write nobody reviewed. Request the action again.`,
-          { capability: routed.name, input: action.input },
-        );
-        approvals.resolve(actionId, {
-          status: "FAILED_UNAVAILABLE",
-          action,
-          reasonCode: missing.reasonCode,
-          reason: missing.reason,
-          resolvedAt: now(),
-        });
-        audit.append({
-          kind: "capability_unavailable",
-          capability: action.capability,
-          reasonCode: missing.reasonCode,
-          at: now(),
-        });
-        emit();
-        return capabilityUnavailable(
-          action.capability,
-          missing,
-          refusal(routed, missing.repair, claimed),
-        );
-      }
-      audit.append({
-        kind: "approval_approved",
-        actionId,
-        capability: action.capability,
-        approvedBy: authorizer.actor,
-        at: now(),
-      });
-      const outcome = await executeNow(routed, action.input, {
-        actor: actingActor,
-        humanInitiated: true,
-        ...(proposal ? { commit: proposal.commit } : {}),
-      });
-      // approvals.resolve inserts, so resolving after a reset put the cleared
-      // action back into the fresh session. Nothing here belongs to it.
-      if (session.expired()) {
-        proposal?.discard();
-        return executionCancelled(
-          action.capability,
-          refusal(routed, undefined, claimed),
-        );
-      }
-      if (outcome.ok) {
-        approvals.resolve(actionId, {
-          status: "APPROVED_EXECUTED",
-          action,
-          result: outcome.value,
-          resolvedAt: now(),
-        });
-      } else if (outcome.indeterminate) {
-        // The artifact is deliberately not discarded. It is the evidence a
-        // human reconciles against, and nothing here proves it did not land.
-        unreconciled.attach(outcome.indeterminate.recordId, { actionId });
-        approvals.resolve(actionId, {
-          status: "INDETERMINATE",
-          action,
-          detail: outcome.indeterminate.detail,
-          recordId: outcome.indeterminate.recordId,
-          resolvedAt: now(),
-        });
-      } else {
-        proposal?.discard();
-        approvals.resolve(actionId, {
-          status: "FAILED",
-          action,
-          error: firstText(outcome.result),
-          resolvedAt: now(),
-        });
-      }
-      emit();
-      return outcome.result;
-      } catch (err) {
-        // The action is already claimed, so a throw anywhere in these
-        // checks would otherwise strand it in EXECUTING with no retry.
-        proposals.discard(actionId);
-        const message = err instanceof Error ? err.message : String(err);
-        approvals.resolve(actionId, {
-          status: "FAILED",
-          action,
-          error: message,
-          resolvedAt: now(),
-        });
-        audit.append({
-          kind: "execution_failed",
-          capability: action.capability,
-          executionId: `${actionId}-approval-check`,
-          error: message,
-          at: now(),
-        });
-        emit();
-        return errorResult(message);
-      }
     },
     listUnreconciled() {
       return unreconciled.list();
