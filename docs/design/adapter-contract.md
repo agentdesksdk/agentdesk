@@ -265,26 +265,32 @@ neither in memory nor synchronous, and building it showed where the
 contract is silent. Each item is something the implementation needed and
 the contract did not say.
 
-1. **The contract is synchronous and says nothing about stores that are
-   not.** `fork`, `diff`, `commit`, and `release` return values, and the
-   runtime never awaits what `commit` returns. IndexedDB can only be read
-   or written through requests that settle later. The adapter therefore
-   needs an in-process mirror of the rows it governs, loaded before the
-   first fork, and the contract has no `open` or ready hook: the
-   application has to await the adapter's own `open()` before the runtime
-   starts, and a fork against an unloaded mirror is refused by the adapter
-   throwing, not by anything the runtime checks at `start`.
+1. **Fork and diff are synchronous and say nothing about stores that are
+   not.** `fork` and `diff` return values, and have to: a plan's second
+   operation derives against the first's staged head inside one `scope`,
+   and the diff is what a person reads at request time. IndexedDB can only
+   be read through requests that settle later. The adapter therefore needs
+   an in-process mirror of the rows it governs, loaded before the first
+   fork, and the contract has no `open` or ready hook: the application has
+   to await the adapter's own `open()` before the runtime starts, and a
+   fork against an unloaded mirror is refused by the adapter throwing, not
+   by anything the runtime checks at `start`.
 
-2. **A commit that has returned cannot become refused or indeterminate.**
-   The only check that sees a second tab is the version check inside the
-   commit's own transaction, and its outcome arrives after `commit`
-   returned. The contract has no channel for a late outcome, so the runtime
-   has already recorded `execution_completed` when the database refuses the
-   write; the adapter reports it through `flush()`, outside the contract.
-   The corollary is that for a transactional store nothing synchronous in a
-   commit is ever indeterminate: a failure before return is a refusal,
-   because IndexedDB rolls back, and the indeterminacy the contract models
-   is exactly the part the contract cannot see.
+2. **Resolved: a commit that has returned can no longer report a
+   completion that rolled back.** This was a correctness gap. The only
+   check that sees a second tab is the version check inside the commit's
+   own transaction, and its outcome arrived after `commit` had returned,
+   so the runtime had recorded `execution_completed` for a write the
+   database then refused. `commit` may now return a promise, the runtime
+   awaits it before recording anything, and a rejection is classified the
+   way a throw is: a refusal names itself with `StagedCommitRefused` or
+   `CapabilityUnavailableError`, and anything else is indeterminate. The
+   IndexedDB adapter's commit is the transaction's own outcome, and its
+   mirror moves only when the transaction completes. `release` may return
+   a promise too. What remains true is the corollary: for a transactional
+   store, an abort is a rollback the database vouches for, and the one
+   abort it does not vouch for, a connection lost while committing, is
+   the one the adapter reports as indeterminate.
 
 3. **A commit interrupted by an unload leaves no runtime record.**
    `StagedCommitIndeterminate` exists only when `commit` throws. A page
@@ -328,7 +334,8 @@ the contract did not say.
 packages/webmcp/src/receipts.ts ReceiptStore StoredReceipt
 packages/webmcp/src/capability.ts Change RiskLevel untrustedContentHint
 packages/webmcp/src/plan.ts expectedRevision
-packages/webmcp/src/staging.ts StagingAdapter StagedCommitIndeterminate stateDigest identify
+packages/webmcp/src/staging.ts StagingAdapter StagedCommitIndeterminate StagedCommitRefused stateDigest identify buildStageHandler
+packages/webmcp/src/runtime.ts runInvocation
 packages/webmcp/src/indexeddb-staging.ts indexedDbStaging open flush resolveArtifact STAGING_STORE
 packages/webmcp/src/runtime.ts describeArtifact
 -->

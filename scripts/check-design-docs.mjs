@@ -185,10 +185,14 @@ const CLAIMS = [
   ["docs/architecture.md", /no\s+WebMCP tool reaches it/, "present", "architecture says present is not a tool"],
   ["docs/architecture.md", /adoptHumanActor/, "present", "architecture names the identity boundary a grant issuer crosses"],
   ["docs/architecture.md", /A second adapter, over IndexedDB/, "present", "architecture describes the IndexedDB staging adapter"],
-  ["docs/architecture.md", /IndexedDB rolls back every write the transaction\s+held/, "present", "architecture says an aborted commit transaction is undone by IndexedDB, not the adapter"],
+  ["docs/architecture.md", /IndexedDB\s+rolls back every write the transaction\s+held/, "present", "architecture says an aborted commit transaction is undone by IndexedDB, not the adapter"],
   ["docs/architecture.md", /every row it read or\s+wrote through the draft, each at its version/, "present", "architecture says what a fork snapshots and what a version is"],
   ["adapter-contract.md", /##\s*What the staging contract did not say/, "present", "adapter contract lists what the staging contract left unsaid"],
-  ["adapter-contract.md", /A commit that has returned cannot become refused or\s+indeterminate/, "present", "adapter contract records the synchronous-commit leak"],
+  ["adapter-contract.md", /Resolved: a commit that has returned can no longer report a\s+completion that rolled back/, "present", "adapter contract records the synchronous-commit leak as resolved"],
+  ["adapter-contract.md", /A commit that has returned cannot become refused or\s+indeterminate/, "absent", "the synchronous-commit leak is no longer stated as open"],
+  ["docs/architecture.md", /Commit is the exception: an adapter's\s+`commit` may return a promise, and the runtime awaits it/, "present", "architecture says a staged commit is awaited before the outcome is recorded"],
+  ["docs/architecture.md", /the mirror moves when a commit's\s+transaction completes and not before/, "present", "architecture says the IndexedDB mirror follows the transaction"],
+  ["docs/architecture.md", /A fork opened while a commit is in flight derives against the rows as\s+they were, without waiting/, "present", "architecture decides what a fork in the same tick derives against"],
   ["adapter-contract.md", /`identify` is consulted only when the artifact does not clone/, "present", "adapter contract records the identify-by-clone-failure leak"],
 ];
 

@@ -2427,8 +2427,10 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       at: now(),
     });
     try {
+      // A staged commit is awaited like a handler is: a store that answers
+      // later answers before anything about the outcome is written down.
       const value = opts.commit
-        ? opts.commit()
+        ? await opts.commit()
         : await capability.execute(input, execContext);
       if (session.expired()) {
         return {

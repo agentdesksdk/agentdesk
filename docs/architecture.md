@@ -1013,7 +1013,16 @@ prevent that.
 Staging is synchronous by contract. A handler that suspends resumes after its
 fork closed, so `defineCapability` refuses an async handler, `runStage`
 refuses a returned promise, and the demo store refuses every later write once
-a staged handler has suspended.
+a staged handler has suspended. Commit is the exception: an adapter's
+`commit` may return a promise, and the runtime awaits it before it records
+the outcome, so a store that answers later answers before anything is
+written down. A rejection is read exactly as a throw is: `StagedCommitRefused`
+or `CapabilityUnavailableError` is a refusal that releases the fork and
+audits no completion; anything else is indeterminate and keeps the record
+and the artifact. `release` may return a promise too, and its rejection is a
+failed cleanup. Fork and diff stay synchronous, because a plan's second
+operation derives against the first's staged head inside one `scope`, and
+the diff is what a person reads at request time.
 
 Forking is the application's job, since only it knows its data layer. The SDK
 owns the artifact's identity and lifecycle and stays out of the store.
@@ -1043,10 +1052,16 @@ the demo. Its decisions, each of which the contract left to it:
   refuses `APPROVAL_STALE` before anything is dispatched. It then runs one
   readwrite transaction that re-reads every base row, aborts if any moved
   under a writer this process could not see, and otherwise puts every
-  staged row and deletes the fork in that same transaction. When the
-  transaction aborts after partial application, the adapter does nothing:
-  IndexedDB rolls back every write the transaction held, so there is
-  nothing to undo, and `flush()` reports the refusal.
+  staged row and deletes the fork in that same transaction. The promise it
+  returns is the transaction's outcome: it resolves on `complete`, and on
+  `abort` it rejects `APPROVAL_STALE` when the adapter aborted over a moved
+  version, `StagedCommitRefused` when IndexedDB aborted with an error, and
+  a plain error when the abort carried no error after every write had been
+  accepted, which is a connection lost while committing and the one case
+  the specification does not promise a rollback for. When the transaction
+  aborts after partial application, the adapter does nothing: IndexedDB
+  rolls back every write the transaction held, so there is nothing to
+  undo.
 - *Release* drops the fork and its row. A commit after a release refuses
   with `StagedCommitRefused`, which the runtime reads as a commit that never
   dispatched.
@@ -1057,16 +1072,22 @@ the demo. Its decisions, each of which the contract left to it:
   operation as a function precisely so the artifact does not clone and the
   record carries the key rather than a second copy of the rows.
 
-The contract is synchronous and IndexedDB is not. The adapter keeps an
+Fork and diff are synchronous and IndexedDB is not. The adapter keeps an
 in-process mirror of the governed rows, loaded once by `open()`, which the
-application awaits before the runtime starts; every IndexedDB write goes
-through one serialized queue that `flush()` settles. The mirror is a single
-writer's view: a second tab's write is caught by the transaction's own
-version check and refused by the database, but the report arrives after
-`commit` returned, which is the leak `docs/design/adapter-contract.md`
-records. The tests drive it through an in-test double that buffers a
-transaction's writes and lands them together, because no fake-indexeddb
-shim is in the workspace lockfile.
+application awaits before the runtime starts; fork rows and releases go
+through one serialized queue that `flush()` settles, so a fork's row is
+written before the commit that deletes it. The transaction is the
+authority and the mirror follows it: the mirror moves when a commit's
+transaction completes and not before, so a refused commit leaves it as it
+was. A fork opened while a commit is in flight derives against the rows as
+they were, without waiting, because fork cannot wait; its own commit is then
+refused by the version check, which is what a fork against rows that moved
+deserves. Two tabs on one database therefore both fork the same row, the
+first lands, and the second is refused with nothing written and no
+completion audited. The tests drive it through an in-test double that
+buffers a transaction's writes and lands them together, aborts by dropping
+them, and can lose its connection while committing, because no
+fake-indexeddb shim is in the workspace lockfile.
 
 ### The human keeps working while an approval is pending
 
@@ -1162,7 +1183,10 @@ than a write outside what the human reviewed.
 Staging is synchronous by contract, because a handler that suspends resumes
 after its fork has closed. `defineCapability` refuses an `AsyncFunction`,
 `runStage` refuses a returned thenable, and a host store can refuse later
-writes once a staged handler has escaped.
+writes once a staged handler has escaped. The adapter's `commit` and
+`release` are the exception and may return promises; `runInvocation`
+awaits the commit, and `buildStageHandler` classifies a rejection the way
+it classifies a throw.
 
 Plan preparation runs every staging inside one `adapter.scope`, so each
 operation derives against its predecessor's staged head. Commit consumes the
@@ -1837,7 +1861,8 @@ packages/webmcp/src/persistence.ts PersistedRecord PersistedIdempotencyClaim Per
 packages/webmcp/src/runtime.ts persistOpen rehydrate describeArtifact restoredClaims approvalClaims
 packages/webmcp/src/staging.ts hydrate identify digestOf
 packages/webmcp/src/indexeddb-staging.ts indexedDbStaging IndexedDbFork IndexedDbDraft STAGING_STORE versionOf open flush resolveArtifact
-packages/webmcp/src/staging.ts StagedCommitRefused
+packages/webmcp/src/staging.ts StagedCommitRefused buildStageHandler
+packages/webmcp/src/runtime.ts runInvocation
 packages/webmcp/src/results.ts after_restart
 packages/webmcp/src/runtime.ts present PresentationRequest REVEAL_TOKEN
 packages/webmcp/src/capability.ts AgentView agentView

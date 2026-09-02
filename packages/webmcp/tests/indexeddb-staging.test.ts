@@ -37,6 +37,7 @@ function fakeIndexedDb() {
   const databases = new Map<string, { version: number; stores: Map<string, Table> }>();
   const transactions: Array<{ names: string[]; mode: string }> = [];
   let cut = false;
+  let lose: string | null = null;
 
   const seed = (name: string, rows: Record<string, Record<string, unknown>[]>) => {
     const stores = new Map<string, Table>();
@@ -66,6 +67,13 @@ function fakeIndexedDb() {
           const hung = mode === "readwrite" && cut;
           if (hung) {
             cut = false;
+          }
+          // The connection goes away while the transaction is committing:
+          // IndexedDB fires abort with no error after every write was
+          // accepted, and whether they landed is not observable from the page.
+          const lost = mode === "readwrite" && lose !== null && list.includes(lose);
+          if (lost) {
+            lose = null;
           }
           const overlay = new Map<string, Map<string, Record<string, unknown> | null>>();
           const writes: Array<() => void> = [];
@@ -127,6 +135,11 @@ function fakeIndexedDb() {
                     done = true;
                     for (const land of writes) {
                       land();
+                    }
+                    if (lost) {
+                      tx.error = null;
+                      tx.onabort?.({ target: tx });
+                      return;
                     }
                     tx.oncomplete?.({ target: tx });
                   });
@@ -205,6 +218,10 @@ function fakeIndexedDb() {
     /** The next readwrite transaction never settles: the page went away. */
     cut: () => {
       cut = true;
+    },
+    /** The next readwrite transaction naming `store` aborts with no error after its writes were accepted. */
+    lose: (store: string) => {
+      lose = store;
     },
   };
 }
@@ -289,8 +306,8 @@ const directCapability = (name: string, operation: string): Capability =>
 function throwsAfterCommit(adapter: IndexedDbStagingAdapter): StagingAdapter<IndexedDbFork> {
   return {
     ...adapter,
-    commit: (fork, restage) => {
-      adapter.commit(fork, restage);
+    commit: async (fork, restage) => {
+      await adapter.commit(fork, restage);
       throw new Error("The connection dropped after the write was sent; the commit's outcome is unknown.");
     },
   };
@@ -307,8 +324,7 @@ describe("a row the operation only read is part of what the commit checks", () =
     await adapter.flush();
     const before = db.transactions.length;
 
-    adapter.commit(staged, () => adapter.fork("cancel_if_active", { id: "O-1" }));
-    await adapter.flush();
+    await adapter.commit(staged, () => adapter.fork("cancel_if_active", { id: "O-1" }));
 
     expect(db.table(DB, ORDERS).get("O-1")).toEqual({ id: "O-1", status: "cancelled", total: 40, version: 4 });
     expect(db.table(DB, CUSTOMERS).get("C-1")).toEqual(CUSTOMER_ROWS[0]);
@@ -322,10 +338,12 @@ describe("a row the operation only read is part of what the commit checks", () =
     const { staged } = adapter.fork("cancel_if_active", { id: "O-1" });
     db.table(DB, CUSTOMERS).set("C-1", { id: "C-1", status: "suspended", version: 2 });
 
-    adapter.commit(staged, () => adapter.fork("cancel_if_active", { id: "O-1" }));
-    await expect(adapter.flush()).rejects.toThrow(/C-1/);
+    await expect(
+      adapter.commit(staged, () => adapter.fork("cancel_if_active", { id: "O-1" })),
+    ).rejects.toThrow(/C-1/);
 
     expect(db.table(DB, ORDERS).get("O-1")).toEqual(ORDER_ROWS[0]);
+    expect(adapter.read(ORDERS, "O-1")).toEqual(ORDER_ROWS[0]);
   });
 });
 
@@ -354,8 +372,7 @@ describe("the IndexedDB staging adapter holds the fork, diff, commit, release co
     await adapter.flush();
     const before = db.transactions.length;
 
-    adapter.commit(staged, () => adapter.fork("cancel_pair", {}));
-    await adapter.flush();
+    await adapter.commit(staged, () => adapter.fork("cancel_pair", {}));
 
     expect(db.table(DB, ORDERS).get("O-1")).toEqual({ id: "O-1", status: "cancelled", total: 40, version: 4 });
     expect(db.table(DB, ORDERS).get("O-2")).toEqual({ id: "O-2", status: "cancelled", total: 15, version: 2 });
@@ -369,13 +386,12 @@ describe("the IndexedDB staging adapter holds the fork, diff, commit, release co
     await adapter.open();
     const first = adapter.fork("cancel", { id: "O-1" });
     const second = adapter.fork("flag", { id: "O-1" });
-    adapter.commit(first.staged, () => adapter.fork("cancel", { id: "O-1" }));
-    await adapter.flush();
+    await adapter.commit(first.staged, () => adapter.fork("cancel", { id: "O-1" }));
     const before = db.transactions.length;
 
     let refusal: unknown;
     try {
-      adapter.commit(second.staged, () => adapter.fork("flag", { id: "O-1" }));
+      await adapter.commit(second.staged, () => adapter.fork("flag", { id: "O-1" }));
     } catch (err) {
       refusal = err;
     }
@@ -402,11 +418,36 @@ describe("the IndexedDB staging adapter holds the fork, diff, commit, release co
     // cannot see it, so only the transaction's own check can.
     db.table(DB, ORDERS).set("O-2", { id: "O-2", status: "shipped", total: 15, version: 2 });
 
-    adapter.commit(staged, () => adapter.fork("cancel_pair", {}));
-    await expect(adapter.flush()).rejects.toThrow(/O-2/);
+    let refusal: unknown;
+    try {
+      await adapter.commit(staged, () => adapter.fork("cancel_pair", {}));
+    } catch (err) {
+      refusal = err;
+    }
 
+    expect(refusal).toBeInstanceOf(CapabilityUnavailableError);
+    expect((refusal as CapabilityUnavailableError).unavailability.reasonCode).toBe("APPROVAL_STALE");
     expect(db.table(DB, ORDERS).get("O-1")).toEqual(ORDER_ROWS[0]);
     expect(db.table(DB, ORDERS).get("O-2")).toEqual({ id: "O-2", status: "shipped", total: 15, version: 2 });
+    // The transaction is authoritative, so the mirror moves only when it completes.
+    expect(adapter.read(ORDERS, "O-1")).toEqual(ORDER_ROWS[0]);
+    expect(adapter.read(ORDERS, "O-2")).toEqual(ORDER_ROWS[1]);
+  });
+
+  it("a fork opened while a commit is in flight derives against the rows as they were, and its commit is refused", async () => {
+    const { adapter, db } = makeAdapter();
+    await adapter.open();
+    const first = adapter.fork("cancel", { id: "O-1" });
+    const landing = adapter.commit(first.staged, () => adapter.fork("cancel", { id: "O-1" }));
+    const second = adapter.fork("flag", { id: "O-1" });
+
+    expect(adapter.diff(second.staged)).toEqual([{ field: "orders:O-1.flagged", before: null, after: true }]);
+    await landing;
+    await expect(
+      adapter.commit(second.staged, () => adapter.fork("flag", { id: "O-1" })),
+    ).rejects.toThrow(/O-1/);
+
+    expect(db.table(DB, ORDERS).get("O-1")).toEqual({ id: "O-1", status: "cancelled", total: 40, version: 4 });
   });
 
   it("release drops the fork, and a commit after release refuses", async () => {
@@ -420,7 +461,7 @@ describe("the IndexedDB staging adapter holds the fork, diff, commit, release co
     await adapter.flush();
     expect(db.table(DB, STAGING).size).toBe(0);
 
-    expect(() => adapter.commit(staged, () => adapter.fork("cancel", { id: "O-1" }))).toThrow(
+    await expect(adapter.commit(staged, () => adapter.fork("cancel", { id: "O-1" }))).rejects.toThrow(
       StagedCommitRefused,
     );
     await adapter.flush();
@@ -461,6 +502,63 @@ describe("the IndexedDB staging adapter holds the fork, diff, commit, release co
     reopened.reconcile(rebuilt!, { kind: "commit_not_applied" });
     await reopened.flush();
     expect(db.table(DB, STAGING).size).toBe(0);
+  });
+});
+
+describe("the transaction's outcome is the commit's outcome", () => {
+  const runtimeOver = async (adapter: IndexedDbStagingAdapter, capabilities: Capability[]) => {
+    const runtime = createAgentDeskRuntime({
+      capabilities,
+      registerTool: async () => {},
+      actor: AGENT,
+      staging: adapter,
+    });
+    await runtime.start();
+    return runtime;
+  };
+  const kinds = (runtime: Awaited<ReturnType<typeof runtimeOver>>) =>
+    runtime.getSnapshot().audit.map((event) => event.kind);
+
+  it("two tabs forking the same row: the first lands, the second is refused with nothing written", async () => {
+    const { adapter: first, db } = makeAdapter();
+    await first.open();
+    const second = makeAdapter(db, false).adapter;
+    await second.open();
+    const tabA = await runtimeOver(first, [stagedCapability("cancel_thing", "cancel")]);
+    const tabB = await runtimeOver(second, [stagedCapability("flag_thing", "flag")]);
+    await tabA.invoke("cancel_thing", { id: "O-1" });
+    await tabB.invoke("flag_thing", { id: "O-1" });
+
+    const landed = await tabA.approve(tabA.getSnapshot().pending[0]!.id, HUMAN);
+    const refused = await tabB.approve(tabB.getSnapshot().pending[0]!.id, HUMAN);
+
+    expect(landed.isError).toBeFalsy();
+    expect(refused.code).toBe("CAPABILITY_UNAVAILABLE");
+    expect(refused.data?.reasonCode).toBe("APPROVAL_STALE");
+    expect(kinds(tabB)).not.toContain("execution_completed");
+    expect(tabB.listUnreconciled()).toEqual([]);
+    expect(db.table(DB, ORDERS).get("O-1")).toEqual({ id: "O-1", status: "cancelled", total: 40, version: 4 });
+    await second.flush();
+    expect(db.table(DB, STAGING).size).toBe(0);
+  });
+
+  it("a transaction that loses its connection after the writes were sent is indeterminate, not completed", async () => {
+    const { adapter, db } = makeAdapter();
+    await adapter.open();
+    const runtime = await runtimeOver(adapter, [directCapability("cancel_thing", "cancel")]);
+    db.lose(ORDERS);
+
+    const result = await runtime.invoke("cancel_thing", { id: "O-1" });
+
+    expect(result.code).toBe("EXECUTION_INDETERMINATE");
+    expect(kinds(runtime)).not.toContain("execution_completed");
+    const [record] = runtime.listUnreconciled();
+    expect(record).toMatchObject({
+      kind: "commit_indeterminate",
+      changes: [{ field: "orders:O-1.status", before: "processing", after: "cancelled" }],
+    });
+    // The database did take the write; the page could not know that.
+    expect(db.table(DB, ORDERS).get("O-1")).toEqual({ id: "O-1", status: "cancelled", total: 40, version: 4 });
   });
 });
 
@@ -578,7 +676,6 @@ describe("the staged reviews from 2026-08-31, where adapter-generic, hold agains
     await runtime.invoke("cancel_thing", { id: "O-1" });
 
     const approved = await runtime.approve(runtime.getSnapshot().pending[0]!.id, HUMAN);
-    await adapter.flush();
 
     expect(approved.isError).toBeFalsy();
     expect(db.table(DB, ORDERS).get("O-1")).toEqual({ id: "O-1", status: "cancelled", total: 40, version: 4 });
