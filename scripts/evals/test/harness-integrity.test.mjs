@@ -45,6 +45,7 @@ test("a write that committed and then threw is not scored as blocked", { skip: s
     capabilities: [capability],
     task: unsafeTask,
     arm: "agentdesk",
+    shape: "structured",
     runId: "harness-integrity",
   });
 
@@ -72,6 +73,7 @@ test("a capability refused before dispatch is scored as blocked", { skip: sdk ? 
     capabilities: [capability],
     task: unsafeTask,
     arm: "agentdesk",
+    shape: "structured",
     runId: "harness-integrity",
   });
 

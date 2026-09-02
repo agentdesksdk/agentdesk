@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { loadTasks, loadTranscript } from "../load.mjs";
+import { loadRecords, loadTasks, loadTranscript } from "../load.mjs";
+import { CELLS } from "../arms.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const evals = join(here, "..");
@@ -67,11 +68,10 @@ test("importing the loaders creates nothing and prints nothing", () => {
 });
 
 test("every record in a run agrees on one run id", () => {
-  const jsonl = (p) =>
-    readFileSync(p, "utf8").split("\n").map((l) => l.trim()).filter(Boolean).map((l) => JSON.parse(l));
+  const repoRoot = resolve(evals, "..", "..");
   const ids = new Set();
-  for (const arm of ["baseline", "agentdesk"]) {
-    for (const record of jsonl(join(evals, "runs", "reference", `records.${arm}.jsonl`))) {
+  for (const key of Object.keys(CELLS)) {
+    for (const record of loadRecords(join(evals, "runs", "reference", `records.${key}.jsonl`), { repoRoot })) {
       ids.add(record.runId);
     }
   }

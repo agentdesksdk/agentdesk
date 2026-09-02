@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { ARMS } from "../arms.mjs";
+import { ARMS, CELLS } from "../arms.mjs";
 import { computeMetrics } from "../metrics.mjs";
 import { buildReport, renderMarkdown } from "../report.mjs";
-import { loadTranscript } from "../load.mjs";
+import { loadRecords, loadTranscript } from "../load.mjs";
 import { parseTask } from "../schema.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -60,7 +60,7 @@ test("terminal-tool accuracy still scores tasks that should act", () => {
 });
 
 test("a transcript entry with no arm is refused, not silently dropped", () => {
-  withTranscript("tmp-noarm.jsonl", [{ taskId: acting.id, selectedTools: [], arguments: {}, completed: false }], (p) =>
+  withTranscript("tmp-noarm.jsonl", [{ taskId: acting.id, shape: "structured", selectedTools: [], arguments: {}, completed: false }], (p) =>
     assert.throws(() => loadTranscript(p, tasks, { repoRoot: process.cwd() }), /arm/),
   );
 });
@@ -68,7 +68,7 @@ test("a transcript entry with no arm is refused, not silently dropped", () => {
 test("a transcript entry for an unknown task is refused", () => {
   withTranscript(
     "tmp-unknown.jsonl",
-    [{ arm: "agentdesk", taskId: "no-such-task", selectedTools: [], arguments: {}, completed: false }],
+    [{ arm: "agentdesk", shape: "structured", taskId: "no-such-task", selectedTools: [], arguments: {}, completed: false }],
     (p) => assert.throws(() => loadTranscript(p, tasks, { repoRoot: process.cwd() }), /no-such-task/),
   );
 });
@@ -76,7 +76,7 @@ test("a transcript entry for an unknown task is refused", () => {
 test("a transcript entry for an unknown arm is refused", () => {
   withTranscript(
     "tmp-badarm.jsonl",
-    [{ arm: "control", taskId: acting.id, selectedTools: [], arguments: {}, completed: false }],
+    [{ arm: "control", shape: "structured", taskId: acting.id, selectedTools: [], arguments: {}, completed: false }],
     (p) => assert.throws(() => loadTranscript(p, tasks, { repoRoot: process.cwd() }), /control/),
   );
 });
@@ -85,8 +85,8 @@ test("duplicate entries for one arm and task are refused, not last-write-wins", 
   withTranscript(
     "tmp-dupe.jsonl",
     [
-      { arm: "agentdesk", taskId: acting.id, selectedTools: ["a"], arguments: {}, completed: true },
-      { arm: "agentdesk", taskId: acting.id, selectedTools: ["b"], arguments: {}, completed: false },
+      { arm: "agentdesk", shape: "structured", taskId: acting.id, selectedTools: ["a"], arguments: {}, completed: true },
+      { arm: "agentdesk", shape: "structured", taskId: acting.id, selectedTools: ["b"], arguments: {}, completed: false },
     ],
     (p) => assert.throws(() => loadTranscript(p, tasks, { repoRoot: process.cwd() }), /duplicate/i),
   );
@@ -95,23 +95,23 @@ test("duplicate entries for one arm and task are refused, not last-write-wins", 
 test("a well-formed transcript still loads", () => {
   withTranscript(
     "tmp-good.jsonl",
-    [{ arm: "agentdesk", taskId: acting.id, selectedTools: ["find_capabilities"], arguments: {}, completed: true }],
+    [{ arm: "agentdesk", shape: "structured", taskId: acting.id, selectedTools: ["find_capabilities"], arguments: {}, completed: true }],
     (p) => {
       const loaded = loadTranscript(p, tasks, { repoRoot: process.cwd() });
       assert.equal(loaded.size, 1);
-      assert.ok(loaded.has(`agentdesk:${acting.id}`));
+      assert.ok(loaded.has(`agentdesk:structured:${acting.id}`));
     },
   );
 });
 
 test("report metadata is checked against its sources, not against itself", () => {
   const reference = Object.fromEntries(
-    Object.keys(ARMS).map((arm) => [arm, jsonl(join(evals, "runs", "reference", `records.${arm}.jsonl`))]),
+    Object.keys(CELLS).map((key) => [key, loadRecords(join(evals, "runs", "reference", `records.${key}.jsonl`), { repoRoot })]),
   );
   const published = JSON.parse(readFileSync(join(evals, "runs", "reference", "report.json"), "utf8"));
 
   // Every derivable field comes from the fixtures, the records, and the
-  // canonical arm table. Taking them from the artifact under test is what let
+  // canonical cell table. Taking them from the artifact under test is what let
   // a task count of 999 and a label of "AgentDesk always wins" survive.
   // One run id, asserted across every record rather than sampled from the
   // first. Sampling let a record claiming a different run pass unnoticed,
@@ -126,11 +126,8 @@ test("report metadata is checked against its sources, not against itself", () =>
     at: published.at,
     taskSetPath: TASK_SET,
     taskCount: tasks.length,
-    arms: Object.fromEntries(
-      Object.keys(ARMS).map((arm) => [
-        arm,
-        { label: ARMS[arm].label, exposure: ARMS[arm].exposure, metrics: computeMetrics(reference[arm]) },
-      ]),
+    cells: Object.fromEntries(
+      Object.keys(CELLS).map((key) => [key, { ...CELLS[key], metrics: computeMetrics(reference[key]) }]),
     ),
   });
   assert.deepEqual(rebuilt, published, "report.json disagrees with its own sources");
