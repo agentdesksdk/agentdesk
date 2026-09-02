@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { AVAILABLE, defineCapability, unavailable } from "../src/capability.ts";
 import { riskBasedPolicy, type PolicyEngine } from "../src/policy.ts";
-import { receipt, type ToolResult } from "../src/results.ts";
+import type { Refusal, Settled } from "../src/protocol.ts";
+import {
+  approvalRequired,
+  completed,
+  policyDenied,
+  receipt,
+  type ToolResult,
+} from "../src/results.ts";
 import { MAX_ROUTED } from "../src/router.ts";
 import { createAgentDeskRuntime } from "../src/runtime.ts";
 import { createMockModelContext } from "./mock-model-context.ts";
@@ -148,7 +155,8 @@ describe("one result protocol: a refusal", () => {
     expect(refused.data).toMatchObject({
       status: "CAPABILITY_UNAVAILABLE",
       reason: "Order is not identity-verified",
-      nowPossible: ["verify_customer_identity"],
+      // The repair and the related alternative are both callable right now.
+      nowPossible: ["issue_credit", "verify_customer_identity"],
       blockedCapabilities: ["refund_shipping"],
       repair: {
         capability: "verify_customer_identity",
@@ -176,7 +184,8 @@ describe("one result protocol: a refusal", () => {
       "issue_credit",
       "refund_shipping",
     ]);
-    expect(refused.data?.nowPossible).toEqual([]);
+    // The prerequisite is still callable, so it is the only thing possible.
+    expect(refused.data?.nowPossible).toEqual(["verify_customer_identity"]);
   });
 
   it("names only capabilities the agent can actually call in nowPossible", async () => {
@@ -523,6 +532,32 @@ describe("one result protocol: a retired tool", () => {
     expect(retired.data?.blockedCapabilities).toEqual(["get_invoice"]);
     expect(retired.data?.nowPossible).toEqual([]);
     expect(retired.data?.evidence).toEqual([]);
+  });
+});
+
+describe("one result protocol: illegal states are not constructible", () => {
+  it("a success builder refuses a situation that names a repair", () => {
+    const refusal: Refusal = {
+      nowPossible: [],
+      blockedCapabilities: [],
+      evidence: [],
+      repair: { capability: "verify_customer_identity" },
+    };
+    const settled: Settled = {
+      nowPossible: [],
+      blockedCapabilities: [],
+      evidence: [],
+    };
+    // @ts-expect-error a completed result cannot carry a repair
+    completed({ ok: true }, undefined, { ...refusal, changes: [] });
+    // @ts-expect-error a pending approval cannot carry a repair
+    approvalRequired("cancel_order", "APR-1", "CONSEQUENTIAL", "s", [], "summary", refusal);
+    // A refusal may or may not name one; both compile and neither carries changes.
+    const denied = policyDenied("cancel_order", "denied", refusal);
+    const bare = policyDenied("cancel_order", "denied", settled);
+    expect(denied.data?.repair).toEqual({ capability: "verify_customer_identity" });
+    expect(bare.data).not.toHaveProperty("repair");
+    expect(denied.data).not.toHaveProperty("changes");
   });
 });
 

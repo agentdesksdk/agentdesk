@@ -14,11 +14,21 @@ import {
   type Change,
   type ExecutionContext,
   type RiskLevel,
-  type Unavailability,
 } from "./capability.ts";
 import { CapabilityCatalog } from "./catalog.ts";
-import { decidePolicy, riskBasedPolicy, type PolicyEngine } from "./policy.ts";
-import type { Repair } from "./protocol.ts";
+import {
+  decidePolicy,
+  riskBasedPolicy,
+  type PolicyDecision,
+  type PolicyEngine,
+} from "./policy.ts";
+import type {
+  Evidence,
+  Refusal,
+  Repair,
+  Settled,
+  Situation,
+} from "./protocol.ts";
 import { defaultValidator, type Validator } from "./validation.ts";
 import {
   PresentationBus,
@@ -48,14 +58,17 @@ import { compareNames, isRouteError, rankCapabilities, routeCapability } from ".
 import {
   approvalRequired,
   capabilityUnavailable,
+  completed,
   errorResult,
   executionCancelled,
   executionIndeterminate,
   idempotencyCapacity,
   idempotencyConflict,
   isReceiptEnvelope,
+  isToolResult,
   policyDenied,
   previewUnavailable,
+  toolRetired,
   toToolResult,
   validationFailed,
   type ToolResult,
@@ -116,7 +129,9 @@ export type RoutedMatch = {
   requiresApproval: boolean;
   reasonCode?: string;
   reason?: string;
+  /** The author's repair, kept only when the agent can call it right now. */
   repair?: Repair;
+  /** Derived from `repair.capability`; kept one release for readers of the old name. */
   suggestedCapability?: string;
 };
 
@@ -512,10 +527,172 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       runCapability(capability, input, "native", signal),
     () => emit(),
     options.exposedTo,
+    (name) =>
+      toolRetired(
+        name,
+        refusal(catalog.get(name), { capability: FIND_CAPABILITIES }),
+      ),
   );
 
   function appOnly(capability: Capability): boolean {
     return !BUILTIN_NAMES.has(capability.name);
+  }
+
+  /**
+   * Whether policy lets routing offer a capability at all. This is the one
+   * eligibility check: `find_capabilities`, the native surface, and the
+   * `nowPossible` and `blockedCapabilities` lists on every result all read
+   * it, so none of them can name a capability the others would not.
+   *
+   * Routing has no input, so policy is asked with none. A policy that
+   * denies on missing input hides the capability from routing, which is the
+   * safe direction, and a throwing policy denies for the same reason.
+   *
+   * Denied means invisible: absent from a routing report, from the native
+   * surface, from both lists, and never named as a repair. That is the line
+   * between denied and unavailable, which stays visible with its reason.
+   * Bootstrap tools are always offered.
+   */
+  function routable(capability: Capability): boolean {
+    return offering(capability).kind !== "deny";
+  }
+
+  /** The decision behind `routable`, kept so a refusal can carry its reason. */
+  function offering(capability: Capability): PolicyDecision {
+    if (BUILTIN_NAMES.has(capability.name)) {
+      return { kind: "allow" };
+    }
+    try {
+      return policy({ capability, input: {}, context });
+    } catch (err) {
+      return {
+        kind: "deny",
+        reason: `the policy threw while deciding whether ${capability.name} may be offered: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      };
+    }
+  }
+
+  /** Routable and available right now: what the agent can call. */
+  function callable(capability: Capability): boolean {
+    return (
+      routable(capability) && evaluateAvailability(capability, context).available
+    );
+  }
+
+  /**
+   * The author's repair, checked. A repair is kept only when it names a
+   * capability the agent can call right now, so it is always an
+   * instruction the agent can follow, and a denied capability is never
+   * repeated back. An unknown or unavailable one is dropped rather than
+   * offered as a fix that would refuse.
+   */
+  function visibleRepair(repair: Repair | undefined): Repair | undefined {
+    if (repair === undefined) {
+      return undefined;
+    }
+    const target = catalog.get(repair.capability);
+    return target !== undefined && callable(target) ? repair : undefined;
+  }
+
+  /**
+   * What is possible and what is blocked, seen from one capability.
+   *
+   * The neighbourhood is the capability, its author's repair, one hop of
+   * the relationship graph in both directions, and what the last routing
+   * offered. That is where "what now" lives: the step this one needed, the
+   * step it just unblocked, the alternative its author named, and the
+   * working set the agent already holds. It is bounded by the routing
+   * budget plus a capability's declared edges, so a result never becomes a
+   * catalog dump.
+   *
+   * The author's repair enters unfiltered so an unavailable one is listed
+   * as blocked; `partition` is what keeps a denied one out.
+   */
+  function situationFor(
+    subject: Capability | undefined,
+    repair: Repair | undefined,
+    evidence: readonly Evidence[],
+  ): Situation {
+    const names = new Set<string>();
+    if (subject !== undefined) {
+      names.add(subject.name);
+      for (const name of subject.relationships.requires) {
+        names.add(name);
+      }
+      for (const name of subject.relationships.related) {
+        names.add(name);
+      }
+      for (const other of catalog.all()) {
+        if (
+          other.relationships.requires.includes(subject.name) ||
+          other.relationships.related.includes(subject.name)
+        ) {
+          names.add(other.name);
+        }
+      }
+    }
+    if (repair !== undefined) {
+      names.add(repair.capability);
+    }
+    for (const match of lastRouting?.matches ?? []) {
+      names.add(match.name);
+    }
+    return partition([...names], evidence);
+  }
+
+  /**
+   * Splits names into the two lists through the same `routable` check
+   * routing uses. A denied name is in neither. Bootstrap tools are in
+   * neither either, because they are the constant surface rather than a
+   * situation. Codepoint order, so equal situations serialize identically.
+   */
+  function partition(
+    names: readonly string[],
+    evidence: readonly Evidence[],
+  ): Situation {
+    const nowPossible: string[] = [];
+    const blockedCapabilities: string[] = [];
+    for (const name of [...new Set(names)].sort(compareNames)) {
+      const capability = catalog.get(name);
+      if (
+        capability === undefined ||
+        !appOnly(capability) ||
+        !routable(capability)
+      ) {
+        continue;
+      }
+      if (evaluateAvailability(capability, context).available) {
+        nowPossible.push(name);
+      } else {
+        blockedCapabilities.push(name);
+      }
+    }
+    return {
+      nowPossible,
+      blockedCapabilities,
+      evidence: evidence.map((item) => ({ ...item })),
+    };
+  }
+
+  /** What a refusal is built from. The repair on it is the author's, checked. */
+  function refusal(
+    subject: Capability | undefined,
+    repair?: Repair,
+    evidence: readonly Evidence[] = [],
+  ): Refusal {
+    const situation = situationFor(subject, repair, evidence);
+    const visible = visibleRepair(repair);
+    return visible === undefined ? situation : { ...situation, repair: visible };
+  }
+
+  /** What a completed, pending, or indeterminate result is built from. */
+  function settled(
+    subject: Capability,
+    evidence: readonly Evidence[] = [],
+  ): Settled {
+    return situationFor(subject, undefined, evidence);
   }
 
   function present(
@@ -576,7 +753,9 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   }
 
   function desiredNative(): Capability[] {
-    const available = availableCapabilities(catalog, context);
+    // A denied capability is registered on no path. Registering it would
+    // publish its name, description, and schema through `getTools()`.
+    const available = availableCapabilities(catalog, context).filter(routable);
     if (exposure === "flat") {
       return available;
     }
@@ -628,6 +807,21 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       via,
       at: now(),
     });
+    // What routing would not offer, invocation does not describe. Checked
+    // ahead of availability so a caller who guessed a denied capability's
+    // name learns nothing about its state. The input-bearing policy check
+    // still runs after validation, where the input it reads is known good.
+    const offered = offering(capability);
+    if (offered.kind === "deny") {
+      audit.append({
+        kind: "policy_denied",
+        capability: capability.name,
+        reason: offered.reason,
+        at: now(),
+      });
+      emit();
+      return policyDenied(capability.name, offered.reason, refusal(capability));
+    }
     const availability = evaluateAvailability(capability, context);
     if (!availability.available) {
       audit.append({
@@ -637,7 +831,11 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         at: now(),
       });
       emit();
-      return capabilityUnavailable(capability.name, availability);
+      return capabilityUnavailable(
+        capability.name,
+        availability,
+        refusal(capability, availability.repair),
+      );
     }
     const inputCheck = capability.checkInput?.(input, context);
     if (inputCheck && !inputCheck.available) {
@@ -648,7 +846,11 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         at: now(),
       });
       emit();
-      return capabilityUnavailable(capability.name, inputCheck);
+      return capabilityUnavailable(
+        capability.name,
+        inputCheck,
+        refusal(capability, inputCheck.repair),
+      );
     }
     const validation = validate(capability.inputSchema, input);
     if (!validation.valid) {
@@ -659,7 +861,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         at: now(),
       });
       emit();
-      return validationFailed(capability.name, validation.issues);
+      // The repair is the same capability with the arguments fixed.
+      return validationFailed(
+        capability.name,
+        validation.issues,
+        refusal(capability, { capability: capability.name }),
+      );
     }
 
     const decision = policy({ capability, input, context });
@@ -671,7 +878,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         at: now(),
       });
       emit();
-      return policyDenied(capability.name, decision.reason);
+      return policyDenied(capability.name, decision.reason, refusal(capability));
     }
 
     present(capability, "capability_started", input, invocationActor);
@@ -689,7 +896,11 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           at: now(),
         });
         emit();
-        return previewUnavailable(capability.name, staged.error);
+        return previewUnavailable(
+          capability.name,
+          staged.error,
+          refusal(capability),
+        );
       }
       const preview = staged.proposal
         ? { ok: true as const, changes: [...staged.proposal.changes] }
@@ -703,7 +914,11 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           at: now(),
         });
         emit();
-        return previewUnavailable(capability.name, preview.error);
+        return previewUnavailable(
+          capability.name,
+          preview.error,
+          refusal(capability),
+        );
       }
       let action;
       try {
@@ -749,6 +964,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         summary,
         action.preview,
         capability.approvalEvidence,
+        settled(capability, [{ kind: "approval", id: action.id }]),
       );
     }
     // A previous call of this exact operation may already have written. A
@@ -765,6 +981,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         unresolved.id,
         unresolved.detail,
         unresolved.changes,
+        settled(capability, [{ kind: "record", id: unresolved.id }]),
       );
     }
 
@@ -798,7 +1015,9 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         at: now(),
       });
       emit();
-      return settle(previewUnavailable(capability.name, direct.error));
+      return settle(
+        previewUnavailable(capability.name, direct.error, refusal(capability)),
+      );
     }
     const outcome = await executeNow(capability, input, {
       actor: invocationActor,
@@ -1102,7 +1321,11 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       if (previous.fingerprint !== fingerprint) {
         return {
           kind: "refused",
-          result: idempotencyConflict(capability.name, idempotencyKey),
+          result: idempotencyConflict(
+            capability.name,
+            idempotencyKey,
+            refusal(capability),
+          ),
         };
       }
       return { kind: "replay", result: previous.inFlight };
@@ -1110,7 +1333,11 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     if (!reserveIdempotencySlot()) {
       return {
         kind: "refused",
-        result: idempotencyCapacity(capability.name, IDEMPOTENCY_LIMIT),
+        result: idempotencyCapacity(
+          capability.name,
+          IDEMPOTENCY_LIMIT,
+          refusal(capability),
+        ),
       };
     }
     let resolve: (result: ToolResult) => void = () => {};
@@ -1212,7 +1439,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         return {
           ok: false,
           executionId,
-          result: executionCancelled(capability.name),
+          result: executionCancelled(capability.name, refusal(capability)),
         };
       }
       const event: Extract<AuditEvent, { kind: "execution_completed" }> = {
@@ -1238,17 +1465,28 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         return {
           ok: false,
           executionId,
-          result: executionCancelled(capability.name),
+          result: executionCancelled(capability.name, refusal(capability)),
         };
       }
       // Everything that can fail is built before anything is committed. A
       // receipt the store cannot hold and a result that will not serialize
       // are both failures of this execution, not of the bookkeeping after
       // it, so they belong on the failure path while it is still reachable.
-      let toolResult: ToolResult;
+      //
+      // The result itself is assembled after the commit, because it names
+      // the receipt the store assigns. That is safe only because the value
+      // is reduced to plain data here, once, so the assembly below cannot
+      // throw and cannot read a handler's getter a second time.
+      let recordable: unknown;
       let pending: Parameters<typeof receipts.record>[0] | undefined;
       try {
-        toolResult = toToolResult(value);
+        if (isToolResult(value)) {
+          recordable = value;
+        } else {
+          const raw = isReceiptEnvelope(value) ? value.value : value;
+          const json = JSON.stringify(raw === undefined ? null : raw);
+          recordable = json === undefined ? null : JSON.parse(json);
+        }
         if (isReceiptEnvelope(value)) {
           pending = structuredClone({
             capability: capability.name,
@@ -1271,9 +1509,15 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       // One terminal outcome, committed together. Presentation runs after the
       // governance evidence is durable and cannot change it.
       audit.append(event);
-      if (pending) {
-        receipts.record(pending);
-      }
+      const stored = pending ? receipts.record(pending) : undefined;
+      const evidence: Evidence[] = [
+        ...(stored ? [{ kind: "receipt" as const, id: stored.id }] : []),
+        { kind: "execution", id: executionId },
+      ];
+      const toolResult = completed(recordable, pending?.receipt, {
+        ...settled(capability, evidence),
+        changes: pending?.receipt.changes ?? [],
+      });
       try {
         present(capability, "capability_completed", input, actingActor, {
           executionId,
@@ -1294,11 +1538,15 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         verification,
       };
     } catch (err) {
+      const attempted: Evidence[] = [{ kind: "execution", id: executionId }];
       if (session.expired()) {
         return {
           ok: false,
           executionId,
-          result: executionCancelled(capability.name),
+          result: executionCancelled(
+            capability.name,
+            refusal(capability, undefined, attempted),
+          ),
         };
       }
       if (err instanceof CapabilityUnavailableError) {
@@ -1312,7 +1560,11 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         return {
           ok: false,
           executionId,
-          result: capabilityUnavailable(capability.name, err.unavailability),
+          result: capabilityUnavailable(
+            capability.name,
+            err.unavailability,
+            refusal(capability, err.unavailability.repair, attempted),
+          ),
         };
       }
       const message = err instanceof Error ? err.message : String(err);
@@ -1358,6 +1610,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
             record.id,
             message,
             err.changes,
+            settled(capability, [{ kind: "record", id: record.id }, ...attempted]),
           ),
         };
       }
@@ -1505,7 +1758,9 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   async function findCapabilities(
     query: string,
   ): Promise<Record<string, unknown>> {
-    const appCaps = catalog.all().filter(appOnly);
+    // Routing offers what policy lets it offer, and nothing else is ranked,
+    // annotated, or counted. A denied capability is absent from the report.
+    const appCaps = catalog.all().filter(appOnly).filter(routable);
     let ranked = rankCapabilities(appCaps, context, query);
     let fallback = false;
     if (ranked.length === 0) {
@@ -1532,8 +1787,10 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       if (!availability.available) {
         match.reasonCode = availability.reasonCode;
         match.reason = availability.reason;
-        if (availability.suggestedCapability !== undefined) {
-          match.suggestedCapability = availability.suggestedCapability;
+        const repair = visibleRepair(availability.repair);
+        if (repair !== undefined) {
+          match.repair = repair;
+          match.suggestedCapability = repair.capability;
         }
       }
       return match;
@@ -1569,6 +1826,14 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     });
     emit();
 
+    // The report's situation is what it offered plus the repairs those
+    // offers named, through the same partition every other result uses.
+    const situation = partition(
+      matches.flatMap((match) =>
+        match.repair ? [match.name, match.repair.capability] : [match.name],
+      ),
+      [],
+    );
     return {
       catalog_size: appCaps.length,
       query,
@@ -1587,11 +1852,13 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           out.reasonCode = match.reasonCode;
           out.reason = match.reason;
         }
-        if (match.suggestedCapability !== undefined) {
-          out.suggestedCapability = match.suggestedCapability;
+        if (match.repair !== undefined) {
+          out.repair = match.repair;
+          out.suggestedCapability = match.repair.capability;
         }
         return out;
       }),
+      ...situation,
       activated_tools: activated,
       limit: 5,
       instruction:
@@ -1661,7 +1928,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     const next = new Set<string>();
     for (const name of routedNames) {
       const capability = catalog.get(name);
-      if (capability && evaluateAvailability(capability, context).available) {
+      if (capability && callable(capability)) {
         next.add(name);
       }
     }
@@ -2451,6 +2718,8 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         return errorResult(`unknown capability: ${action.capability}`);
       }
       try {
+      // Every refusal from here names the approval it refused as evidence.
+      const claimed: Evidence[] = [{ kind: "approval", id: actionId }];
       // Policy is re-evaluated here, not just at request time: a rule that
       // started denying while the action sat pending must block it.
       const decision = policy({
@@ -2473,7 +2742,11 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           at: now(),
         });
         emit();
-        return policyDenied(action.capability, decision.reason);
+        return policyDenied(
+          action.capability,
+          decision.reason,
+          refusal(routed, undefined, claimed),
+        );
       }
 
       const availability = evaluateAvailability(routed, context);
@@ -2501,16 +2774,23 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           at: now(),
         });
         emit();
-        return capabilityUnavailable(action.capability, blocker);
+        return capabilityUnavailable(
+          action.capability,
+          blocker,
+          refusal(routed, blocker.repair, claimed),
+        );
       }
       // The staged artifact is the only thing that may land for a staged
       // capability. Missing it is a fail-closed refusal, never a fallback
       // to running the handler outside the fork the human reviewed.
       const proposal = proposals.take(actionId);
       if (routed.stagedOperation && !proposal) {
+        // The repair is the same request again, with the input the human
+        // already saw, so a new proposal is staged for a new approval.
         const missing = unavailable(
           "STAGED_PROPOSAL_MISSING",
           `The staged change behind ${actionId} is no longer held by the runtime, so approving it would run a write nobody reviewed. Request the action again.`,
+          { capability: routed.name, input: action.input },
         );
         approvals.resolve(actionId, {
           status: "FAILED_UNAVAILABLE",
@@ -2526,7 +2806,11 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           at: now(),
         });
         emit();
-        return capabilityUnavailable(action.capability, missing);
+        return capabilityUnavailable(
+          action.capability,
+          missing,
+          refusal(routed, missing.repair, claimed),
+        );
       }
       audit.append({
         kind: "approval_approved",
@@ -2544,7 +2828,10 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       // action back into the fresh session. Nothing here belongs to it.
       if (session.expired()) {
         proposal?.discard();
-        return executionCancelled(action.capability);
+        return executionCancelled(
+          action.capability,
+          refusal(routed, undefined, claimed),
+        );
       }
       if (outcome.ok) {
         approvals.resolve(actionId, {

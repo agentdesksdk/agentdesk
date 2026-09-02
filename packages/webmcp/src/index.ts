@@ -145,6 +145,7 @@ export type { ToolResult, ToolCode } from "./results.ts";
 export {
   approvalRequired,
   capabilityUnavailable,
+  completed,
   executionCancelled,
   idempotencyCapacity,
   idempotencyConflict,

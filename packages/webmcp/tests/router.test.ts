@@ -1,8 +1,14 @@
 ﻿import { describe, expect, it } from "vitest";
 import { AVAILABLE, defineCapability, unavailable } from "../src/capability.ts";
+import type { ToolResult } from "../src/results.ts";
 import { rankCapabilities } from "../src/router.ts";
 import { createAgentDeskRuntime } from "../src/runtime.ts";
 import { createMockModelContext } from "./mock-model-context.ts";
+
+function withoutEvidence(result: ToolResult) {
+  const { evidence: _evidence, ...data } = result.data ?? {};
+  return { ...result, data };
+}
 
 function fixtureCatalog() {
   return [
@@ -177,12 +183,14 @@ describe("native dynamic routing", () => {
       state: { orderId: "10428" },
     });
     await model.execute("find_capabilities", { query: "inspect order" });
-    const nativeResult = await model.execute("inspect_order", {});
-    const invokeResult = await model.execute("invoke_capability", {
+    const nativeResult = (await model.execute("inspect_order", {})) as ToolResult;
+    const invokeResult = (await model.execute("invoke_capability", {
       name: "inspect_order",
       input: {},
-    });
-    expect(invokeResult).toEqual(nativeResult);
+    })) as ToolResult;
+    // Two executions, so the evidence names two execution ids; everything
+    // else, the content and the answers, is the same result.
+    expect(withoutEvidence(invokeResult)).toEqual(withoutEvidence(nativeResult));
     const kinds = runtime
       .getSnapshot()
       .audit.filter((event) => event.kind === "capability_invoked")
