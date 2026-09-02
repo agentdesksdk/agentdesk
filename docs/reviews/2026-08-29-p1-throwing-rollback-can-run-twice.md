@@ -1,6 +1,6 @@
 # P1: A rollback that commits and throws can run twice
 
-Status: OPEN
+Status: **RESOLVED** on `main` as #9 (`02e08c7`)
 
 Reviewed commit: `812e5b9`
 
