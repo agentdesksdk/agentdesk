@@ -7,6 +7,7 @@ import { useBenchmark, useRuntime } from "../components/hooks.ts";
 import { resetStore } from "../data/store.ts";
 import { benchmark, estimateTokens } from "../instrumentation/benchmark.ts";
 import {
+  BOOTSTRAP,
   REFUND_SHIPPING_HAPPY,
   runSideBySide,
   type ArmMeasurement,
@@ -63,12 +64,6 @@ export function Benchmark() {
     }
   }
   const modeLabel = snapshot.exposure === "flat" ? "Baseline (flat)" : "AgentDesk (routed)";
-  const BOOTSTRAP = new Set([
-    "find_capabilities",
-    "invoke_capability",
-    "get_context",
-    "get_action_status",
-  ]);
   const runtimeTools = snapshot.nativeTools.filter((name) => BOOTSTRAP.has(name)).length;
   const appTools = snapshot.nativeTools.length - runtimeTools;
 
