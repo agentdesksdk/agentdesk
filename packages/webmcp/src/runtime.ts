@@ -135,6 +135,7 @@ import {
   type Unreconciled,
 } from "./staging.ts";
 import { ToolSurfaceManager } from "./tool-surface.ts";
+import type { CapabilityProvider } from "./provider.ts";
 import {
   assertSafeOrigins,
   createWebMcpAdapter,
@@ -380,6 +381,12 @@ export type AgentDeskRuntime = {
 };
 
 export function createAgentDeskRuntime<S = unknown>(options: {
+  /**
+   * Where the capabilities come from and how they are published. Replaces
+   * `capabilities`, `registerTool`, and `adapter`, which the native
+   * provider wraps; passing both is refused.
+   */
+  provider?: CapabilityProvider;
   capabilities?: readonly Capability[];
   registerTool?: RegisterToolFn | null;
   adapter?: WebMcpAdapter;
