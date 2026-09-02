@@ -99,6 +99,23 @@ export function grantStateText(grant: Grant): string {
   }
 }
 
+/**
+ * The Uses row. Live, what is left; exhausted, all spent; expired or
+ * revoked, what went unused of what was granted, the way the State row
+ * says it, since nothing is "left" of a grant that can no longer be used.
+ */
+export function grantUsesText(grant: Grant): string {
+  switch (grant.state) {
+    case "live":
+      return `${grant.remaining} of ${usesText(grant.uses)} left`;
+    case "exhausted":
+      return `all ${usesText(grant.uses)} spent`;
+    case "expired":
+    case "revoked":
+      return `${usesText(grant.remaining)} unused of ${grant.uses} granted`;
+  }
+}
+
 function fieldWords(field: string): string {
   return field.replace(/_/g, " ");
 }

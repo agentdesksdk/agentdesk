@@ -98,8 +98,9 @@ export function Benchmark() {
           {REFUND_SHIPPING_HAPPY.prompt}&rdquo;) under flat exposure, then
           routed, on a runtime built from this page&apos;s catalog the way{" "}
           <code>pnpm eval</code> builds one. Each arm starts from the demo
-          seed; the approval is granted by you as the operator, and the seed
-          is restored when the run ends. Both columns are the task-time peak:
+          seed; the harness approves the refund as a person would, so both
+          arms complete without a click, and the seed is restored when the
+          run ends. Both columns are the task-time peak:
           sampled after routing and after execution, the larger reported.
         </p>
         <div className="bench-controls">
