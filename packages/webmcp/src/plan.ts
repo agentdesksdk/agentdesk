@@ -91,6 +91,8 @@ export type PlannedOperation = {
   capability: CapabilityName;
   input: Record<string, unknown>;
   preview: Change[];
+  /** A digest of the state this operation's preview was derived from. */
+  stateVersion?: string;
 };
 
 /**

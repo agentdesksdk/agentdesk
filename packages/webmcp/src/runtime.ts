@@ -65,6 +65,7 @@ import {
 import { compareNames, isRouteError, rankCapabilities, routeCapability } from "./router.ts";
 import {
   approvalRequired,
+  approvalStale,
   capabilityUnavailable,
   completed,
   errorResult,
@@ -86,6 +87,7 @@ import {
   parseResolution,
   StagedCommitIndeterminate,
   StagedProposalStore,
+  stateDigest,
   UnreconciledStore,
   type StagedProposal,
   type StagedResolution,
@@ -1124,6 +1126,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         refusal(capability),
       );
     }
+    // The digest is computed here, by the runtime, from the preview the
+    // adapter or the author just derived, and only where there was a preview
+    // to derive it from. A summary-only approval has no state to bind to.
+    const stateVersion = hasPreviewSource(capability, staged.proposal)
+      ? stateDigest(preview.changes)
+      : undefined;
     let action;
     try {
       action = approvals.request(
@@ -1133,6 +1141,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         summary,
         preview.changes,
         now(),
+        stateVersion,
       );
     } catch (err) {
       // Nothing owns the proposal yet, so a failure to record the pending
@@ -1170,7 +1179,43 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       capability.approvalEvidence,
       settled(capability, [{ kind: "approval", id: action.id }]),
       considered,
+      action.stateVersion,
     );
+  }
+
+  /** Whether a preview was derived at all, so a digest means something. */
+  function hasPreviewSource(
+    capability: Capability,
+    proposal: StagedProposal | undefined,
+  ): boolean {
+    return proposal !== undefined || capability.previewChanges !== undefined;
+  }
+
+  /**
+   * The digest of current state, derived the same way the preview was: a
+   * fresh fork for a staged capability, the author's preview callback for a
+   * direct one, then `stateDigest` over what came back. The probe fork is
+   * released at once; only the reviewed artifact ever lands. A probe that
+   * cannot be derived yields no digest, which the caller treats as moved,
+   * because a state that cannot be read back is not one anyone approved.
+   */
+  function currentDigest(
+    capability: Capability,
+    input: Record<string, unknown>,
+  ): string | undefined {
+    if (capability.stagedOperation !== undefined) {
+      const probe = stageFor(capability, input);
+      if (!probe.ok || probe.proposal === undefined) {
+        return undefined;
+      }
+      try {
+        return stateDigest(probe.proposal.changes);
+      } finally {
+        probe.proposal.discard();
+      }
+    }
+    const preview = safePreview(capability, input, context);
+    return preview.ok ? stateDigest(preview.changes) : undefined;
   }
 
   /**
@@ -1831,6 +1876,20 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           validation.issues.map((issue) => issue.message).join("; "),
         );
       }
+      // The same check a single approval runs, per operation. Earlier
+      // operations have landed by now, so the probe forks from the state
+      // this one was reviewed against; only a move nobody reviewed differs.
+      if (operation.stateVersion !== undefined) {
+        const observed = currentDigest(routed, operation.input);
+        if (observed !== operation.stateVersion) {
+          proposals.discard(StagedProposalStore.planKey(planId, index));
+          return blocked(
+            `APPROVAL_STALE: the state this operation was reviewed against has moved (expected ${
+              operation.stateVersion
+            }, observed ${observed ?? "unreadable"}), so it was not run`,
+          );
+        }
+      }
 
       const proposal = proposals.take(
         StagedProposalStore.planKey(planId, index),
@@ -2279,10 +2338,14 @@ export function createAgentDeskRuntime<S = unknown>(options: {
                 `${routed.name} declares a change preview and it failed: ${preview.error}`,
               );
             }
+            const stateVersion = hasPreviewSource(routed, proposal.proposal)
+              ? stateDigest(preview.changes)
+              : undefined;
             operations.push({
               capability: routed.name,
               input: structuredClone(input),
               preview: preview.changes,
+              ...(stateVersion !== undefined ? { stateVersion } : {}),
             });
           }
         });
@@ -2980,6 +3043,44 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           blocker,
           refusal(routed, blocker.repair, claimed),
         );
+      }
+      // The person approved a change from an exact state. If that state has
+      // moved, the approval no longer describes what would happen, so
+      // nothing runs and the artifact is released. The check is the same
+      // one a plan runs per operation.
+      if (action.stateVersion !== undefined) {
+        const observed = currentDigest(routed, action.input);
+        if (observed !== action.stateVersion) {
+          proposals.discard(actionId);
+          const versions = {
+            expected: action.stateVersion,
+            observed: observed ?? "unreadable",
+          };
+          approvals.resolve(actionId, {
+            status: "FAILED_UNAVAILABLE",
+            action,
+            reasonCode: "APPROVAL_STALE",
+            reason: `the state this approval was reviewed against has moved (expected ${versions.expected}, observed ${versions.observed})`,
+            resolvedAt: now(),
+          });
+          audit.append({
+            kind: "capability_unavailable",
+            capability: action.capability,
+            reasonCode: "APPROVAL_STALE",
+            at: now(),
+          });
+          emit();
+          return approvalStale(
+            action.capability,
+            actionId,
+            versions,
+            refusal(
+              routed,
+              { capability: routed.name, input: action.input },
+              claimed,
+            ),
+          );
+        }
       }
       // The staged artifact is the only thing that may land for a staged
       // capability. Missing it is a fail-closed refusal, never a fallback

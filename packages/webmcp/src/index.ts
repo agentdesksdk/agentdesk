@@ -25,6 +25,7 @@ export {
 } from "./capability.ts";
 export { CapabilityCatalog } from "./catalog.ts";
 export {
+  stateDigest,
   StagedCommitIndeterminate,
   StagedCommitRefused,
   StagedProposalError,
@@ -159,6 +160,7 @@ export type {
 export type { ToolResult, ToolCode } from "./results.ts";
 export {
   approvalRequired,
+  approvalStale,
   capabilityUnavailable,
   completed,
   executionCancelled,

@@ -10,6 +10,12 @@ export type PendingAction = {
   summary: string;
   /** What this call would change, shown to the human before approving. */
   preview: Change[];
+  /**
+   * A digest of the state the preview was derived from, computed by the
+   * runtime. Absent when there was no preview to derive it from. Commit
+   * re-derives it and refuses on mismatch.
+   */
+  stateVersion?: string;
   createdAt: number;
 };
 
@@ -63,6 +69,7 @@ export class ApprovalManager {
     summary: string,
     preview: Change[],
     createdAt: number,
+    stateVersion?: string,
   ): PendingAction {
     const snapshot = structuredClone(input);
     const storedPreview = structuredClone(preview) as Change[];
@@ -84,6 +91,7 @@ export class ApprovalManager {
       risk,
       summary,
       preview: storedPreview,
+      ...(stateVersion !== undefined ? { stateVersion } : {}),
       createdAt,
     };
     this.records.set(id, { status: "PENDING", action });
