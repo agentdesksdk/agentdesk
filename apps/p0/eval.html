@@ -173,10 +173,13 @@
       the same one <code>pnpm eval</code> runs, on
       <code>document.modelContext</code>. Connect a WebMCP client, paste one task
       prompt at a time, approve or reject here when asked, and reset between
-      tasks. The arm comes from the URL.
+      tasks. The arm and the result shape come from the URL; on a
+      <code>bare</code> cell every tool result is projected through
+      <code>scripts/evals/shapes.mjs</code>, the runner's own projection,
+      before the client sees it.
     </p>
     <div class="arm" role="status" aria-live="polite">
-      <span class="label" id="arm-label">Reading arm…</span>
+      <span class="label" id="arm-label">Reading cell…</span>
       <span class="exposure" id="arm-exposure"></span>
       <span id="arm-switch"></span>
     </div>
