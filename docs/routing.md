@@ -28,6 +28,24 @@ against the user's locale in a browser, and Danish collation sorts a leading
 `aa` after `z`, so the same application published a different tool set to a
 Danish user than to an English one.
 
+## 29.1% on a real-sized catalog
+
+The scorer above was tuned on a seeded demo. Against a catalog it was not
+seeded for, it publishes the capability a task needs less than a third of
+the time. The routing stress evaluation in `docs/evaluations.md` generates
+408 capabilities across twelve domains from seed 2026, with vocabulary
+shared on purpose, and routes 55 held-out messy phrasings through
+`routeTask` under both built-in strategies. The deterministic scorer routes
+the expected capability into the published set of five for 29.1% of tasks,
+16 of 55, and in 74.5% of tasks the fifth and sixth scores are equal, so
+codepoint order of the name decides what is published. Hybrid does worse,
+23.6%, because its `requires` edges pull the `get_*` prerequisite of every
+matched write into the set and spend the budget on reads; the graph helps
+when the base match is right and cannot repair one that is wrong. The
+committed run is `scripts/evals/runs/routing-reference/`, and
+`pnpm check:docs` holds the figures here to that run's `report.json`.
+These are the numbers roadmap item 2.2 has to beat.
+
 ## Three strategies
 
 `routeTask(candidates, request, strategy, eligible)` is the V2 entry point.
