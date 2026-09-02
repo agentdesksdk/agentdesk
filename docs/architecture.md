@@ -540,13 +540,28 @@ against the right one. A token is not one this runtime issued, was already
 used, has expired, or was issued for a different approval: each is a
 refusal with that reason, and the pending action or plan is untouched.
 
-**Who can mint one.** The issuer goes through `adoptHumanActor`, the same
-boundary a grant's issuer crosses, so an agent identity, the ambient actor
-when it is the agent, and a malformed identity all throw `TypeError`. A
-token stands for a person's click, and the runtime records that person as
-the approver when the token is consumed, not whoever presented it. Only
-page code can reach `issueApprovalGesture`; an agent acting through tools
-cannot.
+**Who can mint one, and when.** The issuer goes through `adoptHumanActor`,
+the same boundary a grant's issuer crosses, so an agent identity, the
+ambient actor when it is the agent, and a malformed identity all throw
+`TypeError`. Then the runtime asks whether a user activation is in
+progress, through `gesture.userActivation`, which defaults to the browser's
+own `navigator.userActivation.isActive` and answers no wherever there is no
+navigator, so a Node or jsdom process cannot mint without injecting the
+seam. Minting outside an activation throws. The demo's Approve handler runs
+inside the click, so it mints unchanged; its tests inject the seam. A token
+stands for a person's click, and the runtime records that person as the
+approver when the token is consumed, not whoever presented it.
+
+**What the token proves, and what it does not.** A token proves that a call
+was made during a user activation, by code with access to the runtime
+object, carrying a human identity. It does not prove which human: the
+identity is still what the page asserted, and binding it to a person is
+what the WebAuthn seam below is for. And it proves nothing at all on a page
+that hands its runtime to untrusted script: any code that can reach
+`issueApprovalGesture` during a click can mint. So a page keeps the method
+where only its own approval control closes over it. The demo exposes an
+inspectable runtime on `window.agentdesk` with `issueApprovalGesture`
+removed; only the card's click handler holds the minting method.
 
 **What the audit records.** `approval_approved` and `plan_approved` carry
 `gestureId` when a token carried the approval, alongside the human it
@@ -569,14 +584,19 @@ the only member is the page token, verified by `GestureStore`. A WebAuthn
 assertion is a second member with a second verifier behind the same
 function, and `approve`, `approvePlan`, and their callers do not change.
 
-**Untrusted content in context.** A capability flagged
-`untrustedContentHint` whose output entered the agent's context this
-session is remembered by name. An approval made while any such content is
-in context records `untrusted_content_ignored`, naming the approval and the
-sources, just before `approval_approved` or `plan_approved`, so the record
-says the runtime saw the content and treated it as data rather than as
-authority. This is the audit half of the adversarial note; the approval
-itself proceeds, because the person decided. `reset` clears the set.
+**Untrusted content in context.** Every completed read of a capability
+flagged `untrustedContentHint` is recorded with a tick, and each approval
+remembers the tick it was requested at (a plan, the tick it was prepared
+at). At approve time only the flagged reads between the request and the
+approval count: those are the ones that could have shaped what the agent
+asked for and what the person was shown. An approval with any records
+`untrusted_content_ignored`, naming the approval and the sources, just
+before `approval_approved` or `plan_approved`, so the record says the
+runtime saw the content and treated it as data rather than as authority. A
+note read before the request does not mark it, and two pending approvals
+each answer for their own window, so the signal stays a signal. This is
+the audit half of the adversarial note; the approval itself proceeds,
+because the person decided. `reset` clears the record.
 
 ## A receipt says where its proof can be seen
 
@@ -1631,7 +1651,7 @@ packages/webmcp/src/results.ts approvalStale viewUnavailable EvidenceLink Author
 packages/webmcp/src/runtime.ts deriveEvidence linksThroughView settledReceipt
 packages/webmcp/src/protocol.ts link
 packages/webmcp/src/gesture.ts ApprovalGesture GestureBinding GestureStore GESTURE_TTL_MS isApprovalGesture consume
-packages/webmcp/src/runtime.ts resolveApprover issueApprovalGesture untrustedSources approvalGesture
+packages/webmcp/src/runtime.ts resolveApprover issueApprovalGesture userActivation untrustedReads untrustedSince requestedAtTick approvalGesture
 packages/webmcp/src/audit.ts untrusted_content_ignored gestureId
 packages/webmcp/src/capability.ts AgentView agentView
 packages/webmcp/src/runtime.ts throughView changesThroughView hiddenStrings withhold crossing agentText viewFailed runInvocation approveInner
