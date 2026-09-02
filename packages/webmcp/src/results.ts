@@ -378,7 +378,7 @@ export function idempotencyConflict(
             : "This idempotency key was already used for this capability with different input.",
         next:
           cause === "after_restart"
-            ? "Check the application for the earlier write. Use a new idempotency_key only once you know it did not land."
+            ? `Ask a person to query the receipts for ${capability}; the receipt in evidence, when there is one, is the earlier write. Use a new idempotency_key only once you know it did not land.`
             : "Use a new idempotency_key, or resend the original input to get the original result.",
       },
       situation,
