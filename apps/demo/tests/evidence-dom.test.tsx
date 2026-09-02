@@ -48,13 +48,33 @@ async function frames(count: number) {
   }
 }
 
+/**
+ * The page's runtime requires a gesture token minted inside a user
+ * activation. jsdom has none, so one is injected for the duration of the
+ * click it stands for, the way the shell's other DOM tests approve.
+ */
+async function approveFromClick(id: string): Promise<void> {
+  Object.defineProperty(navigator, "userActivation", {
+    value: { isActive: true },
+    configurable: true,
+  });
+  try {
+    await agentdesk.approve(id, agentdesk.issueApprovalGesture({ actionId: id }, HUMAN));
+  } finally {
+    Object.defineProperty(navigator, "userActivation", {
+      value: { isActive: false },
+      configurable: true,
+    });
+  }
+}
+
 /** The hero refund, approved by a person, so a receipt with evidence exists. */
 async function refundThroughApproval() {
   await act(async () => {
     await agentdesk.invoke("refund_shipping", { order_id: ORDER });
   });
   await act(async () => {
-    await agentdesk.approve(agentdesk.getSnapshot().pending[0]!.id, HUMAN);
+    await approveFromClick(agentdesk.getSnapshot().pending[0]!.id);
   });
   return agentdesk.queryReceipts({ capability: "refund_shipping" })[0]!;
 }
