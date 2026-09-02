@@ -795,7 +795,9 @@ input[type="text"]:focus {
 }
 
 .receipt-actions {
-  flex: none;
+  /* Shrinks and wraps; flex: none sized it to every control on one line. */
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
