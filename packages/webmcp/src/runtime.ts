@@ -17,7 +17,13 @@ import {
   type RiskLevel,
 } from "./capability.ts";
 import { CapabilityCatalog } from "./catalog.ts";
-import type { CatalogDomain } from "./hierarchy.ts";
+import {
+  catalogHierarchy,
+  rankWithin,
+  viewOf,
+  type CatalogDomain,
+  type CatalogHierarchy,
+} from "./hierarchy.ts";
 import {
   decidePolicy,
   riskBasedPolicy,
@@ -87,7 +93,14 @@ import {
   type ReconciliationOutcome,
   type StoredReceipt,
 } from "./receipts.ts";
-import { compareNames, isRouteError, rankCapabilities, routeCapability } from "./router.ts";
+import {
+  compareNames,
+  DEFAULT_ROUTED,
+  isRouteError,
+  rankCapabilities,
+  routeCapability,
+  type RankedCapability,
+} from "./router.ts";
 import {
   approvalRequired,
   approvalStale,
@@ -760,6 +773,13 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   let started = false;
   let routedNames = new Set<string>();
   let lastRouting: RoutingReport | null = null;
+  // The catalog is fixed for the life of the runtime, so its tree is
+  // tokenized once; each call pays only the routable filter and a count.
+  let hierarchy: CatalogHierarchy<Capability> | undefined;
+  const tree = (): CatalogHierarchy<Capability> => {
+    hierarchy ??= catalogHierarchy(catalog.all().filter(appOnly));
+    return hierarchy;
+  };
   const listeners = new Set<(snapshot: RuntimeSnapshot) => void>();
 
   /**
@@ -1550,8 +1570,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
 
     if (capability.name === FIND_CAPABILITIES) {
       const raw = readString(input, "query") ?? readString(input, "task") ?? "";
+      const domain = readString(input, "domain");
       // Bound what enters routing, lastRouting, and the audit log.
-      const report = await findCapabilities(raw.slice(0, 400));
+      const report = await findCapabilities(
+        raw.slice(0, 400),
+        domain === undefined ? undefined : domain.slice(0, 120),
+      );
       try {
         return toToolResult(throughView(report, undefined, invocationActor));
       } catch (err) {
@@ -2878,22 +2902,46 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           .join(", ")}`;
   }
 
+  /**
+   * `find_capabilities`. With no domain it is the single call it always
+   * was, ranked by `rankCapabilities` over the routable catalog, plus the
+   * domain tree beside the matches so a client can narrow. With a domain,
+   * or `domain/subdomain`, it ranks inside that branch under the same
+   * budget and the same routable predicate, so a denied capability is
+   * absent from every level. An unknown domain routes nothing and answers
+   * with the tree.
+   */
   async function findCapabilities(
     query: string,
+    domain?: string,
   ): Promise<Record<string, unknown>> {
     // Routing offers what policy lets it offer, and nothing else is ranked,
     // annotated, or counted. A denied capability is absent from the report.
     const appCaps = catalog.all().filter(appOnly).filter(routable);
-    let ranked = rankCapabilities(appCaps, context, query);
+    const narrowed = domain === undefined ? undefined : tree().within(domain, routable);
+    const unknownDomain = domain !== undefined && narrowed === undefined;
+    let ranked: RankedCapability[];
+    if (narrowed !== undefined) {
+      // The deterministic scorer, inside the branch the client chose, with
+      // ties at the cut reduced by what the query shares with a description.
+      ranked = rankWithin(narrowed, viewOf(query, context), tree().fold(query, routable))
+        .slice(0, DEFAULT_ROUTED)
+        .map(({ member, score }) => ({ capability: member, score }));
+    } else if (unknownDomain) {
+      ranked = [];
+    } else {
+      ranked = rankCapabilities(appCaps, context, query);
+    }
     let fallback = false;
-    if (ranked.length === 0) {
+    if (ranked.length === 0 && !unknownDomain) {
       fallback = true;
-      ranked = appCaps
+      ranked = (narrowed ?? appCaps)
         .filter((capability) => evaluateAvailability(capability, context).available)
         .sort((a, b) => compareNames(a.name, b.name))
         .slice(0, 5)
         .map((capability) => ({ capability, score: 0 }));
     }
+    const domains = domain === undefined || unknownDomain ? tree().view(routable).domains : undefined;
     const matches: RoutedMatch[] = ranked.map(({ capability, score }) => {
       const availability = evaluateAvailability(capability, context);
       const match: RoutedMatch = {
@@ -2930,7 +2978,14 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     const activated = surface
       .nativeNames()
       .filter((name) => !BUILTIN_NAMES.has(name));
-    lastRouting = { query, matches, activated, at: now() };
+    lastRouting = {
+      query,
+      ...(domain !== undefined ? { domain } : {}),
+      ...(domains !== undefined ? { domains: structuredClone(domains) } : {}),
+      matches,
+      activated,
+      at: now(),
+    };
     presentation.emit({
       phase: "intent_routed",
       capability: FIND_CAPABILITIES,
@@ -2957,9 +3012,17 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       ),
       [],
     );
+    const instruction = unknownDomain
+      ? `${domain} is not a domain in this catalog; choose one from domains and call again with it.`
+      : `Up to 5 of the most relevant capabilities are active WebMCP tools; refine the query to surface others. Prefer the native typed tools. If your client has not refreshed its tool list, call invoke_capability with the capability name.${
+          domain === undefined
+            ? " The domains list is the catalog's tree; call again with domain, or domain/subdomain, to rank within one branch."
+            : ""
+        }`;
     return {
       catalog_size: appCaps.length,
       query,
+      ...(domain !== undefined ? { domain } : {}),
       matches: matches.map((match) => {
         const out: Record<string, unknown> = {
           name: match.name,
@@ -2982,10 +3045,10 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         return out;
       }),
       ...situation,
+      ...(domains !== undefined ? { domains } : {}),
       activated_tools: activated,
       limit: 5,
-      instruction:
-        "Up to 5 of the most relevant capabilities are active WebMCP tools; refine the query to surface others. Prefer the native typed tools. If your client has not refreshed its tool list, call invoke_capability with the capability name.",
+      instruction,
     };
   }
 
@@ -4423,6 +4486,11 @@ function builtinCapabilities(): Capability[] {
             type: "string",
             description:
               "The task or intent in plain words, e.g. 'refund shipping for an unshipped order'",
+          },
+          domain: {
+            type: "string",
+            description:
+              "Optional. A domain from the domains list, or domain/subdomain, to rank within that branch only.",
           },
         },
       },

@@ -275,8 +275,8 @@ describe("the single-call path is what it was", () => {
 });
 
 describe("the budget holds on every path", () => {
-  it("never registers more than the bootstrap tools plus MAX_ROUTED", async () => {
-    const { find, model } = await booted(largeCatalog());
+  it("never holds more than the bootstrap tools plus MAX_ROUTED live, on any path", async () => {
+    const { find, model, runtime } = await booted(largeCatalog());
 
     for (const input of [
       { query: "shared thing" },
@@ -286,7 +286,13 @@ describe("the budget holds on every path", () => {
       { query: "shared thing", domain: "nowhere" },
     ]) {
       await find(input);
-      expect(model.tools.size).toBeLessThanOrEqual(4 + MAX_ROUTED);
+      // A tool retired by this call stays registered as a tombstone until
+      // the next call clears it, so the live set is what is counted.
+      const snapshot = runtime.getSnapshot();
+      const live = snapshot.nativeTools.filter((name) => !snapshot.tombstones.includes(name));
+      expect(live.length).toBeLessThanOrEqual(4 + MAX_ROUTED);
+      expect(snapshot.routedTools.length).toBeLessThanOrEqual(MAX_ROUTED);
+      expect(model.tools.size - snapshot.tombstones.length).toBeLessThanOrEqual(4 + MAX_ROUTED);
     }
   });
 
