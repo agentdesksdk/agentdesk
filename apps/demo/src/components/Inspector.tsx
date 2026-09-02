@@ -69,6 +69,12 @@ export function Inspector() {
     BOOTSTRAP.has(name),
   );
   const report = snapshot.lastRouting;
+  // Read on every snapshot, like the rail does; a receipt with an empty
+  // evidence list is a write nobody can be shown.
+  const receipts = agentdesk.queryReceipts();
+  const receiptsWithProof = receipts.filter(
+    (entry) => (entry.receipt.evidence ?? []).length > 0,
+  ).length;
 
   return (
     <>
@@ -116,6 +122,12 @@ export function Inspector() {
                 ))}
               </Fragment>
             ))}
+          </span>
+        </div>
+        <div className="stat-row">
+          <span>Receipts with proof</span>
+          <span className="num" data-evidence>
+            {receiptsWithProof} of {receipts.length}
           </span>
         </div>
         <div className="stat-row">

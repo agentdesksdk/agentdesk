@@ -288,6 +288,29 @@ export const shippingCapabilities: Capability[] = [
             reveal: "shipping-summary",
           },
         ],
+        // Where each changed value is shown: the refund row on the order, the
+        // credit on the customer, the invoice status on the order's billing.
+        evidence: [
+          {
+            label: `Shipping refund on Order #${order.id}`,
+            route: `/orders/${order.id}`,
+            reveal: "shipping-summary",
+          },
+          {
+            label: `Credit ${creditId} for customer ${order.customerId}`,
+            route: `/customers/${order.customerId}`,
+            reveal: "customer-credits",
+          },
+          ...(invoiceBefore
+            ? [
+                {
+                  label: `Invoice ${invoiceBefore.id} status on Order #${order.id}`,
+                  route: `/orders/${order.id}`,
+                  reveal: "order-billing",
+                },
+              ]
+            : []),
+        ],
         note: "Reversible: rolling back clears the credit and restores the invoice.",
         result: {
           order_id: order.id,

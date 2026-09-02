@@ -64,6 +64,8 @@ describe("Show me proof", () => {
     await agentdesk.reset();
     resetStore();
     globalThis.localStorage = memoryStorage();
+    // jsdom has no scrollIntoView; revealTarget scrolls before it highlights.
+    Element.prototype.scrollIntoView ??= () => {};
     // Fast presence: the refund's own narration must not be what moves the
     // page; only the person's press on the control may.
     localStorage.setItem("agentdesk-presence-mode", "fast");

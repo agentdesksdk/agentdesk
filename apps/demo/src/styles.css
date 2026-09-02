@@ -1439,3 +1439,15 @@ input[type="text"]:focus {
 .durability-card .durability-result:empty {
   display: none;
 }
+
+/* "Show me proof": the kind (value or page) is part of the text. */
+.undo.proof .proof-kind {
+  font-weight: 500;
+  color: var(--ink-soft);
+  margin-left: 4px;
+}
+
+.proof-row {
+  justify-content: flex-start;
+  margin-top: 4px;
+}

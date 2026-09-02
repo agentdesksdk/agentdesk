@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import type { PresentationEvent } from "@agentdesk/webmcp";
 import { agentdesk } from "../runtime/agentdesk.ts";
 import { useAnnouncer } from "./announcer.ts";
+import { subscribeProof } from "./evidence.ts";
 import { revealTarget, shouldHandOffFocus } from "./reveal.ts";
 
 export type PresenceMode = "fast" | "guided";
@@ -84,6 +85,20 @@ export function AgentPresence({ mode }: { mode: PresenceMode }) {
       window.clearTimeout(revealTimer.current);
     };
   }, []);
+
+  // A person pressed "Show me proof". That is an explicit request, so the
+  // anchor takes focus as well as the highlight, in every presence mode.
+  useEffect(
+    () =>
+      subscribeProof(({ link }) => {
+        navigateRef.current(`/${baseRef.current}${link.route}`);
+        if (link.reveal !== undefined) {
+          revealTarget(link.reveal, revealTimer, { highlight: true, focus: true });
+        }
+        announceRef.current(`Showing ${link.label}.`);
+      }),
+    [],
+  );
 
   return (
     <>

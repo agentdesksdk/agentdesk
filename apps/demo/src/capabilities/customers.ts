@@ -3,6 +3,7 @@ import {
   CapabilityUnavailableError,
   unavailable,
   type Capability,
+  receipt,
 } from "@agentdesk/webmcp";
 import { getState, mutate } from "../data/store.ts";
 import { orderTotal } from "../data/types.ts";
@@ -278,6 +279,8 @@ export const customerCapabilities: Capability[] = [
           ),
         );
       }
+      const movedOrders = getState().orders.filter((o) => o.customerId === duplicate.id).length;
+      const movedTickets = getState().tickets.filter((t) => t.customerId === duplicate.id).length;
       mutate((draft) => {
         for (const order of draft.orders) {
           if (order.customerId === duplicate.id) {
@@ -291,7 +294,27 @@ export const customerCapabilities: Capability[] = [
         }
         draft.customers = draft.customers.filter((c) => c.id !== duplicate.id);
       });
-      return { merged_into: primary.id, removed: duplicate.id };
+      return receipt({
+        entity: `Customer ${primary.name}`,
+        changes: [
+          { field: `Orders under ${duplicate.name}`, before: movedOrders, after: 0 },
+          { field: `Tickets under ${duplicate.name}`, before: movedTickets, after: 0 },
+          { field: `Customer ${duplicate.id}`, before: duplicate.name, after: null },
+        ],
+        evidence: [
+          {
+            label: `Orders now under ${primary.name}`,
+            route: `/customers/${primary.id}`,
+            reveal: "customer-orders",
+          },
+          {
+            label: `${duplicate.name} gone from the customer list`,
+            route: "/customers",
+            reveal: "customers-table",
+          },
+        ],
+        result: { merged_into: primary.id, removed: duplicate.id },
+      });
     },
   }),
   createStateTransitionCapability({
@@ -329,7 +352,22 @@ export const customerCapabilities: Capability[] = [
           target.notes = [];
         }
       });
-      return { customer_id: customer.id, anonymized: true };
+      return receipt({
+        entity: `Customer ${customer.id}`,
+        changes: [
+          { field: "Name", before: customer.name, after: `Anonymized ${customer.id}` },
+          { field: "Email", before: customer.email, after: "removed@example.com" },
+          { field: "Phone", before: customer.phone, after: "removed" },
+        ],
+        evidence: [
+          {
+            label: `Profile of customer ${customer.id}`,
+            route: `/customers/${customer.id}`,
+            reveal: "customer-profile",
+          },
+        ],
+        result: { customer_id: customer.id, anonymized: true },
+      });
     },
   }),
 ];

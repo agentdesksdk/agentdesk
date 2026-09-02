@@ -26,17 +26,23 @@ export function CustomerDetail() {
 
   return (
     <>
-      <div className="detail-header">
-        <h1>{customer.name}</h1>
-        {customer.tags.map((tag) => (
-          <span key={tag} className="pill normal">
-            {tag}
-          </span>
-        ))}
+      <div
+        data-reveal="customer-profile"
+        role="region"
+        aria-label={`Profile of ${customer.name}`}
+      >
+        <div className="detail-header">
+          <h1>{customer.name}</h1>
+          {customer.tags.map((tag) => (
+            <span key={tag} className="pill normal">
+              {tag}
+            </span>
+          ))}
+        </div>
+        <p className="page-sub">
+          {customer.email} · {customer.phone} · {customer.city}, {customer.country}
+        </p>
       </div>
-      <p className="page-sub">
-        {customer.email} · {customer.phone} · {customer.city}, {customer.country}
-      </p>
       <Ghost collection="customers" id={customer.id} />
       <div className="grid-2">
         <div
