@@ -134,6 +134,12 @@ export {
   type PendingAction,
 } from "./approval.ts";
 export type { AuditEvent, AuditListener } from "./audit.ts";
+export {
+  isApprovalGesture,
+  type ApprovalGesture,
+  type GestureBinding,
+  type GestureVerdict,
+} from "./gesture.ts";
 export { GrantStore, matchesScope, parseGrantRequest, parseScope } from "./grants.ts";
 export type {
   Grant,

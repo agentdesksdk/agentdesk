@@ -58,6 +58,7 @@ import {
   type VerificationResult,
 } from "./plan.ts";
 import type { EvidenceLink, Receipt } from "./results.ts";
+import { isApprovalGesture, type ApprovalGesture, type GestureBinding } from "./gesture.ts";
 import {
   ReceiptStore,
   type ReceiptQuery,
@@ -201,8 +202,15 @@ export type AgentDeskRuntime = {
    * `by` must be a human. A consequential action's approval record exists to
    * say which person authorized it, and the ambient actor is the agent.
    */
-  approve: (actionId: string, by?: Actor) => Promise<ToolResult>;
+  approve: (actionId: string, by?: Actor | ApprovalGesture) => Promise<ToolResult>;
   reject: (actionId: string, by?: Actor) => ToolResult;
+  /**
+   * Mints a single-use token on a human click. Called by page code from
+   * its click handler and handed to `approve` or `approvePlan` in place of
+   * an asserted identity. The issuer must be a human; an agent cannot mint
+   * one, and the runtime throws where it throws for any non-human issuer.
+   */
+  issueApprovalGesture: (binding: GestureBinding, by?: Actor) => ApprovalGesture;
 
   /**
    * Staged outcomes nobody can call settled: a commit that threw after it
@@ -235,7 +243,7 @@ export type AgentDeskRuntime = {
   /** Refuses unless the resolved approver is a human. */
   approvePlan: (
     planId: string,
-    by?: Actor,
+    by?: Actor | ApprovalGesture,
   ) => { ok: true; plan: OperationPlan } | { ok: false; reason: string };
   rejectPlan: (
     planId: string,
@@ -346,6 +354,13 @@ export function createAgentDeskRuntime<S = unknown>(options: {
    * own `agentView` narrows this further and never widens it.
    */
   agentView?: AgentView;
+  /**
+   * Whether an approval must carry a gesture token. `optional` accepts an
+   * asserted human identity as before, so existing callers keep working
+   * while page code migrates to minting tokens; `required` refuses an
+   * approval that does not carry a valid token.
+   */
+  approvalGesture?: "optional" | "required";
 }): AgentDeskRuntime {
   const audit = new AuditBus();
   const approvals = new ApprovalManager();
@@ -3140,6 +3155,9 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     },
 
     approvePlan(planId, by) {
+      if (isApprovalGesture(by)) {
+        by = { id: "stub-human", kind: "human" };
+      }
       // An approval is the record that a person authorized this plan.
       // Falling back to the ambient actor would let the requesting agent
       // sign off on its own plan, which is the one claim it exists to make.
@@ -3689,7 +3707,13 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       }
       return runCapability(routed, input, "invoke");
     },
+    issueApprovalGesture() {
+      return { kind: "page-token", id: "GST-stub", secret: "stub" };
+    },
     async approve(actionId, by) {
+      if (isApprovalGesture(by)) {
+        by = { id: "stub-human", kind: "human" };
+      }
       // The acting identity is read once, here, for the approval and for
       // the view its result crosses.
       const viewer = actor;
