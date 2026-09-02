@@ -1055,8 +1055,23 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         label: entity,
         route,
         ...(spec.reveal !== undefined ? { reveal: spec.reveal } : {}),
+        source: "derived",
       },
     ];
+  }
+
+  /**
+   * Stamps the source on what an author wrote. The runtime sets it and
+   * nothing the author put there survives, so `source` always says who
+   * knew where the proof lives.
+   */
+  function authored(links: readonly EvidenceLink[]): EvidenceLink[] {
+    return links.map((link) => ({
+      label: link.label,
+      route: link.route,
+      ...(link.reveal !== undefined ? { reveal: link.reveal } : {}),
+      source: "authored",
+    }));
   }
 
   /**
@@ -2073,8 +2088,9 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         ? {
             ...value.receipt,
             evidence:
-              value.receipt.evidence ??
-              deriveEvidence(capability, input, value.receipt.entity),
+              value.receipt.evidence !== undefined
+                ? authored(value.receipt.evidence)
+                : deriveEvidence(capability, input, value.receipt.entity),
           }
         : undefined;
       if (settledReceipt !== undefined) {
