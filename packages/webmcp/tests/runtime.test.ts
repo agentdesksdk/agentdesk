@@ -98,7 +98,7 @@ describe("AgentDesk runtime", () => {
     await runtime.setContext({ route: "/hello", state: {} });
     expect(model.tools.has("hello_dynamic_tool")).toBe(true);
     const result = await model.execute("hello_dynamic_tool", {});
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       content: [{ type: "text", text: JSON.stringify({ ok: true }) }],
     });
 
@@ -136,7 +136,7 @@ describe("AgentDesk runtime", () => {
       input: { q: "hi" },
     });
     expect(seen).toEqual({ q: "hi" });
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       content: [{ type: "text", text: JSON.stringify({ echoed: { q: "hi" } }) }],
     });
   });
@@ -181,7 +181,7 @@ describe("AgentDesk runtime", () => {
     }
     const approved = await runtime.approve(actionId, { id: "operator", name: "Operator", kind: "human" });
     expect(applied).toBe(true);
-    expect(approved).toEqual({
+    expect(approved).toMatchObject({
       content: [{ type: "text", text: "applied" }],
     });
     expect(runtime.getSnapshot().pending).toHaveLength(0);
@@ -278,7 +278,7 @@ describe("AgentDesk runtime", () => {
     expect(runtime.getSnapshot().supported).toBe(false);
     expect(runtime.getSnapshot().nativeTools).toEqual([]);
     const result = await runtime.invoke("ping");
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       content: [{ type: "text", text: "pong" }],
     });
   });

@@ -13,8 +13,9 @@ React/UI  (observes only)
 createAgentDeskRuntime({ capabilities })
    ├─ CapabilityCatalog        one entry per capability, name-keyed
    ├─ rankCapabilities         deterministic weighted routing
-   ├─ availability             structured reasons + suggested alternatives
+   ├─ availability             structured reasons + a checked repair
    ├─ decidePolicy             READ / WRITE execute, CONSEQUENTIAL needs approval
+   ├─ protocol                 one result shape: changed, possible, blocked, repair, evidence
    ├─ ApprovalManager          pending + resolved action records
    ├─ AuditBus                 append-only in-memory event log
    ▼
@@ -47,17 +48,25 @@ document.modelContext.registerTool(...)
 
 4. **Native and compatibility execution share one pipeline.** A native typed
    tool call and `invoke_capability` both resolve through:
-   capability lookup → context availability → input pre-flight
-   (`checkInput`) → policy → approval if consequential → handler → audit.
+   capability lookup → routability (policy asked with no input) → context
+   availability → input pre-flight (`checkInput`) → validation → policy with
+   the validated input → approval if consequential → handler → audit.
    There is exactly one implementation of that pipeline
    (`runCapability` in `runtime.ts`); business logic is never duplicated.
 
-5. **Availability is checked at routing time and again at execution time.**
-   `find_capabilities` annotates every match with availability and only
-   activates available ones. Invocation re-checks context availability and
-   input pre-flight. Approval re-checks both once more before executing, so
-   a state change between request and approval fails closed with a
-   structured reason (`FAILED_UNAVAILABLE`) instead of mutating stale state.
+5. **Availability is checked at routing time and again at execution time,
+   and routing and results share one eligibility.** `find_capabilities`
+   annotates every match with availability and only activates available
+   ones. Invocation re-checks context availability and input pre-flight.
+   Approval re-checks both once more before executing, so a state change
+   between request and approval fails closed with a structured reason
+   (`FAILED_UNAVAILABLE`) instead of mutating stale state. A capability
+   policy denies is a different case from one that is unavailable: it is
+   invisible, on every path, while an unavailable one is visible with its
+   reason. The one predicate that decides (`routable`) is what routing ranks
+   over, what the native surface registers from, and what every result's
+   `nowPossible` and `blockedCapabilities` are computed through, so no
+   result can name a capability routing would not offer.
 
 6. **Consequential actions never block a WebMCP promise.** A CONSEQUENTIAL
    invocation returns `APPROVAL_REQUIRED` with an `approval_id`
@@ -88,7 +97,8 @@ document.modelContext.registerTool(...)
 | `audit.ts` | `AuditBus` and the audit event union |
 | `plan.ts` | `PlanStore`, `OperationPlan`, plan statuses, `Actor`, `VerificationResult` |
 | `receipts.ts` | `ReceiptStore`, the queryable history of what changed, with the executing actor, plan, and rollback state |
-| `results.ts` | Structured tool results (`TOOL_RETIRED`, `APPROVAL_REQUIRED`, `CAPABILITY_UNAVAILABLE`) |
+| `protocol.ts` | The result protocol: `Repair`, `Evidence`, `Situation`, and the `ResultProtocol` union every terminal result conforms to |
+| `results.ts` | Structured tool results (`TOOL_RETIRED`, `APPROVAL_REQUIRED`, `CAPABILITY_UNAVAILABLE`, `completed`), each built from a situation |
 | `tool-surface.ts` | Reconciliation, AbortController lifecycle, tombstones, schema-byte accounting |
 | `runtime.ts` | The pipeline, bootstrap tools, exposure modes, snapshots |
 | `webmcp-adapter.ts` | The only `document.modelContext` touchpoint |
@@ -118,6 +128,112 @@ AgentDesk's role is being a tool *provider* and control plane. Per-method
 browser parity is not guaranteed by the spec, so the client probes with
 `probeFeatures()` and returns a structured `{ok: false, reason}` rather
 than throwing when a method is absent.
+
+## The result protocol
+
+Every terminal result the runtime hands an agent answers five questions:
+what changed, what is now possible, what stays blocked, which capability
+repairs the situation, and what evidence proves the answer. The shape is
+one type, `ResultProtocol` in `protocol.ts`, discriminated by the `status`
+every payload already carries.
+
+```ts
+type ResultProtocol =
+  | { status: "COMPLETED"; changes: Change[]; nowPossible; blockedCapabilities; evidence }
+  | { status: "APPROVAL_REQUIRED"; nowPossible; blockedCapabilities; evidence }
+  | { status: "INDETERMINATE"; changes: Change[]; nowPossible; blockedCapabilities; evidence }
+  | { status: RefusalStatus; reason: string; repair?: Repair; nowPossible; blockedCapabilities; evidence };
+```
+
+A refusal looks like this on the wire, here for a refund whose order is not
+yet verified:
+
+```json
+{
+  "status": "CAPABILITY_UNAVAILABLE",
+  "capability": "refund_shipping",
+  "reasonCode": "NOT_VERIFIED",
+  "reason": "Order is not identity-verified",
+  "nowPossible": ["issue_credit", "verify_customer_identity"],
+  "blockedCapabilities": ["refund_shipping"],
+  "repair": { "capability": "verify_customer_identity", "input": { "customerId": "CUS-104" } },
+  "suggestedCapability": "verify_customer_identity",
+  "evidence": []
+}
+```
+
+The variants are spelled out so the combinations that cannot happen are
+not constructible. A success carries `changes` and never a `repair`; a
+refusal carries a `reason` and may carry a `repair`, and never `changes`.
+The builders in `results.ts` enforce it at compile time: `completed`,
+`approvalRequired`, and `executionIndeterminate` take a `Settled` situation
+whose `repair` is typed `never`, and every refusal builder takes a
+`Refusal`. Handing a refusal's situation to a success builder does not
+compile, which is the guarantee that a result can never say both "done"
+and "here is how to fix it".
+
+**Denied is invisible; unavailable is visible.** The two lists are computed
+by `partition` through `routable`, the same predicate `find_capabilities`
+ranks over and `desiredNative` registers from. `routable` asks policy with
+no input, because routing has none; a policy that denies on missing input
+hides the capability, and a throwing policy denies. A denied capability is
+therefore absent from a routing report, from `getTools()` in either
+exposure, from `nowPossible` and `blockedCapabilities`, and from `repair`,
+and a denied capability invoked by name answers `POLICY_DENIED` before its
+availability is read, so a guessed name learns nothing about its state.
+Under a deny-all policy every one of those fields is empty on every path.
+An unavailable capability, by contrast, is listed in `blockedCapabilities`
+and carries its `reasonCode` and `reason` on its own refusal and on its
+routing match.
+
+**A repair is the author's claim, checked.** `Unavailability.repair` names
+a capability and the input to call it with. The runtime keeps it only when
+that capability exists, is routable, and is available right now
+(`visibleRepair`), so a repair is always an instruction the agent can
+follow. An unavailable repair is dropped and listed as blocked instead; a
+denied one is dropped and not listed. The builders never read the author's
+repair directly: `capabilityUnavailable` takes only the code and the
+sentence, and the repair reaches it on the situation the runtime built.
+`suggestedCapability` no longer exists on `Unavailability`; it is derived
+from `repair.capability` on the way out, for one release, and
+`unavailable(code, reason, "name")` still means `{ capability: "name" }`.
+Two refusals carry a repair the runtime chose rather than the author:
+`VALIDATION_FAILED` names the same capability, because the fix is the same
+call with the arguments corrected, and `STAGED_PROPOSAL_MISSING` names the
+same capability with the input the human already saw, because the fix is a
+new proposal for a new approval. A tombstone names `find_capabilities`.
+
+**The lists are a neighbourhood, not a catalog.** `situationFor` collects
+the capability itself, its author's repair, one hop of the relationship
+graph in both directions, and what the last routing offered, then
+partitions those names. That is where "what now" lives: the step this one
+needed, the step it just unblocked, the alternative its author named, and
+the working set the agent already holds. It is bounded by the routing
+budget plus a capability's declared edges, so a result in flat exposure
+does not list seventy-eight names. The routing report's own lists are the
+matches it offered plus the repairs those matches named. Bootstrap tools
+are in neither list, because they are the constant surface.
+
+**Evidence is a runtime-issued id.** A completed write names its stored
+receipt and its execution; a pending approval names the approval; a
+refusal at approval time names the approval it refused; an indeterminate
+write names the record a human reconciles; a refusal thrown from inside a
+handler names the execution that threw. A refusal before any execution has
+none. The kinds are `receipt`, `execution`, `approval`, and `record`.
+
+**A plain value keeps its content.** A handler that returns a `receipt()`
+envelope gets the full payload in `content` and `data` alike. A handler
+that returns a bare value keeps that value as its `content` text, byte for
+byte what it was before this protocol, and carries the answers in `data`
+with `changes: []`, because consumers parse that text as the bare value
+today. A handler that builds its own `ToolResult` keeps it. The result is
+assembled after the receipt is stored, because it names the receipt's id;
+that is safe only because the value is reduced to plain data once, before
+the commit, so the assembly can neither throw nor read a handler's getter
+twice.
+
+Plan outcomes (`OperationOutcome`), `get_action_status`, and a handler
+exception surfaced as a bare `errorResult` are not in this protocol yet.
 
 ## Execution lifecycle
 
@@ -1104,7 +1220,9 @@ differs, which is what makes the `/baseline` vs `/agentdesk` comparison fair.
 
 <!-- code-anchors
 packages/webmcp/src/receipts.ts RollbackState ReconciliationOutcome reconcile markIndeterminate rollbackVerification rollbackAttemptedAt rollbackFailure
-packages/webmcp/src/capability.ts verifyRollback rollbackEvidence
-packages/webmcp/src/runtime.ts reconcileRollback markRolledBack proveRollback ownActor
+packages/webmcp/src/capability.ts verifyRollback rollbackEvidence Unavailability repair
+packages/webmcp/src/runtime.ts reconcileRollback markRolledBack proveRollback ownActor routable visibleRepair situationFor partition desiredNative
 packages/webmcp/src/audit.ts rollback_indeterminate rollback_reconciled rollback_performed
+packages/webmcp/src/protocol.ts Repair Evidence Situation Refusal Settled ResultProtocol RefusalStatus
+packages/webmcp/src/results.ts completed capabilityUnavailable approvalRequired executionIndeterminate
 -->

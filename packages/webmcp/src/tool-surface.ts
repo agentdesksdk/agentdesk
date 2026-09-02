@@ -31,12 +31,25 @@ export class ToolSurfaceManager {
   private readonly active = new Map<string, ActiveTool>();
   private chain: Promise<void> = Promise.resolve();
 
+  /**
+   * `retired` builds the result a tombstone returns. The runtime supplies
+   * one that reports where the retired capability now stands, because only
+   * the runtime can read policy and availability. Without it the tombstone
+   * still answers, with empty lists and `find_capabilities` as the repair.
+   */
   constructor(
     private readonly adapter: WebMcpAdapter,
     private readonly audit: AuditBus,
     private readonly executor: NativeExecutor,
     private readonly notify?: () => void,
     private readonly exposedTo?: string[],
+    private readonly retired: (name: string) => ToolResult = (name) =>
+      toolRetired(name, {
+        nowPossible: [],
+        blockedCapabilities: [],
+        evidence: [],
+        repair: { capability: "find_capabilities" },
+      }),
   ) {}
 
   private registerOptions(controller: AbortController) {
@@ -188,7 +201,7 @@ export class ToolSurfaceManager {
           at: now(),
         });
         this.notify?.();
-        return toolRetired(name);
+        return this.retired(name);
       },
     };
     await this.adapter.registerTool(tool, this.registerOptions(controller));

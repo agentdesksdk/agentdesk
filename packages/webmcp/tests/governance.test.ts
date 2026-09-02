@@ -1,9 +1,31 @@
 ﻿import { describe, expect, it } from "vitest";
 import { AVAILABLE, defineCapability, unavailable } from "../src/capability.ts";
+import type { ToolResult } from "../src/results.ts";
 import { createAgentDeskRuntime } from "../src/runtime.ts";
 import { createMockModelContext } from "./mock-model-context.ts";
 
 type Store = { refunded: boolean; log: string[] };
+
+/**
+ * The alternative `refund_shipping` names once it has been spent. It has to
+ * exist and be callable for the runtime to repeat the name: a repair the
+ * agent could not follow is dropped rather than offered.
+ */
+function issueCreditFixture() {
+  return defineCapability({
+    name: "issue_credit",
+    description: "Issue a store credit instead of a refund",
+    domain: "billing",
+    intents: ["issue credit"],
+    risk: "WRITE",
+    execute: () => ({ credited: true }),
+  });
+}
+
+function withoutEvidence(result: ToolResult) {
+  const { evidence: _evidence, ...data } = result.data ?? {};
+  return { ...result, data };
+}
 
 function refundFixture(store: Store) {
   return defineCapability({
@@ -92,7 +114,7 @@ describe("two-phase approval", () => {
     const model = createMockModelContext();
     const runtime = createAgentDeskRuntime({
       registerTool: model.registerTool,
-      capabilities: [refundFixture(store)],
+      capabilities: [refundFixture(store), issueCreditFixture()],
     });
     await runtime.start();
     await model.execute("invoke_capability", { name: "refund_shipping" });
@@ -148,7 +170,7 @@ describe("availability reasons", () => {
     const model = createMockModelContext();
     const runtime = createAgentDeskRuntime({
       registerTool: model.registerTool,
-      capabilities: [refundFixture(store)],
+      capabilities: [refundFixture(store), issueCreditFixture()],
     });
     await runtime.start();
     const result = await model.execute("invoke_capability", {
@@ -162,7 +184,10 @@ describe("availability reasons", () => {
         capability: "refund_shipping",
         reasonCode: "ALREADY_REFUNDED",
         reason: "Shipping has already been refunded for this order.",
+        repair: { capability: "issue_credit" },
         suggestedCapability: "issue_credit",
+        nowPossible: ["issue_credit"],
+        blockedCapabilities: ["refund_shipping"],
       },
     });
   });
@@ -172,7 +197,7 @@ describe("availability reasons", () => {
     const model = createMockModelContext();
     const runtime = createAgentDeskRuntime({
       registerTool: model.registerTool,
-      capabilities: [refundFixture(store)],
+      capabilities: [refundFixture(store), issueCreditFixture()],
     });
     await runtime.start();
     const listed = (await model.execute("find_capabilities", {
@@ -316,7 +341,7 @@ describe("exposure modes", () => {
       exposure: "flat",
     });
     await runtime.start();
-    const flatResult = await model.execute("get_invoice", {});
+    const flatResult = (await model.execute("get_invoice", {})) as ToolResult;
 
     await runtime.setExposure("routed");
     const snapshot = runtime.getSnapshot();
@@ -330,10 +355,12 @@ describe("exposure modes", () => {
     // whole retired catalog registered.
     expect(snapshot.tombstones).toEqual([]);
     expect(model.tools.size).toBe(4);
-    const invokeResult = await model.execute("invoke_capability", {
+    const invokeResult = (await model.execute("invoke_capability", {
       name: "get_invoice",
       input: {},
-    });
-    expect(invokeResult).toEqual(flatResult);
+    })) as ToolResult;
+    // Same handler, same content, same answers; only the execution id in
+    // the evidence differs, because these are two executions.
+    expect(withoutEvidence(invokeResult)).toEqual(withoutEvidence(flatResult));
   });
 });

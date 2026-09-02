@@ -132,10 +132,20 @@ export {
   type PendingAction,
 } from "./approval.ts";
 export type { AuditEvent, AuditListener } from "./audit.ts";
+export type {
+  Evidence,
+  Refusal,
+  RefusalStatus,
+  Repair,
+  ResultProtocol,
+  Settled,
+  Situation,
+} from "./protocol.ts";
 export type { ToolResult, ToolCode } from "./results.ts";
 export {
   approvalRequired,
   capabilityUnavailable,
+  completed,
   executionCancelled,
   idempotencyCapacity,
   idempotencyConflict,

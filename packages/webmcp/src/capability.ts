@@ -31,6 +31,7 @@ export type ExecutionContext = AppContext & {
 
 import type { FocusPolicy } from "./presentation.ts";
 import type { VerificationResult } from "./plan.ts";
+import type { Repair } from "./protocol.ts";
 
 
 export type RiskLevel = "READ" | "WRITE" | "CONSEQUENTIAL";
@@ -101,25 +102,47 @@ export type Policy =
 
 export type ToolSurfaceKind = "native" | "invoke";
 
+/**
+ * What an author says about a capability that cannot run: a stable code, a
+ * sentence a human can read, and optionally the capability that repairs the
+ * situation with the input to call it with.
+ *
+ * The author's `repair` is a claim, not a promise. The runtime checks it
+ * against policy and availability before it reaches a result, so a repair
+ * naming a capability the agent cannot route to is dropped rather than
+ * repeated. There is no `suggestedCapability` here any more; the runtime
+ * derives that name from `repair.capability` on the way out, for one
+ * release, so nothing has two places to say the same thing.
+ */
 export type Unavailability = {
   available: false;
   reasonCode: string;
   reason: string;
-  suggestedCapability?: string;
+  repair?: Repair;
 };
 
 export type Availability = { available: true } | Unavailability;
 
 export const AVAILABLE: Availability = { available: true };
 
+/**
+ * `repair` may be a bare capability name, which is the old
+ * `suggestedCapability` argument and means `{ capability: name }`. Passing
+ * the object is the form that can carry input.
+ */
 export function unavailable(
   reasonCode: string,
   reason: string,
-  suggestedCapability?: string,
+  repair?: Repair | string,
 ): Unavailability {
   const result: Unavailability = { available: false, reasonCode, reason };
-  if (suggestedCapability !== undefined) {
-    result.suggestedCapability = suggestedCapability;
+  if (repair !== undefined) {
+    result.repair =
+      typeof repair === "string"
+        ? { capability: repair }
+        : repair.input === undefined
+          ? { capability: repair.capability }
+          : { capability: repair.capability, input: { ...repair.input } };
   }
   return result;
 }
