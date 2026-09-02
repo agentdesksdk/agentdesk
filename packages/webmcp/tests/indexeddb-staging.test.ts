@@ -18,6 +18,7 @@ const AGENT = { id: "agent", name: "Agent", kind: "agent" as const };
 
 const DB = "meridian";
 const ORDERS = "orders";
+const CUSTOMERS = "customers";
 const STAGING = "agentdesk_staging";
 
 type Table = Map<string, Record<string, unknown>>;
@@ -215,14 +216,16 @@ const ORDER_ROWS: Row[] = [
   { id: "O-2", status: "processing", total: 15, version: 1 },
 ];
 
+const CUSTOMER_ROWS: Row[] = [{ id: "C-1", status: "active", version: 1 }];
+
 function makeAdapter(db = fakeIndexedDb(), seeded = true) {
   if (seeded) {
-    db.seed(DB, { [ORDERS]: ORDER_ROWS });
+    db.seed(DB, { [ORDERS]: ORDER_ROWS, [CUSTOMERS]: CUSTOMER_ROWS });
   }
   const adapter = indexedDbStaging({
     name: DB,
     indexedDB: db.factory,
-    stores: [ORDERS],
+    stores: [ORDERS, CUSTOMERS],
     operations: {
       cancel: (draft, input) => {
         const id = String(input.id);
@@ -240,6 +243,17 @@ function makeAdapter(db = fakeIndexedDb(), seeded = true) {
         return receipt({ entity: `orders:${id}`, changes: [], undoable: false, result: { id } });
       },
       /** Reads one order to decide about another, so the read is in the fork's base too. */
+      /** Decides about an order from a row in another store it never writes. */
+      cancel_if_active: (draft, input) => {
+        const id = String(input.id);
+        const customer = draft.get(CUSTOMERS, "C-1")!;
+        if (customer.status !== "active") {
+          throw new Error("customer is not active");
+        }
+        const order = draft.get(ORDERS, id)!;
+        draft.put(ORDERS, { ...order, status: "cancelled" });
+        return receipt({ entity: `orders:${id}`, changes: [], undoable: false, result: { id } });
+      },
       cancel_pair: (draft) => {
         const first = draft.get(ORDERS, "O-1")!;
         const second = draft.get(ORDERS, "O-2")!;
@@ -281,6 +295,39 @@ function throwsAfterCommit(adapter: IndexedDbStagingAdapter): StagingAdapter<Ind
     },
   };
 }
+
+describe("a row the operation only read is part of what the commit checks", () => {
+  it("is re-read inside the commit's transaction even though the diff never names it", async () => {
+    const { adapter, db } = makeAdapter();
+    await adapter.open();
+    const { staged } = adapter.fork("cancel_if_active", { id: "O-1" });
+    expect(adapter.diff(staged)).toEqual([
+      { field: "orders:O-1.status", before: "processing", after: "cancelled" },
+    ]);
+    await adapter.flush();
+    const before = db.transactions.length;
+
+    adapter.commit(staged, () => adapter.fork("cancel_if_active", { id: "O-1" }));
+    await adapter.flush();
+
+    expect(db.table(DB, ORDERS).get("O-1")).toEqual({ id: "O-1", status: "cancelled", total: 40, version: 4 });
+    expect(db.table(DB, CUSTOMERS).get("C-1")).toEqual(CUSTOMER_ROWS[0]);
+    const writes = db.transactions.slice(before).filter((tx) => tx.mode === "readwrite");
+    expect(writes.map((tx) => [...tx.names].sort())).toEqual([[STAGING, CUSTOMERS, ORDERS].sort()]);
+  });
+
+  it("refuses in the database when the read row moved under another writer", async () => {
+    const { adapter, db } = makeAdapter();
+    await adapter.open();
+    const { staged } = adapter.fork("cancel_if_active", { id: "O-1" });
+    db.table(DB, CUSTOMERS).set("C-1", { id: "C-1", status: "suspended", version: 2 });
+
+    adapter.commit(staged, () => adapter.fork("cancel_if_active", { id: "O-1" }));
+    await expect(adapter.flush()).rejects.toThrow(/C-1/);
+
+    expect(db.table(DB, ORDERS).get("O-1")).toEqual(ORDER_ROWS[0]);
+  });
+});
 
 describe("the IndexedDB staging adapter holds the fork, diff, commit, release contract", () => {
   it("fork then diff reports exactly the changed fields, and touches nothing live", async () => {
