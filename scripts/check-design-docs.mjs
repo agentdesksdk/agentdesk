@@ -194,7 +194,83 @@ const CLAIMS = [
   ["docs/architecture.md", /the mirror moves when a commit's\s+transaction completes and not before/, "present", "architecture says the IndexedDB mirror follows the transaction"],
   ["docs/architecture.md", /A fork opened while a commit is in flight derives against the rows as\s+they were, without waiting/, "present", "architecture decides what a fork in the same tick derives against"],
   ["adapter-contract.md", /`identify` is consulted only when the artifact does not clone/, "present", "adapter contract records the identify-by-clone-failure leak"],
+
+  ["docs/routing.md", /##\s*[\d.]+% on a real-sized catalog/, "present", "routing states what the scorer measures at on a real-sized catalog"],
+  ["docs/routing.md", /scripts\/evals\/runs\/routing-reference/, "present", "routing names the committed routing stress run"],
+  ["docs/routing.md", /Hybrid does worse/, "present", "routing says hybrid does worse on the stress catalog, and why"],
 ];
+
+/**
+ * Figures a document quotes from a committed evaluation run are held to
+ * that run's report. A claim row can only say the prose contains a number;
+ * this says the number is the one the records compute, so a regenerated
+ * reference cannot leave a stale percentage in a sentence that still
+ * matches its pattern.
+ */
+const REFERENCE_FIGURES = [
+  {
+    report: "scripts/evals/runs/routing-reference/report.json",
+    // Whole phrases, not bare numbers. Requiring "29.1%" somewhere in the
+    // file passed while the sentence said 29.2%, because the heading still
+    // carried the old figure. Each phrase is the sentence the figure lives
+    // in, so the sentence itself has to agree with the run.
+    phrases: (report) => {
+      const pct = (v) => `${(v * 100).toFixed(1)}%`;
+      const det = report.cells.deterministic.metrics;
+      const hyb = report.cells.hybrid.metrics;
+      const hit = det.terminalInRoutedSet;
+      const hitH = hyb.terminalInRoutedSet;
+      const { size, seed } = report.catalog;
+      return {
+        "docs/routing.md": [
+          [`## ${pct(hit.value)} on a real-sized catalog`, "the heading figure"],
+          [`for ${pct(hit.value)} of tasks, ${hit.numerator} of ${hit.denominator}`, "the deterministic expected-in-routed-set sentence"],
+          [`in ${pct(det.tieAtCut.value)} of tasks the fifth and sixth scores are equal`, "the tie-at-the-cut sentence"],
+          [`Hybrid does worse, ${pct(hitH.value)},`, "the hybrid sentence"],
+          [`${size} capabilities across twelve domains from seed ${seed}`, "the catalog sentence"],
+        ],
+        "docs/evaluations.md": [
+          [`| Expected capability in the routed set | ${pct(hit.value)} (${hit.numerator} of ${hit.denominator}) | ${pct(hitH.value)} (${hitH.numerator} of ${hitH.denominator}) |`, "the expected-in-routed-set row"],
+          [`| Tie at the cut | ${pct(det.tieAtCut.value)} | ${pct(hyb.tieAtCut.value)} |`, "the tie-at-the-cut row"],
+          [`${hit.denominator - hit.numerator} of ${hit.denominator} tasks do not route their capability`, "the failing-count sentence"],
+          [`${size} capabilities across twelve domains`, "the catalog size"],
+          [`a seed, ${seed} in the reference`, "the catalog seed"],
+        ],
+      };
+    },
+  },
+];
+
+/** A phrase as a pattern: literal text, with any run of whitespace allowed where the prose wraps. */
+function loose(text) {
+  const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(escaped.split(/\s+/).join(String.raw`\s+`));
+}
+
+function checkReferenceFigures() {
+  const found = [];
+  for (const { report, phrases } of REFERENCE_FIGURES) {
+    const path = join(root, report);
+    if (!existsSync(path)) {
+      found.push(`${report} is missing; documents quote figures from it`);
+      continue;
+    }
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    for (const [doc, list] of Object.entries(phrases(parsed))) {
+      const body = readDoc(doc);
+      if (body === null) {
+        found.push(`${doc} is missing (quotes ${report})`);
+        continue;
+      }
+      for (const [phrase, what] of list) {
+        if (!loose(phrase).test(body)) {
+          found.push(`${doc} does not state "${phrase}", ${what} computed from ${report}; the prose is stale against the run`);
+        }
+      }
+    }
+  }
+  return found;
+}
 
 const failures = [];
 
@@ -255,6 +331,8 @@ for (const path of [...new Set(anchoredFiles)]) {
 if (anchorCount === 0) {
   failures.push("no code anchors found; design docs must anchor the code they describe");
 }
+
+failures.push(...checkReferenceFigures());
 
 if (failures.length > 0) {
   console.error(`design doc check FAILED (${failures.length})`);
