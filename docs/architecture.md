@@ -1660,6 +1660,22 @@ Three rules keep this from leaking into the judged path:
 `AgentPresence` in the demo consumes this stream, with a guided/fast
 toggle. Execution is byte-identical in both modes.
 
+**A page can replay a reveal.** `runtime.present(request)` takes the
+navigate-and-reveal shape the runtime emits for a completed write,
+`{ capability, route?, reveal?, message?, focus? }`, checks it the way the
+runtime checks its own hints (a route starts with `/`, a reveal is the
+opaque anchor token the application registered and never a selector), and
+emits it on the same bus with the same `capability_completed` phase, so
+the consumer that reveals a write reveals its proof the same way, in one
+call. It is a presentation event, not an execution: it changes no state,
+writes no audit, needs no actor beyond the page, and sets nothing only an
+execution can supply, so no `executionId` means the focus handoff cannot
+fire from a replay. It is a runtime method and not a capability, so no
+WebMCP tool reaches it; an agent replaying reveals would be a nuisance
+channel. Presentation never enters a result, so there is nothing for the
+agent view to project; if that ever changes, a replayed event crosses like
+every other value.
+
 ### Guided execution
 
 The agent calls tools; it does not click through the UI. But a human
@@ -1774,6 +1790,7 @@ packages/webmcp/src/persistence.ts PersistedRecord PersistedIdempotencyClaim Per
 packages/webmcp/src/runtime.ts persistOpen rehydrate describeArtifact restoredClaims approvalClaims
 packages/webmcp/src/staging.ts hydrate identify digestOf
 packages/webmcp/src/results.ts after_restart
+packages/webmcp/src/runtime.ts present PresentationRequest REVEAL_TOKEN
 packages/webmcp/src/capability.ts AgentView agentView
 packages/webmcp/src/runtime.ts throughView changesThroughView hiddenStrings withhold crossing agentText viewFailed runInvocation approveInner
 packages/webmcp/src/approval.ts stateVersion
