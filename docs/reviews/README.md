@@ -104,6 +104,7 @@ and executed under plain Node, and the design doc check passed.
 | P2 | RESOLVED | [Importing the transcript loader executes the evaluation CLI](2026-09-01-p2-importing-transcript-loader-runs-eval.md) |
 
 | P1 | RESOLVED | [The routing tie-break is locale-sensitive, so the tool surface varies by user](2026-09-02-p1-routing-tie-break-is-locale-sensitive.md) |
+| P1 | RESOLVED | [Routing never consulted policy, so a denied capability was published as a native tool](2026-09-02-p1-routing-never-consulted-policy.md) |
 | P2 | RESOLVED | [Duplicate relationship edges are counted twice](2026-09-02-p2-duplicate-relationship-edges-count-twice.md) |
 | P2 | RESOLVED | [`fromOrigins` is advisory and nothing says so](2026-09-02-p2-from-origins-is-advisory-and-undocumented.md) |
 | P2 | RESOLVED | [The eval surface metrics ignore the recorded peak](2026-09-02-p2-eval-surface-metrics-ignore-recorded-peak.md) |
