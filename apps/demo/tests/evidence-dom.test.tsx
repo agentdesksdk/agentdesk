@@ -2,10 +2,9 @@
 import { act, cleanup, fireEvent, render, within, type RenderResult } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { EvidenceLink } from "@agentdesk/webmcp";
+import type { EvidenceLink, PresentationEvent } from "@agentdesk/webmcp";
 import { App } from "../src/App.tsx";
 import { EvidenceControls } from "../src/components/EvidenceControls.tsx";
-import { subscribeProof, type ProofRequest } from "../src/components/evidence.ts";
 import { getState, resetStore } from "../src/data/store.ts";
 import { agentdesk } from "../src/runtime/agentdesk.ts";
 
@@ -96,7 +95,7 @@ describe("Show me proof", () => {
     localStorage.removeItem("agentdesk-presence-mode");
   });
 
-  it("navigates to the order and reveals the shipping summary anchor, through the proof stream", async () => {
+  it("navigates to the order and reveals the shipping summary anchor, through the runtime's presentation bus", async () => {
     const view = mountAt("/agentdesk");
     const entry = await refundThroughApproval();
     const shipping = entry.receipt.evidence!.find((l) => l.reveal === "shipping-summary")!;
@@ -104,8 +103,11 @@ describe("Show me proof", () => {
     expect(shipping.source).toBe("authored");
 
     const receipt = view.getByRole("region", { name: "Receipt for Order #10428" });
-    const seen: ProofRequest[] = [];
-    const unsubscribe = subscribeProof((request) => seen.push(request));
+    // The press goes through the runtime's own presentation bus, as a
+    // replay: the navigate-and-reveal shape of a completed write, with
+    // nothing only an execution could supply.
+    const seen: PresentationEvent[] = [];
+    const unsubscribe = agentdesk.subscribePresentation((event) => seen.push(event));
     try {
       const control = within(receipt).getByRole("button", {
         name: new RegExp(`^Show me proof: ${shipping.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
@@ -116,7 +118,14 @@ describe("Show me proof", () => {
         fireEvent.click(control);
       });
       expect(seen).toHaveLength(1);
-      expect(seen[0]!.link).toMatchObject({ route: `/orders/${ORDER}`, reveal: "shipping-summary" });
+      expect(seen[0]).toMatchObject({
+        phase: "capability_completed",
+        capability: "refund_shipping",
+        route: `/orders/${ORDER}`,
+        reveal: "shipping-summary",
+      });
+      expect(seen[0]).not.toHaveProperty("executionId");
+      expect(seen[0]).not.toHaveProperty("humanInitiated");
     } finally {
       unsubscribe();
     }
@@ -128,6 +137,29 @@ describe("Show me proof", () => {
     expect(anchor).not.toBeNull();
     expect(anchor.classList.contains("agent-reveal")).toBe(true);
     expect(document.activeElement).toBe(anchor);
+  });
+
+  it("a replay through runtime.present moves the page and focuses the anchor in fast mode, with no control pressed", async () => {
+    const view = mountAt("/agentdesk");
+    expect(view.queryByRole("heading", { name: `Order #${ORDER}` })).toBeNull();
+    await act(async () => {
+      agentdesk.present({
+        capability: "refund_shipping",
+        route: `/orders/${ORDER}`,
+        reveal: "shipping-summary",
+        message: "Showing Shipping refund on Order #10428.",
+      });
+    });
+    // Fast mode moves nothing for the runtime's own events; a replay is a
+    // person's request, so it moves the page, lights and focuses the
+    // anchor, and is announced.
+    expect(view.getByRole("heading", { name: `Order #${ORDER}` })).toBeDefined();
+    await frames(3);
+    const anchor = document.querySelector('[data-reveal="shipping-summary"]')!;
+    expect(anchor.classList.contains("agent-reveal")).toBe(true);
+    expect(document.activeElement).toBe(anchor);
+    const spoken = view.getAllByRole("status").map((region) => region.textContent ?? "");
+    expect(spoken.some((text) => text.includes("Showing Shipping refund on Order #10428."))).toBe(true);
   });
 
   it("offers one control per link on the receipt, each named as the value it proves", async () => {
@@ -176,7 +208,7 @@ describe("a derived link is labelled as the page, an authored one as the value",
       reveal: "shipping-summary",
       source: "authored",
     };
-    const view = render(<EvidenceControls links={[derived, authored]} />);
+    const view = render(<EvidenceControls capability="refund_shipping" links={[derived, authored]} />);
     const [first, second] = view.getAllByRole("button", { name: /^Show me proof:/ });
     expect(first!.textContent).toMatch(/page/);
     expect(first!.textContent).not.toMatch(/value/);
