@@ -53,7 +53,7 @@ static deployment.
 large internal capability catalog (78)
   → context-aware deterministic router
   → dynamic native WebMCP registration (≤6 typed tools at a time)
-  → availability with structured reasons + suggested alternatives
+  → availability with structured reasons + a checked repair (which capability to call, with what input)
   → risk policy: READ / WRITE execute, CONSEQUENTIAL needs a human
   → two-phase approval that never blocks a WebMCP call
   → audit timeline of everything
