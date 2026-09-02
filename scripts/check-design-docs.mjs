@@ -130,6 +130,12 @@ const CLAIMS = [
   ["docs/architecture.md", /suggested alternatives/, "absent", "availability carries a checked repair, not a free-text suggestion"],
   ["docs/routing.md", /the runtime's behaviour is unchanged by this document/, "absent", "the runtime now filters denied capabilities before ranking"],
   ["docs/routing.md", /##\s*The report's situation/, "present", "routing states what the report lists as possible and blocked"],
+
+  ["docs/architecture.md", /##\s*Scoped authority grants/, "present", "architecture states the grant contract"],
+  ["docs/architecture.md", /A grant never widens policy/, "present", "architecture states that a grant narrows approval only"],
+  ["docs/architecture.md", /spent at the execution claim, before the first await/, "present", "architecture states when a use is spent"],
+  ["docs/architecture.md", /GRANT_REFUSED/, "present", "architecture names the grant refusal result"],
+  ["docs/architecture.md", /adoptHumanActor/, "present", "architecture names the identity boundary a grant issuer crosses"],
 ];
 
 const failures = [];
