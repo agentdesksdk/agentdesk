@@ -9,6 +9,11 @@ these decisions. Nothing in this directory may be written by hand, and
 `pnpm eval --transcript <file>` refuses any entry the loader cannot
 validate.
 
+Every entry names the arm it was driven on and the result shape the client
+was handed, and it scores only that cell. The eval page hands the model the
+structured result, so entries captured there say `"shape":"structured"`;
+the bare cells stay unavailable until a page serves a bare result.
+
 ## Naming
 
 `<client>-<model>-<YYYY-MM-DD>.jsonl`, for example

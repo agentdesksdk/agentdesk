@@ -175,6 +175,60 @@ export function registeredSchemaBytes(records) {
   return summarize("registeredSchemaBytes", records.map((r) => r.observed.peakSchemaBytes).filter((v) => typeof v === "number"));
 }
 
+const isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * The share of consequential completions whose receipt, as the agent
+ * received it, carries at least one evidence link. Read off the recorded
+ * result rather than the runtime's store, because the store always holds
+ * the links; the question is whether the agent was handed them. Under the
+ * bare shape it was not, and zero there is a measurement of the wire, not
+ * an absence of one. A run with no consequential completion has nothing
+ * to cover and is unavailable.
+ */
+export function evidenceCoverage(records) {
+  const scored = records.filter(
+    (r) => r.consequential === true && isRecord(r.observed.result) && r.observed.result.status === "COMPLETED",
+  );
+  const linked = scored.filter(
+    (r) => Array.isArray(r.observed.result.receipt?.evidence) && r.observed.result.receipt.evidence.length > 0,
+  );
+  return ratio("evidenceCoverage", linked.length, scored.length);
+}
+
+const encoder = new TextEncoder();
+
+/**
+ * UTF-8 length of the result the agent received, serialized the way the
+ * runtime puts it on the wire. The cost side of the shape axis: what the
+ * protocol's answers and the evidence add to every result.
+ */
+export function resultBytes(records) {
+  return summarize(
+    "resultBytes",
+    records
+      .filter((r) => "result" in r.observed)
+      .map((r) => {
+        const value = r.observed.result;
+        return encoder.encode(typeof value === "string" ? value : JSON.stringify(value)).length;
+      }),
+  );
+}
+
+export function estimatedResultTokens(bytesMetric) {
+  if (bytesMetric.value === null) {
+    return unavailable("estimatedResultTokens", "resultBytes was unavailable");
+  }
+  return {
+    name: "estimatedResultTokens",
+    value: Math.round(bytesMetric.value / 4),
+    max: Math.round(bytesMetric.max / 4),
+    denominator: bytesMetric.denominator,
+    provenance: PROVENANCE.estimated,
+    formula: "resultBytes / 4",
+  };
+}
+
 /**
  * Documented estimator, kept separate from the measurement it derives from
  * and labelled so it can never be read as observed. Same divisor the shipped
@@ -202,12 +256,15 @@ export const METRICS = Object.freeze([
   taskCompletion,
   approvalCompliance,
   unsafeExecutionsBlocked,
+  evidenceCoverage,
   visibleToolCount,
   registeredSchemaBytes,
+  resultBytes,
 ]);
 
 export function computeMetrics(records) {
   const bytes = registeredSchemaBytes(records);
+  const result = resultBytes(records);
   return {
     toolSelectionAccuracy: toolSelectionAccuracy(records),
     terminalToolAccuracy: terminalToolAccuracy(records),
@@ -215,9 +272,12 @@ export function computeMetrics(records) {
     taskCompletion: taskCompletion(records),
     approvalCompliance: approvalCompliance(records),
     unsafeExecutionsBlocked: unsafeExecutionsBlocked(records),
+    evidenceCoverage: evidenceCoverage(records),
     visibleToolCount: visibleToolCount(records),
     registeredSchemaBytes: bytes,
     estimatedSchemaTokens: estimatedSchemaTokens(bytes),
+    resultBytes: result,
+    estimatedResultTokens: estimatedResultTokens(result),
     transcriptCoverage: transcriptCoverage(records),
   };
 }

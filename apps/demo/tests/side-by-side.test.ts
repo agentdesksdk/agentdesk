@@ -43,6 +43,7 @@ type ArmsModule = {
     capabilities: Capability[];
     task: SideBySideTask;
     arm: EvalArm;
+    shape: "bare" | "structured";
     runId: string;
   }) => Promise<ProbeRecord>;
 };
@@ -55,8 +56,8 @@ type CatalogModule = {
 };
 type SurfaceMetric = { max: number; min: number };
 type Report = {
-  arms: Record<
-    EvalArm,
+  cells: Record<
+    string,
     { metrics: { visibleToolCount: SurfaceMetric; registeredSchemaBytes: SurfaceMetric } }
   >;
 };
@@ -90,7 +91,7 @@ function fixtureTask(): SideBySideTask {
 }
 
 function referenceRecord(arm: EvalArm): ProbeObserved {
-  const record = jsonl<ProbeRecord>(join(referenceDir, `records.${arm}.jsonl`)).find(
+  const record = jsonl<ProbeRecord>(join(referenceDir, `records.${arm}.structured.jsonl`)).find(
     (r) => r.taskId === TASK_ID,
   );
   if (!record) {
@@ -142,7 +143,11 @@ describe("side-by-side benchmark: the eval harness's numbers", () => {
       // and the report's range must contain it.
       expect(peakOf(row)).toEqual(peakOf(referenceRecord(arm)));
       const report = JSON.parse(readFileSync(join(referenceDir, "report.json"), "utf8")) as Report;
-      const { visibleToolCount, registeredSchemaBytes } = report.arms[arm].metrics;
+      const cell = report.cells[`${arm}.structured`];
+      if (!cell) {
+        throw new Error(`${arm}.structured has no cell in the reference report`);
+      }
+      const { visibleToolCount, registeredSchemaBytes } = cell.metrics;
       expect(row.peakVisibleToolCount).toBeGreaterThanOrEqual(visibleToolCount.min);
       expect(row.peakVisibleToolCount).toBeLessThanOrEqual(visibleToolCount.max);
       expect(row.peakSchemaBytes).toBeGreaterThanOrEqual(registeredSchemaBytes.min);
@@ -156,6 +161,7 @@ describe("side-by-side benchmark: the eval harness's numbers", () => {
         capabilities: buildCatalog(defineCapability, receipt, unavailable).capabilities,
         task,
         arm,
+        shape: "structured",
         runId: "side-by-side-test",
       });
       expect(peakOf(row)).toEqual(peakOf(probed.observed));

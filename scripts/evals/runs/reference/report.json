@@ -1,15 +1,17 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "runId": "reference",
-  "at": "2026-09-01T00:46:04.269Z",
+  "at": "2026-09-02T03:08:30.765Z",
   "taskSet": {
     "path": "scripts/evals/tasks/v2.tasks.jsonl",
     "taskCount": 6
   },
-  "arms": {
-    "baseline": {
-      "label": "Baseline (flat exposure)",
+  "cells": {
+    "baseline.bare": {
+      "arm": "baseline",
       "exposure": "flat",
+      "shape": "bare",
+      "label": "Baseline (flat, bare)",
       "metrics": {
         "toolSelectionAccuracy": {
           "name": "toolSelectionAccuracy",
@@ -55,6 +57,13 @@
           "value": 1,
           "numerator": 1,
           "denominator": 1,
+          "provenance": "measured"
+        },
+        "evidenceCoverage": {
+          "name": "evidenceCoverage",
+          "value": 0,
+          "numerator": 0,
+          "denominator": 3,
           "provenance": "measured"
         },
         "visibleToolCount": {
@@ -83,6 +92,23 @@
           "provenance": "estimated",
           "formula": "registeredSchemaBytes / 4"
         },
+        "resultBytes": {
+          "name": "resultBytes",
+          "value": 66.83333333333333,
+          "mean": 66.83333333333333,
+          "max": 100,
+          "min": 47,
+          "denominator": 6,
+          "provenance": "measured"
+        },
+        "estimatedResultTokens": {
+          "name": "estimatedResultTokens",
+          "value": 17,
+          "max": 25,
+          "denominator": 6,
+          "provenance": "estimated",
+          "formula": "resultBytes / 4"
+        },
         "transcriptCoverage": {
           "name": "transcriptCoverage",
           "value": 0,
@@ -92,9 +118,11 @@
         }
       }
     },
-    "agentdesk": {
-      "label": "AgentDesk (routed exposure)",
-      "exposure": "routed",
+    "baseline.structured": {
+      "arm": "baseline",
+      "exposure": "flat",
+      "shape": "structured",
+      "label": "Baseline (flat, structured)",
       "metrics": {
         "toolSelectionAccuracy": {
           "name": "toolSelectionAccuracy",
@@ -142,6 +170,124 @@
           "denominator": 1,
           "provenance": "measured"
         },
+        "evidenceCoverage": {
+          "name": "evidenceCoverage",
+          "value": 1,
+          "numerator": 3,
+          "denominator": 3,
+          "provenance": "measured"
+        },
+        "visibleToolCount": {
+          "name": "visibleToolCount",
+          "value": 51,
+          "mean": 51,
+          "max": 51,
+          "min": 51,
+          "denominator": 6,
+          "provenance": "measured"
+        },
+        "registeredSchemaBytes": {
+          "name": "registeredSchemaBytes",
+          "value": 10455,
+          "mean": 10455,
+          "max": 10455,
+          "min": 10455,
+          "denominator": 6,
+          "provenance": "measured"
+        },
+        "estimatedSchemaTokens": {
+          "name": "estimatedSchemaTokens",
+          "value": 2614,
+          "max": 2614,
+          "denominator": 6,
+          "provenance": "estimated",
+          "formula": "registeredSchemaBytes / 4"
+        },
+        "resultBytes": {
+          "name": "resultBytes",
+          "value": 463.8333333333333,
+          "mean": 463.8333333333333,
+          "max": 714,
+          "min": 214,
+          "denominator": 6,
+          "provenance": "measured"
+        },
+        "estimatedResultTokens": {
+          "name": "estimatedResultTokens",
+          "value": 116,
+          "max": 179,
+          "denominator": 6,
+          "provenance": "estimated",
+          "formula": "resultBytes / 4"
+        },
+        "transcriptCoverage": {
+          "name": "transcriptCoverage",
+          "value": 0,
+          "numerator": 0,
+          "denominator": 6,
+          "provenance": "measured"
+        }
+      }
+    },
+    "agentdesk.bare": {
+      "arm": "agentdesk",
+      "exposure": "routed",
+      "shape": "bare",
+      "label": "AgentDesk (routed, bare)",
+      "metrics": {
+        "toolSelectionAccuracy": {
+          "name": "toolSelectionAccuracy",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0,
+          "provenance": "unavailable",
+          "reason": "no recorded model transcript; tool selection is a model decision and was not observed"
+        },
+        "terminalToolAccuracy": {
+          "name": "terminalToolAccuracy",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0,
+          "provenance": "unavailable",
+          "reason": "no task in this run both expected an action and carried a recorded model decision"
+        },
+        "argumentAccuracy": {
+          "name": "argumentAccuracy",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0,
+          "provenance": "unavailable",
+          "reason": "no recorded model transcript; arguments are a model decision and were not observed"
+        },
+        "taskCompletion": {
+          "name": "taskCompletion",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0,
+          "provenance": "unavailable",
+          "reason": "no recorded model transcript; completion depends on what the model attempted"
+        },
+        "approvalCompliance": {
+          "name": "approvalCompliance",
+          "value": 1,
+          "numerator": 3,
+          "denominator": 3,
+          "provenance": "measured"
+        },
+        "unsafeExecutionsBlocked": {
+          "name": "unsafeExecutionsBlocked",
+          "value": 1,
+          "numerator": 1,
+          "denominator": 1,
+          "provenance": "measured"
+        },
+        "evidenceCoverage": {
+          "name": "evidenceCoverage",
+          "value": 0,
+          "numerator": 0,
+          "denominator": 3,
+          "provenance": "measured"
+        },
         "visibleToolCount": {
           "name": "visibleToolCount",
           "value": 6.666666666666667,
@@ -168,6 +314,134 @@
           "provenance": "estimated",
           "formula": "registeredSchemaBytes / 4"
         },
+        "resultBytes": {
+          "name": "resultBytes",
+          "value": 66.83333333333333,
+          "mean": 66.83333333333333,
+          "max": 100,
+          "min": 47,
+          "denominator": 6,
+          "provenance": "measured"
+        },
+        "estimatedResultTokens": {
+          "name": "estimatedResultTokens",
+          "value": 17,
+          "max": 25,
+          "denominator": 6,
+          "provenance": "estimated",
+          "formula": "resultBytes / 4"
+        },
+        "transcriptCoverage": {
+          "name": "transcriptCoverage",
+          "value": 0,
+          "numerator": 0,
+          "denominator": 6,
+          "provenance": "measured"
+        }
+      }
+    },
+    "agentdesk.structured": {
+      "arm": "agentdesk",
+      "exposure": "routed",
+      "shape": "structured",
+      "label": "AgentDesk (routed, structured)",
+      "metrics": {
+        "toolSelectionAccuracy": {
+          "name": "toolSelectionAccuracy",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0,
+          "provenance": "unavailable",
+          "reason": "no recorded model transcript; tool selection is a model decision and was not observed"
+        },
+        "terminalToolAccuracy": {
+          "name": "terminalToolAccuracy",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0,
+          "provenance": "unavailable",
+          "reason": "no task in this run both expected an action and carried a recorded model decision"
+        },
+        "argumentAccuracy": {
+          "name": "argumentAccuracy",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0,
+          "provenance": "unavailable",
+          "reason": "no recorded model transcript; arguments are a model decision and were not observed"
+        },
+        "taskCompletion": {
+          "name": "taskCompletion",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0,
+          "provenance": "unavailable",
+          "reason": "no recorded model transcript; completion depends on what the model attempted"
+        },
+        "approvalCompliance": {
+          "name": "approvalCompliance",
+          "value": 1,
+          "numerator": 3,
+          "denominator": 3,
+          "provenance": "measured"
+        },
+        "unsafeExecutionsBlocked": {
+          "name": "unsafeExecutionsBlocked",
+          "value": 1,
+          "numerator": 1,
+          "denominator": 1,
+          "provenance": "measured"
+        },
+        "evidenceCoverage": {
+          "name": "evidenceCoverage",
+          "value": 1,
+          "numerator": 3,
+          "denominator": 3,
+          "provenance": "measured"
+        },
+        "visibleToolCount": {
+          "name": "visibleToolCount",
+          "value": 6.666666666666667,
+          "mean": 6.666666666666667,
+          "max": 7,
+          "min": 6,
+          "denominator": 6,
+          "provenance": "measured"
+        },
+        "registeredSchemaBytes": {
+          "name": "registeredSchemaBytes",
+          "value": 2486.1666666666665,
+          "mean": 2486.1666666666665,
+          "max": 2557,
+          "min": 2365,
+          "denominator": 6,
+          "provenance": "measured"
+        },
+        "estimatedSchemaTokens": {
+          "name": "estimatedSchemaTokens",
+          "value": 622,
+          "max": 639,
+          "denominator": 6,
+          "provenance": "estimated",
+          "formula": "registeredSchemaBytes / 4"
+        },
+        "resultBytes": {
+          "name": "resultBytes",
+          "value": 463.8333333333333,
+          "mean": 463.8333333333333,
+          "max": 714,
+          "min": 214,
+          "denominator": 6,
+          "provenance": "measured"
+        },
+        "estimatedResultTokens": {
+          "name": "estimatedResultTokens",
+          "value": 116,
+          "max": 179,
+          "denominator": 6,
+          "provenance": "estimated",
+          "formula": "resultBytes / 4"
+        },
         "transcriptCoverage": {
           "name": "transcriptCoverage",
           "value": 0,
@@ -181,41 +455,97 @@
   "unavailable": [
     {
       "arm": "baseline",
+      "shape": "bare",
       "metric": "toolSelectionAccuracy",
       "reason": "no recorded model transcript; tool selection is a model decision and was not observed"
     },
     {
       "arm": "baseline",
+      "shape": "bare",
       "metric": "terminalToolAccuracy",
       "reason": "no task in this run both expected an action and carried a recorded model decision"
     },
     {
       "arm": "baseline",
+      "shape": "bare",
       "metric": "argumentAccuracy",
       "reason": "no recorded model transcript; arguments are a model decision and were not observed"
     },
     {
       "arm": "baseline",
+      "shape": "bare",
+      "metric": "taskCompletion",
+      "reason": "no recorded model transcript; completion depends on what the model attempted"
+    },
+    {
+      "arm": "baseline",
+      "shape": "structured",
+      "metric": "toolSelectionAccuracy",
+      "reason": "no recorded model transcript; tool selection is a model decision and was not observed"
+    },
+    {
+      "arm": "baseline",
+      "shape": "structured",
+      "metric": "terminalToolAccuracy",
+      "reason": "no task in this run both expected an action and carried a recorded model decision"
+    },
+    {
+      "arm": "baseline",
+      "shape": "structured",
+      "metric": "argumentAccuracy",
+      "reason": "no recorded model transcript; arguments are a model decision and were not observed"
+    },
+    {
+      "arm": "baseline",
+      "shape": "structured",
       "metric": "taskCompletion",
       "reason": "no recorded model transcript; completion depends on what the model attempted"
     },
     {
       "arm": "agentdesk",
+      "shape": "bare",
       "metric": "toolSelectionAccuracy",
       "reason": "no recorded model transcript; tool selection is a model decision and was not observed"
     },
     {
       "arm": "agentdesk",
+      "shape": "bare",
       "metric": "terminalToolAccuracy",
       "reason": "no task in this run both expected an action and carried a recorded model decision"
     },
     {
       "arm": "agentdesk",
+      "shape": "bare",
       "metric": "argumentAccuracy",
       "reason": "no recorded model transcript; arguments are a model decision and were not observed"
     },
     {
       "arm": "agentdesk",
+      "shape": "bare",
+      "metric": "taskCompletion",
+      "reason": "no recorded model transcript; completion depends on what the model attempted"
+    },
+    {
+      "arm": "agentdesk",
+      "shape": "structured",
+      "metric": "toolSelectionAccuracy",
+      "reason": "no recorded model transcript; tool selection is a model decision and was not observed"
+    },
+    {
+      "arm": "agentdesk",
+      "shape": "structured",
+      "metric": "terminalToolAccuracy",
+      "reason": "no task in this run both expected an action and carried a recorded model decision"
+    },
+    {
+      "arm": "agentdesk",
+      "shape": "structured",
+      "metric": "argumentAccuracy",
+      "reason": "no recorded model transcript; arguments are a model decision and were not observed"
+    },
+    {
+      "arm": "agentdesk",
+      "shape": "structured",
       "metric": "taskCompletion",
       "reason": "no recorded model transcript; completion depends on what the model attempted"
     }
