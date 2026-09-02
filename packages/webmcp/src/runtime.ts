@@ -135,10 +135,9 @@ import {
   type Unreconciled,
 } from "./staging.ts";
 import { ToolSurfaceManager } from "./tool-surface.ts";
-import type { CapabilityProvider } from "./provider.ts";
+import { nativeProvider, type CapabilityProvider } from "./provider.ts";
 import {
   assertSafeOrigins,
-  createWebMcpAdapter,
   type RegisterToolFn,
   type WebMcpAdapter,
 } from "./webmcp-adapter.ts";
@@ -756,32 +755,48 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   }
 
   let actor: Actor | undefined = adoptActor(options.actor);
-  const adapter =
-    options.adapter ??
-    createWebMcpAdapter(
-      options.registerTool !== undefined
-        ? { registerTool: options.registerTool }
-        : undefined,
+  // One provider, bound once, like the staging adapter. The shipped path
+  // is the native provider over the options it always took; a runtime
+  // handed a provider constructs no WebMCP-specific object of its own.
+  if (
+    options.provider !== undefined &&
+    (options.capabilities !== undefined ||
+      options.registerTool !== undefined ||
+      options.adapter !== undefined)
+  ) {
+    throw new Error(
+      "createAgentDeskRuntime takes either a provider or capabilities, registerTool, and adapter; a provider supplies all three",
     );
+  }
+  const provider: CapabilityProvider =
+    options.provider ??
+    nativeProvider({
+      ...(options.capabilities !== undefined ? { capabilities: options.capabilities } : {}),
+      ...(options.registerTool !== undefined ? { registerTool: options.registerTool } : {}),
+      ...(options.adapter !== undefined ? { adapter: options.adapter } : {}),
+    });
+  const adapter = provider.adapter;
 
   if (options.exposedTo) {
     assertSafeOrigins(options.exposedTo);
   }
   const policy = options.policy ?? riskBasedPolicy;
   const validate = options.validate ?? defaultValidator;
-  const appCapabilities = options.capabilities ?? [];
-  const catalog = new CapabilityCatalog([
+  let appCapabilities: readonly Capability[] = provider.capabilities();
+  let catalog = new CapabilityCatalog([
     ...builtinCapabilities(),
     ...appCapabilities,
   ]);
+  let unsubscribeProvider: (() => void) | undefined;
 
   let context: AppContext = { route: "/", state: {} };
   let exposure: Exposure = options.exposure ?? "routed";
   let started = false;
   let routedNames = new Set<string>();
   let lastRouting: RoutingReport | null = null;
-  // The catalog is fixed for the life of the runtime, so its tree is
-  // tokenized once; each call pays only the routable filter and a count.
+  // The catalog is fixed until the provider announces otherwise, so its
+  // tree is tokenized once per catalog; each call pays only the routable
+  // filter and a count.
   let hierarchy: CatalogHierarchy<Capability> | undefined;
   const tree = (): CatalogHierarchy<Capability> => {
     hierarchy ??= catalogHierarchy(catalog.all().filter(appOnly));
@@ -1514,6 +1529,81 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         // An observer must never change an operation's outcome.
         console.error("agentdesk snapshot listener threw", err);
       }
+    }
+  }
+
+  /**
+   * Checked at start and again when the provider's catalog changes, rather
+   * than at each staged invocation. A staged capability with no adapter has
+   * no way to derive or land its change, and finding that out at approval
+   * time would mean an operator saw a card for something that could never
+   * run.
+   */
+  function assertStagingBacked(capabilities: readonly Capability[]): void {
+    const unbacked = capabilities.filter(
+      (capability: Capability) => capability.stagedOperation !== undefined,
+    );
+    if (unbacked.length > 0 && !options.staging) {
+      throw new Error(
+        `${unbacked
+          .map((capability: Capability) => capability.name)
+          .join(", ")} stage their writes and no staging adapter is bound; pass one to createAgentDeskRuntime`,
+      );
+    }
+    if (options.staging) {
+      for (const hook of [
+        "scope",
+        "fork",
+        "diff",
+        "commit",
+        "release",
+        "reconcile",
+      ] as const) {
+        if (typeof options.staging[hook] !== "function") {
+          throw new Error(
+            `the staging adapter is missing ${hook}, so a staged change could not be handled`,
+          );
+        }
+      }
+      // A capability naming an operation the adapter has not got would fail
+      // at approval time, after an operator was already shown a card for a
+      // change that could never run.
+      const known = new Set(options.staging.operations ?? []);
+      const missing = unbacked.filter(
+        (capability: Capability) => !known.has(capability.stagedOperation!),
+      );
+      if (missing.length > 0) {
+        throw new Error(
+          `the staging adapter owns no operation named ${missing
+            .map((capability: Capability) => capability.stagedOperation)
+            .join(", ")}, named by ${missing
+            .map((capability: Capability) => capability.name)
+            .join(", ")}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * The provider's catalog moved. The runtime reads it again, rebuilds the
+   * catalog and its tree, drops routed names that no longer resolve, and
+   * reconciles the surface, so a retired capability leaves the native tools
+   * and a new one can be routed. A catalog the runtime cannot accept, a
+   * duplicate name or a staged capability nothing backs, is refused back to
+   * the provider and the runtime keeps the catalog it had.
+   */
+  async function catalogChanged(): Promise<void> {
+    const next = provider.capabilities();
+    const rebuilt = new CapabilityCatalog([...builtinCapabilities(), ...next]);
+    assertStagingBacked(rebuilt.all());
+    appCapabilities = next;
+    catalog = rebuilt;
+    hierarchy = undefined;
+    pruneRouted();
+    if (started) {
+      await reconcile();
+    } else {
+      emit();
     }
   }
 
@@ -3405,59 +3495,22 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       if (started) {
         return;
       }
-      // Checked once, here, rather than at each staged invocation. A staged
-      // capability with no adapter has no way to derive or land its change,
-      // and finding that out at approval time would mean an operator saw a
-      // card for something that could never run.
-      const unbacked = catalog
-        .all()
-        .filter((capability: Capability) => capability.stagedOperation !== undefined);
-      if (unbacked.length > 0 && !options.staging) {
-        throw new Error(
-          `${unbacked
-            .map((capability: Capability) => capability.name)
-            .join(", ")} stage their writes and no staging adapter is bound; pass one to createAgentDeskRuntime`,
-        );
-      }
-      if (options.staging) {
-        for (const hook of [
-          "scope",
-          "fork",
-          "diff",
-          "commit",
-          "release",
-          "reconcile",
-        ] as const) {
-          if (typeof options.staging[hook] !== "function") {
-            throw new Error(
-              `the staging adapter is missing ${hook}, so a staged change could not be handled`,
-            );
-          }
-        }
-        // A capability naming an operation the adapter has not got would fail
-        // at approval time, after an operator was already shown a card for a
-        // change that could never run.
-        const known = new Set(options.staging.operations ?? []);
-        const missing = unbacked.filter(
-          (capability: Capability) => !known.has(capability.stagedOperation!),
-        );
-        if (missing.length > 0) {
-          throw new Error(
-            `the staging adapter owns no operation named ${missing
-              .map((capability: Capability) => capability.stagedOperation)
-              .join(", ")}, named by ${missing
-              .map((capability: Capability) => capability.name)
-              .join(", ")}`,
-          );
-        }
-      }
+      assertStagingBacked(catalog.all());
       await rehydrate();
+      // A provider that announces changes is listened to for as long as the
+      // runtime runs; a provider whose catalog is fixed announces nothing.
+      unsubscribeProvider?.();
+      unsubscribeProvider = provider.subscribe?.(() => {
+        void catalogChanged();
+      });
       await surface.reconcile(desiredNative());
       started = true;
       emit();
     },
     async stop() {
       started = false;
+      unsubscribeProvider?.();
+      unsubscribeProvider = undefined;
       endEpoch();
       proposals.discardAll();
       approvals.clear();

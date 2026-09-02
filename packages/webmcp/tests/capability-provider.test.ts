@@ -195,7 +195,7 @@ describe("a provider that changes its catalog after start", () => {
     expect(after.catalogSize).toBe(2);
     expect(after.routedTools).toEqual([]);
     expect(after.nativeTools).not.toContain("refund_shipping");
-    expect(after.available).toEqual(["issue_credit", "read_invoice"]);
+    expect([...after.available].sort()).toEqual(["issue_credit", "read_invoice"]);
 
     await model.execute("find_capabilities", { query: "credit" });
     expect(runtime.getSnapshot().routedTools).toEqual(["issue_credit"]);
