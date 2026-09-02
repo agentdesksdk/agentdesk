@@ -347,6 +347,76 @@ Grants apply to a direct invocation. `approve()` executes an approval a
 person gave for that call, and a plan carries its own approval, so neither
 consults grants.
 
+## An approval is bound to a state digest
+
+An approval authorizes an exact state, not an action name. Every preview
+carries `stateVersion`, a digest the runtime computes from the state the
+preview was derived from, and commit re-derives it from current state and
+refuses on mismatch without writing.
+
+```json
+{ "status": "APPROVAL_STALE", "code": "APPROVAL_STALE",
+  "capability": "cancel_order", "approval_id": "APR-1001",
+  "reasonCode": "APPROVAL_STALE", "requiresNewPreview": true,
+  "stateVersion": { "expected": "sv-3f2a91c07b1d4e66", "observed": "sv-9c04e2aa51f7b380" },
+  "repair": { "capability": "cancel_order", "input": { "order_id": "10428" } },
+  "nowPossible": ["cancel_order"], "blockedCapabilities": [],
+  "evidence": [{ "kind": "approval", "id": "APR-1001" }] }
+```
+
+**What the digest covers.** `stateDigest` in `staging.ts` digests each
+change's `field` and its `before` value, in field order, and nothing else.
+That is the set of facts a person read when they approved: a write to
+anything outside it leaves the digest intact, and a write to anything inside
+it changes it. Digesting the whole store instead would fire a stale
+approval on every unrelated write, and a stale approval that fires on
+unrelated writes teaches people to re-approve without reading. `after` is
+not covered: a capability whose output depends on a clock or a counter
+produces a different `after` from the same state, and that is not drift.
+What the person authorized is a change *from* this state, so the runtime
+re-derives the change at commit and compares the from.
+
+**One digest function.** A single approval and a plan operation share
+`stateDigest` and share `currentDigest`, the runtime's re-derivation, so
+the two cannot drift apart on what "the same state" means. At preview time
+the digest is computed from the preview the adapter or the author just
+derived. At commit time `currentDigest` derives it again the same way: a
+fresh fork for a staged capability, released as soon as it has been read,
+or the author's `previewChanges` for a direct one. Only the reviewed
+artifact ever lands; the probe is never committed. A probe that cannot be
+derived yields no digest and counts as moved, because a state that cannot
+be read back is not one anyone approved.
+
+**The runtime computes it; nothing else can.** Nothing an adapter's `diff`
+or an author's `previewChanges` returns reaches the digest except `field`
+and `before`. A `stateVersion` a capability or an adapter hands in on a
+change is ignored, and the result's `stateVersion` is written by the
+runtime after everything else, so the value on the preview is always the
+runtime's own. A summary-only approval has no preview to derive from and
+carries no `stateVersion`; its approval is not bound to state, because
+there is no state it showed.
+
+**Where it fires.** `approve()` checks after policy and availability and
+before the staged artifact is taken, so a stale approval releases its
+artifact, resolves the action `FAILED_UNAVAILABLE` with reason code
+`APPROVAL_STALE`, and returns `APPROVAL_STALE` in the result protocol with
+`requiresNewPreview: true`, the expected and observed digests, and the
+same request as the repair, because the fix is a new preview of current
+state for a person to look at. `commitPlan` runs the identical check per
+operation, after the operations before it have landed, so the probe forks
+from the state that operation was reviewed against; the operation whose
+base moved is `SKIPPED` with an `APPROVAL_STALE` detail and the rest of
+the plan proceeds. This is the generalization of the plan's revision drift
+check to every staged approval: the optional whole-store `revision`
+provider remains as a coarse fence a plan may pin, and the digest is the
+fine one every preview carries.
+
+**A grant-authorized execution is digest-free by construction.** It has no
+preview: a live grant stands in for the approval and the call takes the
+unapproved execution path, so there is no `stateVersion` on its result and
+nothing to check. The person bound their authority to a scope and a use
+count when they issued the grant, not to a state.
+
 ## Execution lifecycle
 
 Every execution gets an `executionId` that correlates its
@@ -1338,6 +1408,10 @@ packages/webmcp/src/audit.ts rollback_indeterminate rollback_reconciled rollback
 packages/webmcp/src/protocol.ts Repair Evidence Situation Refusal Settled ResultProtocol RefusalStatus
 packages/webmcp/src/results.ts completed capabilityUnavailable approvalRequired executionIndeterminate
 packages/webmcp/src/grants.ts Grant LiveGrant GrantRequest ScopeRule ConsideredGrant GrantOutcome GrantStore parseScope parseGrantRequest matchesScope consult spend revoke liveCapabilities
-packages/webmcp/src/runtime.ts adoptHumanActor authorizing considered queueApproval revokeGrant listGrants getGrant
+packages/webmcp/src/runtime.ts adoptHumanActor authorizing considered queueApproval revokeGrant listGrants getGrant currentDigest hasPreviewSource
+packages/webmcp/src/staging.ts stateDigest
+packages/webmcp/src/results.ts approvalStale
+packages/webmcp/src/approval.ts stateVersion
+packages/webmcp/src/plan.ts stateVersion
 packages/webmcp/src/receipts.ts grantId
 -->
