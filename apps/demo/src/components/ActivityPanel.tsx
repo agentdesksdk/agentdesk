@@ -8,6 +8,7 @@ import type {
   VerificationResult,
 } from "@agentdesk/webmcp";
 import { useAnnouncer } from "./announcer.ts";
+import { receiptAuthorityText } from "./grant-text.ts";
 import { render } from "./ApprovalCards.tsx";
 import { useRuntime } from "./hooks.ts";
 import {
@@ -447,6 +448,9 @@ export function ActivityPanel() {
                     <div className="receipt-head">
                       Receipt · {row.receipt.entity}
                     </div>
+                    {entry?.grantId !== undefined ? (
+                      <div className="receipt-grant">{receiptAuthorityText(entry)}</div>
+                    ) : null}
                     {row.receipt.changes.map((change) => (
                       <div key={change.field} className="change-row">
                         <span className="field">{change.field}</span>

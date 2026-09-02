@@ -2,6 +2,7 @@ import { getState } from "../data/store.ts";
 import { agentdesk, OPERATOR } from "../runtime/agentdesk.ts";
 import { money } from "../capabilities/helpers.ts";
 import { projectedConflicts } from "../capabilities/staged.ts";
+import { consideredGrantFor, consideredGrantText } from "./grant-text.ts";
 import { useDemoStore, useRuntime } from "./hooks.ts";
 import type { PendingAction } from "@agentdesk/webmcp";
 
@@ -50,7 +51,16 @@ export function ApprovalCards() {
   }
   return (
     <div className="approval-overlay">
-      {snapshot.pending.map((action) => (
+      {snapshot.pending.map((action) => {
+        // A grant that did not apply fell through to this card. Naming it
+        // tells the person what the mandate stopped at, not just that one
+        // exists.
+        const considered = consideredGrantFor(action.id, action.capability, snapshot.audit);
+        const grant =
+          considered === undefined
+            ? undefined
+            : snapshot.grants.find((g) => g.id === considered.grantId);
+        return (
         <div key={action.id} className="approval-card" role="alertdialog">
           <header>
             <span className="title">Approval required</span>
@@ -63,6 +73,14 @@ export function ApprovalCards() {
             {detailRows(action).map(([label, value]) => (
               <FragmentRow key={label + value} label={label} value={value} />
             ))}
+            {considered !== undefined ? (
+              <>
+                <dt>Grant</dt>
+                <dd className="considered-grant">
+                  {consideredGrantText(considered, grant)}
+                </dd>
+              </>
+            ) : null}
             <dt>Approval id</dt>
             <dd>{action.id}</dd>
           </dl>
@@ -101,7 +119,8 @@ export function ApprovalCards() {
             </button>
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
