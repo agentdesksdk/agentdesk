@@ -17,6 +17,7 @@ import {
   type RiskLevel,
 } from "./capability.ts";
 import { CapabilityCatalog } from "./catalog.ts";
+import type { CatalogDomain } from "./hierarchy.ts";
 import {
   decidePolicy,
   riskBasedPolicy,
@@ -186,6 +187,10 @@ export type PresentationRequest = {
 
 export type RoutingReport = {
   query: string;
+  /** The domain or `domain/subdomain` the call narrowed to, when it did. */
+  domain?: string;
+  /** The catalog tree a first-level call returned, for an inspector to show. */
+  domains?: CatalogDomain[];
   matches: RoutedMatch[];
   activated: string[];
   at: number;
