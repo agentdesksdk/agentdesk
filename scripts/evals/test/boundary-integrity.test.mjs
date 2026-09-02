@@ -11,6 +11,7 @@ import { parseTask } from "../schema.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const evals = join(here, "..");
+const repoRoot = resolve(evals, "..", "..");
 const jsonl = (path) =>
   readFileSync(path, "utf8").split("\n").map((l) => l.trim()).filter(Boolean).map((l) => JSON.parse(l));
 

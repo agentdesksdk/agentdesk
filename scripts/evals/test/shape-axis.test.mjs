@@ -110,7 +110,8 @@ test("the report carries four cells per metric, each naming its arm and its shap
   }
   const header = renderMarkdown(report).split("\n").find((line) => line.startsWith("| Metric |"));
   assert.ok(header, "the table has a header row");
-  assert.equal(header.split("|").length - 3, 4, "one column per cell");
+  // The split yields an empty edge on each side plus Metric and Provenance.
+  assert.equal(header.split("|").length - 4, 4, "one column per cell");
   for (const shape of SHAPES) {
     assert.equal((header.match(new RegExp(shape, "g")) ?? []).length, 2, `${shape} is named on both arms' columns`);
   }

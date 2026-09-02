@@ -183,7 +183,11 @@ test("the report discloses how much of the task set a transcript covered", () =>
 
   const report = buildReport({
     runId: "p", at: "now", taskSetPath: "t", taskCount: 2,
-    arms: { agentdesk: { label: "AgentDesk", exposure: "routed", metrics } },
+    cells: {
+      "agentdesk.structured": {
+        arm: "agentdesk", exposure: "routed", shape: "structured", label: "AgentDesk (routed, structured)", metrics,
+      },
+    },
   });
   assert.match(
     renderMarkdown(report),
