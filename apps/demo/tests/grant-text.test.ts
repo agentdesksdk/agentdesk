@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { AuditEvent, Grant, HumanActor, StoredReceipt } from "@agentdesk/webmcp";
+import type { Grant, HumanActor, StoredReceipt } from "@agentdesk/webmcp";
 import {
   authorityLine,
-  consideredGrantFor,
   consideredGrantText,
   grantOrderId,
   grantStateText,
@@ -72,55 +71,37 @@ describe("grant words", () => {
   });
 
   it("says what a considered grant stopped at, reading a bound off the grant when the audit lacks it", () => {
-    expect(outcomeWords({ grantId: "GRT-1", outcome: "exhausted" }, grant({ state: "exhausted" } as Partial<Grant>))).toBe(
+    expect(outcomeWords({ id: "GRT-1", outcome: "exhausted" }, grant({ state: "exhausted" } as Partial<Grant>))).toBe(
       "is exhausted, all 3 uses spent",
     );
-    expect(outcomeWords({ grantId: "GRT-1", outcome: "expired" })).toBe("expired before this call");
+    expect(outcomeWords({ id: "GRT-1", outcome: "expired" })).toBe("expired before this call");
     expect(
       outcomeWords(
-        { grantId: "GRT-1", outcome: "revoked" },
+        { id: "GRT-1", outcome: "revoked" },
         grant({ state: "revoked", revokedBy: OPERATOR } as Partial<Grant>),
       ),
     ).toBe("was revoked by Operator");
-    expect(outcomeWords({ grantId: "GRT-1", outcome: "missing_field", field: "order_id" })).toBe(
+    expect(outcomeWords({ id: "GRT-1", outcome: "missing_field", field: "order_id" })).toBe(
       "needs order id on the call, and this call did not carry it",
     );
-    expect(outcomeWords({ grantId: "GRT-1", outcome: "out_of_scope", field: "order_id" }, grant())).toBe(
+    expect(outcomeWords({ id: "GRT-1", outcome: "out_of_scope", field: "order_id" }, grant())).toBe(
       "covers order 10428, not this order id",
     );
     const bounded = grant({
       scope: [{ field: "amount", kind: "bound", min: 5, max: 25 }],
     } as unknown as Partial<Grant>);
-    expect(outcomeWords({ grantId: "GRT-1", outcome: "over_bound", field: "amount", max: 25 })).toBe(
+    expect(outcomeWords({ id: "GRT-1", outcome: "over_bound", field: "amount", max: 25 })).toBe(
       "allows amount up to 25, and this call asked for more",
     );
-    expect(outcomeWords({ grantId: "GRT-1", outcome: "over_bound", field: "amount" }, bounded)).toBe(
+    expect(outcomeWords({ id: "GRT-1", outcome: "over_bound", field: "amount" }, bounded)).toBe(
       "allows amount up to 25, and this call asked for more",
     );
-    expect(outcomeWords({ grantId: "GRT-1", outcome: "under_bound", field: "amount" }, bounded)).toBe(
+    expect(outcomeWords({ id: "GRT-1", outcome: "under_bound", field: "amount" }, bounded)).toBe(
       "allows amount down to 5, and this call asked for less",
     );
-    expect(consideredGrantText({ grantId: "GRT-1", outcome: "exhausted" }, grant({ state: "exhausted" } as Partial<Grant>))).toBe(
+    expect(consideredGrantText({ id: "GRT-1", outcome: "exhausted" }, grant({ state: "exhausted" } as Partial<Grant>))).toBe(
       "Grant GRT-1 was considered and did not apply: it is exhausted, all 3 uses spent. A person decides.",
     );
-  });
-
-  it("pairs a pending approval with the grant_not_applied the runtime wrote for that call, and no other", () => {
-    const at = 1;
-    const audit: AuditEvent[] = [
-      { kind: "capability_invoked", capability: "refund_shipping", risk: "CONSEQUENTIAL", via: "native", at },
-      { kind: "grant_not_applied", grantId: "GRT-1", capability: "refund_shipping", outcome: "exhausted", at },
-      { kind: "approval_requested", capability: "refund_shipping", actionId: "APR-1", risk: "CONSEQUENTIAL", summary: "s", at },
-      { kind: "capability_invoked", capability: "cancel_order", risk: "CONSEQUENTIAL", via: "native", at },
-      { kind: "approval_requested", capability: "cancel_order", actionId: "APR-2", risk: "CONSEQUENTIAL", summary: "s", at },
-      { kind: "capability_invoked", capability: "refund_shipping", risk: "CONSEQUENTIAL", via: "native", at },
-      { kind: "approval_requested", capability: "refund_shipping", actionId: "APR-3", risk: "CONSEQUENTIAL", summary: "s", at },
-    ] as AuditEvent[];
-    expect(consideredGrantFor("APR-1", "refund_shipping", audit)?.grantId).toBe("GRT-1");
-    // A call that consulted no grant borrows nothing from an earlier one.
-    expect(consideredGrantFor("APR-2", "cancel_order", audit)).toBeUndefined();
-    expect(consideredGrantFor("APR-3", "refund_shipping", audit)).toBeUndefined();
-    expect(consideredGrantFor("APR-9", "refund_shipping", audit)).toBeUndefined();
   });
 
   it("a receipt names the grant that authorized it, and says nothing when a person approved", () => {
