@@ -939,11 +939,29 @@ export function createAgentDeskRuntime<S = unknown>(options: {
 
   const WITHHELD = "[withheld]";
 
+  /**
+   * Below this length a hidden value is protected structurally and by
+   * whole value, not inside free text. A shorter value is too common a
+   * substring: a hidden "US" would tear STATUS and "USB-C Dock", a hidden
+   * "ok" would mangle "token". An author who needs a short value protected
+   * inside sentences must not write it into sentences.
+   */
+  const IN_TEXT_MIN_LENGTH = 8;
+
+  /**
+   * Two tiers. Every hidden string is withheld by whole-value equality, at
+   * any depth under any key, which keeps the re-label case closed for a
+   * value of any length. Inside free text only a hidden string of at least
+   * `IN_TEXT_MIN_LENGTH` characters is matched, longest first.
+   */
   function withhold(value: unknown, hidden: readonly string[]): unknown {
     if (typeof value === "string") {
+      if (hidden.includes(value)) {
+        return WITHHELD;
+      }
       let text = value;
       for (const secret of hidden) {
-        if (text.includes(secret)) {
+        if (secret.length >= IN_TEXT_MIN_LENGTH && text.includes(secret)) {
           text = text.split(secret).join(WITHHELD);
         }
       }
