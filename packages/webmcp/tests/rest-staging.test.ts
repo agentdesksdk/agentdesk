@@ -180,6 +180,14 @@ function makeAdapter(server = fakeRest(), options: { batch?: boolean } = {}) {
   return { adapter, server };
 }
 
+const stagedCapability = (name: string, operation: string): Capability =>
+  defineCapability({
+    name,
+    description: `Stages ${operation} for approval.`,
+    risk: "CONSEQUENTIAL",
+    staging: { operation },
+  });
+
 const directCapability = (name: string, operation: string): Capability =>
   defineCapability({
     name,
@@ -195,8 +203,7 @@ describe("the REST staging adapter records a version for every row it stages", (
   it("fork records each row's version from its ETag, fetched with the declared headers", async () => {
     const { adapter, server } = makeAdapter();
 
-    await adapter.prepare("cancel", { id: "O-1" });
-    const { staged } = adapter.fork("cancel", { id: "O-1" });
+        const { staged } = await adapter.fork("cancel", { id: "O-1" });
 
     expect(staged.base).toEqual([
       { resource: "orders", id: "O-1", version: '"v3"', row: { id: "O-1", status: "processing", total: 40 } },
@@ -210,8 +217,7 @@ describe("the REST staging adapter records a version for every row it stages", (
   it("fork records a version from the field a resource declares", async () => {
     const { adapter } = makeAdapter();
 
-    await adapter.prepare("suspend_customer", {});
-    const { staged } = adapter.fork("suspend_customer", {});
+        const { staged } = await adapter.fork("suspend_customer", {});
 
     expect(staged.base).toEqual([
       { resource: "customers", id: "C-1", version: "1", row: { id: "C-1", status: "active", version: 1 } },
@@ -221,15 +227,13 @@ describe("the REST staging adapter records a version for every row it stages", (
   it("refuses to stage a resource that offers neither an ETag nor a version field", async () => {
     const { adapter } = makeAdapter(fakeRest({ etags: false }));
 
-    await expect(adapter.prepare("cancel", { id: "O-1" })).rejects.toThrow(/ETag|version/);
-    expect(() => adapter.fork("cancel", { id: "O-1" })).toThrow(/prepare/);
+    await expect(adapter.fork("cancel", { id: "O-1" })).rejects.toThrow(/ETag|version/);
   });
 
   it("diff reports exactly the changed fields", async () => {
     const { adapter } = makeAdapter();
-    await adapter.prepare("cancel", { id: "O-1" });
-
-    const { staged } = adapter.fork("cancel", { id: "O-1" });
+    
+    const { staged } = await adapter.fork("cancel", { id: "O-1" });
 
     expect(adapter.diff(staged)).toEqual([
       { field: "orders:O-1.status", before: "processing", after: "cancelled" },
@@ -240,8 +244,7 @@ describe("the REST staging adapter records a version for every row it stages", (
 describe("the REST staging adapter commits under If-Match", () => {
   it("sends every write with If-Match on the recorded version and completes when all are acknowledged", async () => {
     const { adapter, server } = makeAdapter();
-    await adapter.prepare("cancel_pair", {});
-    const { staged } = adapter.fork("cancel_pair", {});
+        const { staged } = await adapter.fork("cancel_pair", {});
 
     await adapter.commit(staged, () => adapter.fork("cancel_pair", {}));
 
@@ -259,8 +262,7 @@ describe("the REST staging adapter commits under If-Match", () => {
 
   it("quotes a field version as the entity tag it sends", async () => {
     const { adapter, server } = makeAdapter();
-    await adapter.prepare("suspend_customer", {});
-    const { staged } = adapter.fork("suspend_customer", {});
+        const { staged } = await adapter.fork("suspend_customer", {});
 
     await adapter.commit(staged, () => adapter.fork("suspend_customer", {}));
 
@@ -271,8 +273,7 @@ describe("the REST staging adapter commits under If-Match", () => {
 
   it("a 412 on the first write refuses APPROVAL_STALE with nothing written and no retry", async () => {
     const { adapter, server } = makeAdapter();
-    await adapter.prepare("cancel_pair", {});
-    const { staged } = adapter.fork("cancel_pair", {});
+        const { staged } = await adapter.fork("cancel_pair", {});
     server.move("/orders/O-1");
 
     let refusal: unknown;
@@ -292,8 +293,7 @@ describe("the REST staging adapter commits under If-Match", () => {
 
   it("a 412 on the second write after the first was acknowledged is indeterminate, naming the acknowledged rows", async () => {
     const { adapter, server } = makeAdapter();
-    await adapter.prepare("cancel_pair", {});
-    const { staged } = adapter.fork("cancel_pair", {});
+        const { staged } = await adapter.fork("cancel_pair", {});
     server.move("/orders/O-2");
 
     let outcome: unknown;
@@ -319,8 +319,7 @@ describe("the REST staging adapter commits under If-Match", () => {
 
   it("a network failure after the first write was sent is indeterminate, with the row in flight named as unknown", async () => {
     const { adapter, server } = makeAdapter();
-    await adapter.prepare("cancel_pair", {});
-    const { staged } = adapter.fork("cancel_pair", {});
+        const { staged } = await adapter.fork("cancel_pair", {});
     server.failPut(2);
 
     let outcome: unknown;
@@ -341,8 +340,7 @@ describe("the REST staging adapter commits under If-Match", () => {
 
   it("a network failure on the first write is indeterminate too, because an error does not prove the write did not land", async () => {
     const { adapter, server } = makeAdapter();
-    await adapter.prepare("cancel", { id: "O-1" });
-    const { staged } = adapter.fork("cancel", { id: "O-1" });
+        const { staged } = await adapter.fork("cancel", { id: "O-1" });
     server.failPut(1);
 
     let outcome: unknown;
@@ -360,8 +358,7 @@ describe("the REST staging adapter commits under If-Match", () => {
 
   it("release drops the fork, and a commit after release refuses", async () => {
     const { adapter, server } = makeAdapter();
-    await adapter.prepare("cancel", { id: "O-1" });
-    const { staged } = adapter.fork("cancel", { id: "O-1" });
+        const { staged } = await adapter.fork("cancel", { id: "O-1" });
 
     adapter.release(staged);
 
@@ -373,8 +370,7 @@ describe("the REST staging adapter commits under If-Match", () => {
 
   it("uses one batched request where the backend offers one, and a 412 there refuses with nothing written", async () => {
     const { adapter, server } = makeAdapter(fakeRest({ batch: true }), { batch: true });
-    await adapter.prepare("cancel_pair", {});
-    const { staged } = adapter.fork("cancel_pair", {});
+        const { staged } = await adapter.fork("cancel_pair", {});
 
     await adapter.commit(staged, () => adapter.fork("cancel_pair", {}));
 
@@ -389,8 +385,7 @@ describe("the REST staging adapter commits under If-Match", () => {
     expect(server.puts()).toBe(0);
     expect(server.row("/orders/O-2")).toEqual({ id: "O-2", status: "cancelled", total: 15 });
 
-    await adapter.prepare("flag", { id: "O-1" });
-    const again = adapter.fork("flag", { id: "O-1" });
+        const again = await adapter.fork("flag", { id: "O-1" });
     server.move("/orders/O-1");
     let refusal: unknown;
     try {
@@ -404,13 +399,11 @@ describe("the REST staging adapter commits under If-Match", () => {
 
   it("a fork staged inside a scope after another commits under the version that commit was given", async () => {
     const { adapter, server } = makeAdapter();
-    await adapter.prepare("cancel", { id: "O-1" });
-    await adapter.prepare("flag", { id: "O-1" });
-
-    const [first, second] = adapter.scope(() => [
-      adapter.fork("cancel", { id: "O-1" }),
-      adapter.fork("flag", { id: "O-1" }),
-    ]);
+    const [first, second] = await adapter.scope(async () => {
+      const cancelled = await adapter.fork("cancel", { id: "O-1" });
+      const flagged = await adapter.fork("flag", { id: "O-1" });
+      return [cancelled, flagged];
+    });
 
     expect(adapter.diff(second.staged)).toEqual([{ field: "orders:O-1.flagged", before: null, after: true }]);
     expect(second.staged.base[0]).toMatchObject({ follows: first.staged.id });
@@ -425,20 +418,115 @@ describe("the REST staging adapter commits under If-Match", () => {
   });
 });
 
-describe("an interrupted REST commit is re-identifiable after a reload", () => {
-  it("records the partial outcome with the acknowledged rows, and resolveArtifact rebuilds the fork by id", async () => {
-    const { adapter, server } = makeAdapter();
+describe("the runtime drives the REST adapter with nothing but invoke and approve", () => {
+  const runtimeOver = async (adapter: RestStagingAdapter, capabilities: Capability[]) => {
     const runtime = createAgentDeskRuntime({
-      capabilities: [directCapability("cancel_pair_thing", "cancel_pair")],
+      capabilities,
       registerTool: async () => {},
       actor: AGENT,
       staging: adapter,
     });
     await runtime.start();
-    await adapter.prepare("cancel_pair", {});
+    return runtime;
+  };
+
+  it("forks over the network, previews, and commits the approved change under If-Match", async () => {
+    const { adapter, server } = makeAdapter();
+    const runtime = await runtimeOver(adapter, [stagedCapability("cancel_thing", "cancel")]);
+
+    const asked = await runtime.invoke("cancel_thing", { id: "O-1" });
+
+    expect(asked.code).toBe("APPROVAL_REQUIRED");
+    expect(asked.data?.approvalEvidence).toBe("derived");
+    expect(asked.data?.will_change).toEqual([
+      { field: "orders:O-1.status", before: "processing", after: "cancelled" },
+    ]);
+    expect(server.requests.map((request) => request.method)).toEqual(["GET"]);
+
+    const approved = await runtime.approve(runtime.getSnapshot().pending[0]!.id, HUMAN);
+
+    expect(approved.isError).toBeFalsy();
+    expect(ifMatch(server.requests)).toEqual([["/orders/O-1", '"v3"']]);
+    expect(server.row("/orders/O-1")).toEqual({ id: "O-1", status: "cancelled", total: 40 });
+  });
+
+  it("lands a direct staged write in one call", async () => {
+    const { adapter, server } = makeAdapter();
+    const runtime = await runtimeOver(adapter, [directCapability("cancel_now", "cancel")]);
+
+    const result = await runtime.invoke("cancel_now", { id: "O-2" });
+
+    expect(result.isError).toBeFalsy();
+    expect(server.requests.map((request) => [request.method, request.path])).toEqual([
+      ["GET", "/orders/O-2"],
+      ["PUT", "/orders/O-2"],
+    ]);
+    expect(server.row("/orders/O-2")).toEqual({ id: "O-2", status: "cancelled", total: 15 });
+  });
+
+  it("derives a plan's second operation against the first's staged head, and commits both in order", async () => {
+    const { adapter, server } = makeAdapter();
+    const runtime = await runtimeOver(adapter, [
+      stagedCapability("cancel_thing", "cancel"),
+      stagedCapability("flag_thing", "flag"),
+    ]);
+
+    const plan = await runtime.prepare({
+      operations: [
+        { capability: "cancel_thing", input: { id: "O-1" } },
+        { capability: "flag_thing", input: { id: "O-1" } },
+      ],
+    });
+
+    expect(plan.operations[0]?.preview).toEqual([
+      { field: "orders:O-1.status", before: "processing", after: "cancelled" },
+    ]);
+    expect(plan.operations[1]?.preview).toEqual([
+      { field: "orders:O-1.flagged", before: null, after: true },
+    ]);
+    runtime.approvePlan(plan.id, HUMAN);
+    const committed = await runtime.commitPlan(plan.id);
+    expect(committed.ok).toBe(true);
+    expect(ifMatch(server.requests)).toEqual([
+      ["/orders/O-1", '"v3"'],
+      ["/orders/O-1", '"v4"'],
+    ]);
+    expect(server.row("/orders/O-1")).toEqual({ id: "O-1", status: "cancelled", total: 40, flagged: true });
+  });
+
+  it("replays a repeat under the same idempotency key while the fork is still in flight, forking once", async () => {
+    const { adapter, server } = makeAdapter();
+    const runtime = await runtimeOver(adapter, [directCapability("cancel_now", "cancel")]);
+    const call = () =>
+      runtime.invoke("invoke_capability", {
+        name: "cancel_now",
+        input: { id: "O-1" },
+        idempotency_key: "once",
+      });
+
+    const [first, second] = await Promise.all([call(), call()]);
+
+    expect(first.isError).toBeFalsy();
+    expect(second).toEqual(first);
+    expect(server.requests.map((request) => request.method)).toEqual(["GET", "PUT"]);
+    expect(server.version("/orders/O-1")).toBe(4);
+  });
+});
+
+describe("an interrupted REST commit is re-identifiable after a reload", () => {
+  it("records the partial outcome with the acknowledged rows, and resolveArtifact rebuilds the fork by id", async () => {
+    const { adapter, server } = makeAdapter();
+    const runtime = createAgentDeskRuntime({
+      capabilities: [stagedCapability("cancel_pair_thing", "cancel_pair")],
+      registerTool: async () => {},
+      actor: AGENT,
+      staging: adapter,
+    });
+    await runtime.start();
+    await runtime.invoke("cancel_pair_thing", {});
     server.move("/orders/O-2");
 
-    const result = await runtime.invoke("cancel_pair_thing", {});
+    const result = await runtime.approve(runtime.getSnapshot().pending[0]!.id, HUMAN);
 
     expect(result.code).toBe("EXECUTION_INDETERMINATE");
     const [record] = runtime.listUnreconciled();

@@ -109,6 +109,7 @@ import {
 } from "./results.ts";
 import {
   buildStageHandler,
+  isThenable,
   parseResolution,
   StagedCommitIndeterminate,
   StagedProposalStore,
@@ -1716,7 +1717,8 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       if (claim.kind === "replay") {
         return await claim.result;
       }
-      const asked = queueApproval(capability, input, signal, invocationActor, considered);
+      const queued = queueApproval(capability, input, signal, invocationActor, considered);
+      const asked = isThenable(queued) ? await (queued as Promise<ToolResult>) : (queued as ToolResult);
       if (claim.kind === "won") {
         claim.settle(asked);
         const actionId = asked.code === "APPROVAL_REQUIRED" ? asked.data?.approval_id : undefined;
@@ -1747,7 +1749,10 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     // A staged capability has no runnable handler. On the unapproved path
     // it stages and lands in one step, so the same artifact still produces
     // both the change and the record of it.
-    const direct = stageFor(capability, input, signal);
+    const forked = stageFor(capability, input, signal);
+    const direct = isThenable(forked)
+      ? await (forked as Promise<StageOutcome>)
+      : (forked as StageOutcome);
     if (!direct.ok) {
       audit.append({
         kind: "capability_unavailable",
@@ -1782,8 +1787,9 @@ export function createAgentDeskRuntime<S = unknown>(options: {
             ? consulted.grant
             : { id: authorizing.id, outcome: "revoked" };
         audit.append(notApplied(capability.name, late));
+        const queued = queueApproval(capability, input, signal, invocationActor, late);
         return settle(
-          queueApproval(capability, input, signal, invocationActor, late),
+          isThenable(queued) ? await (queued as Promise<ToolResult>) : (queued as ToolResult),
         );
       }
       audit.append({
@@ -1821,118 +1827,129 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     signal: AbortSignal | undefined,
     invocationActor: Actor | undefined,
     considered: ConsideredGrant | undefined,
-  ): ToolResult {
+  ): ToolResult | Promise<ToolResult> {
     const summary =
       capability.describeApproval?.(input, context) ??
       capability.title ??
       capability.name;
-    const staged = stageFor(capability, input, signal);
-    if (!staged.ok) {
-      audit.append({
-        kind: "capability_unavailable",
-        capability: capability.name,
-        reasonCode: "PREVIEW_UNAVAILABLE",
-        at: now(),
-      });
-      emit();
-      return previewUnavailable(
-        capability.name,
-        agentText(staged.error),
-        refusal(capability),
-      );
-    }
-    const preview = staged.proposal
-      ? { ok: true as const, changes: [...staged.proposal.changes] }
-      : safePreview(capability, input, context);
-    if (!preview.ok && capability.risk === "CONSEQUENTIAL") {
-      staged.proposal?.discard();
-      audit.append({
-        kind: "capability_unavailable",
-        capability: capability.name,
-        reasonCode: "PREVIEW_UNAVAILABLE",
-        at: now(),
-      });
-      emit();
-      return previewUnavailable(
-        capability.name,
-        agentText(preview.error),
-        refusal(capability),
-      );
-    }
-    // The agent's copy of the preview is projected before anything is
-    // queued, so a failed view queues nothing and shows nothing. The person
-    // approving still sees the whole preview on the pending action.
-    let shown: Change[];
-    try {
-      shown = changesThroughView(preview.changes, capability, invocationActor);
-    } catch (err) {
-      if (err instanceof AgentViewFailed) {
-        staged.proposal?.discard();
-        return viewFailed(capability, capability.name, false);
+    // The idempotency slot was claimed before this, so a repeat under the
+    // same key while the fork is in flight joins this request's result
+    // rather than forking again. A fork that answers now is recorded now,
+    // with no tick in between, so a synchronous adapter's timing is what it
+    // always was.
+    const forked = stageFor(capability, input, signal);
+    return isThenable(forked)
+      ? (forked as Promise<StageOutcome>).then(finish)
+      : finish(forked as StageOutcome);
+
+    function finish(staged: StageOutcome): ToolResult {
+      if (!staged.ok) {
+        audit.append({
+          kind: "capability_unavailable",
+          capability: capability.name,
+          reasonCode: "PREVIEW_UNAVAILABLE",
+          at: now(),
+        });
+        emit();
+        return previewUnavailable(
+          capability.name,
+          agentText(staged.error),
+          refusal(capability),
+        );
       }
-      throw err;
-    }
-    // The digest is computed here, by the runtime, from the preview the
-    // adapter or the author just derived, and only where there was a preview
-    // to derive it from. A summary-only approval has no state to bind to.
-    const stateVersion = hasPreviewSource(capability, staged.proposal)
-      ? stateDigest(preview.changes)
-      : undefined;
-    let action;
-    try {
-      action = approvals.request(
+      const preview = staged.proposal
+        ? { ok: true as const, changes: [...staged.proposal.changes] }
+        : safePreview(capability, input, context);
+      if (!preview.ok && capability.risk === "CONSEQUENTIAL") {
+        staged.proposal?.discard();
+        audit.append({
+          kind: "capability_unavailable",
+          capability: capability.name,
+          reasonCode: "PREVIEW_UNAVAILABLE",
+          at: now(),
+        });
+        emit();
+        return previewUnavailable(
+          capability.name,
+          agentText(preview.error),
+          refusal(capability),
+        );
+      }
+      // The agent's copy of the preview is projected before anything is
+      // queued, so a failed view queues nothing and shows nothing. The person
+      // approving still sees the whole preview on the pending action.
+      let shown: Change[];
+      try {
+        shown = changesThroughView(preview.changes, capability, invocationActor);
+      } catch (err) {
+        if (err instanceof AgentViewFailed) {
+          staged.proposal?.discard();
+          return viewFailed(capability, capability.name, false);
+        }
+        throw err;
+      }
+      // The digest is computed here, by the runtime, from the preview the
+      // adapter or the author just derived, and only where there was a preview
+      // to derive it from. A summary-only approval has no state to bind to.
+      const stateVersion = hasPreviewSource(capability, staged.proposal)
+        ? stateDigest(preview.changes)
+        : undefined;
+      let action;
+      try {
+        action = approvals.request(
+          capability.name,
+          input,
+          capability.risk,
+          summary,
+          preview.changes,
+          now(),
+          stateVersion,
+          considered,
+        );
+      } catch (err) {
+        // Nothing owns the proposal yet, so a failure to record the pending
+        // action would otherwise strand the fork with no way to reach it.
+        staged.proposal?.discard();
+        throw err;
+      }
+      // The window this approval answers for opens here. An identical pending
+      // request keeps its original window rather than moving it later.
+      if (!requestedAtTick.has(action.id)) {
+        requestedAtTick.set(action.id, untrustedTick);
+      }
+      if (staged.proposal) {
+        // An identical pending request returns the action that already
+        // exists, whose preview came from the proposal held for it.
+        // Replacing that artifact would let a human approve one diff and
+        // land another, so the newer staging is thrown away instead.
+        if (proposals.has(action.id)) {
+          staged.proposal.discard();
+        } else {
+          proposals.put(action.id, staged.proposal);
+        }
+      }
+      audit.append({
+        kind: "approval_requested",
+        capability: capability.name,
+        actionId: action.id,
+        risk: capability.risk,
+        summary,
+        at: now(),
+      });
+      present(capability, "approval_requested", input, invocationActor);
+      emit();
+      return approvalRequired(
         capability.name,
-        input,
+        action.id,
         capability.risk,
         summary,
-        preview.changes,
-        now(),
-        stateVersion,
+        shown,
+        capability.approvalEvidence,
+        settled(capability, [{ kind: "approval", id: action.id }]),
         considered,
+        action.stateVersion,
       );
-    } catch (err) {
-      // Nothing owns the proposal yet, so a failure to record the pending
-      // action would otherwise strand the fork with no way to reach it.
-      staged.proposal?.discard();
-      throw err;
     }
-    // The window this approval answers for opens here. An identical pending
-    // request keeps its original window rather than moving it later.
-    if (!requestedAtTick.has(action.id)) {
-      requestedAtTick.set(action.id, untrustedTick);
-    }
-    if (staged.proposal) {
-      // An identical pending request returns the action that already
-      // exists, whose preview came from the proposal held for it.
-      // Replacing that artifact would let a human approve one diff and
-      // land another, so the newer staging is thrown away instead.
-      if (proposals.has(action.id)) {
-        staged.proposal.discard();
-      } else {
-        proposals.put(action.id, staged.proposal);
-      }
-    }
-    audit.append({
-      kind: "approval_requested",
-      capability: capability.name,
-      actionId: action.id,
-      risk: capability.risk,
-      summary,
-      at: now(),
-    });
-    present(capability, "approval_requested", input, invocationActor);
-    emit();
-    return approvalRequired(
-      capability.name,
-      action.id,
-      capability.risk,
-      summary,
-      shown,
-      capability.approvalEvidence,
-      settled(capability, [{ kind: "approval", id: action.id }]),
-      considered,
-      action.stateVersion,
-    );
   }
 
   /** Whether a preview was derived at all, so a digest means something. */
@@ -1954,17 +1971,24 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   function currentDigest(
     capability: Capability,
     input: Record<string, unknown>,
-  ): string | undefined {
+  ): string | undefined | Promise<string | undefined> {
     if (capability.stagedOperation !== undefined) {
+      const digestOfProbe = (probe: StageOutcome): string | undefined => {
+        if (!probe.ok || probe.proposal === undefined) {
+          return undefined;
+        }
+        try {
+          return stateDigest(probe.proposal.changes);
+        } finally {
+          probe.proposal.discard();
+        }
+      };
       const probe = stageFor(capability, input);
-      if (!probe.ok || probe.proposal === undefined) {
-        return undefined;
-      }
-      try {
-        return stateDigest(probe.proposal.changes);
-      } finally {
-        probe.proposal.discard();
-      }
+      // A probe over a store that reads later answers later; the caller
+      // awaits it, and a sync adapter's caller still gets a value now.
+      return isThenable(probe)
+        ? (probe as Promise<StageOutcome>).then(digestOfProbe)
+        : digestOfProbe(probe as StageOutcome);
     }
     const preview = safePreview(capability, input, context);
     return preview.ok ? stateDigest(preview.changes) : undefined;
@@ -1986,13 +2010,15 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     return `${capability}:${fingerprintInput(input)}`;
   }
 
+  type StageOutcome =
+    | { ok: true; proposal?: StagedProposal }
+    | { ok: false; error: string };
+
   function stageFor(
     capability: Capability,
     input: Record<string, unknown>,
     signal?: AbortSignal,
-  ):
-    | { ok: true; proposal?: StagedProposal }
-    | { ok: false; error: string } {
+  ): StageOutcome | Promise<StageOutcome> {
     if (!capability.stagedOperation) {
       return { ok: true };
     }
@@ -2031,14 +2057,23 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       },
     );
     const linked = linkSignals(signal, epochController.signal);
+    const failed = (err: unknown): StageOutcome => ({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
     try {
       const proposal = stage(input);
-      return { ok: true, proposal };
+      // A store that reads before it can stage answers later; the outcome
+      // is the same shape either way, so callers await only when they must.
+      if (isThenable(proposal)) {
+        return (proposal as Promise<StagedProposal>).then(
+          (ready): StageOutcome => ({ ok: true, proposal: ready }),
+          failed,
+        );
+      }
+      return { ok: true, proposal: proposal as StagedProposal };
     } catch (err) {
-      return {
-        ok: false,
-        error: err instanceof Error ? err.message : String(err),
-      };
+      return failed(err);
     } finally {
       linked.dispose();
     }
@@ -2751,7 +2786,10 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       // operations have landed by now, so the probe forks from the state
       // this one was reviewed against; only a move nobody reviewed differs.
       if (operation.stateVersion !== undefined) {
-        const observed = currentDigest(routed, operation.input);
+        const probed = currentDigest(routed, operation.input);
+        const observed = isThenable(probed)
+          ? await (probed as Promise<string | undefined>)
+          : (probed as string | undefined);
         if (observed !== operation.stateVersion) {
           proposals.discard(StagedProposalStore.planKey(planId, index));
           return blocked(
@@ -3130,7 +3168,10 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     // nothing runs and the artifact is released. The check is the same
     // one a plan runs per operation.
     if (action.stateVersion !== undefined) {
-      const observed = currentDigest(routed, action.input);
+      const probed = currentDigest(routed, action.input);
+      const observed = isThenable(probed)
+        ? await (probed as Promise<string | undefined>)
+        : (probed as string | undefined);
       if (observed !== action.stateVersion) {
         proposals.discard(actionId);
         const versions = {
@@ -3508,35 +3549,59 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       const scope = options.staging
         ? options.staging.scope
         : <T,>(run: () => T): T => run();
-      try {
-        scope(() => {
-          for (const { routed, input } of routedOperations) {
-            const proposal = stageFor(routed, input);
-            if (!proposal.ok) {
-              throw new Error(
-                `${routed.name} could not stage its change: ${proposal.error}`,
-              );
-            }
-            staged.push(proposal.proposal);
-            const preview = proposal.proposal
-              ? { ok: true as const, changes: [...proposal.proposal.changes] }
-              : safePreview(routed, input, context);
-            if (!preview.ok && routed.risk === "CONSEQUENTIAL") {
-              throw new Error(
-                `${routed.name} declares a change preview and it failed: ${preview.error}`,
-              );
-            }
-            const stateVersion = hasPreviewSource(routed, proposal.proposal)
-              ? stateDigest(preview.changes)
-              : undefined;
-            operations.push({
-              capability: routed.name,
-              input: structuredClone(input),
-              preview: preview.changes,
-              ...(stateVersion !== undefined ? { stateVersion } : {}),
+      const record = (
+        routed: Capability,
+        input: Record<string, unknown>,
+        proposal: StageOutcome,
+      ): void => {
+        if (!proposal.ok) {
+          throw new Error(
+            `${routed.name} could not stage its change: ${proposal.error}`,
+          );
+        }
+        staged.push(proposal.proposal);
+        const preview = proposal.proposal
+          ? { ok: true as const, changes: [...proposal.proposal.changes] }
+          : safePreview(routed, input, context);
+        if (!preview.ok && routed.risk === "CONSEQUENTIAL") {
+          throw new Error(
+            `${routed.name} declares a change preview and it failed: ${preview.error}`,
+          );
+        }
+        const stateVersion = hasPreviewSource(routed, proposal.proposal)
+          ? stateDigest(preview.changes)
+          : undefined;
+        operations.push({
+          capability: routed.name,
+          input: structuredClone(input),
+          preview: preview.changes,
+          ...(stateVersion !== undefined ? { stateVersion } : {}),
+        });
+      };
+      // Stays synchronous while every fork answers synchronously, which is
+      // what an adapter whose scope closes on return needs. The first fork
+      // that answers later turns the rest into a chain the scope is told
+      // to stay open for, and each later operation still derives against
+      // the one before it.
+      const stageFrom = (index: number): void | Promise<void> => {
+        for (let at = index; at < routedOperations.length; at += 1) {
+          const { routed, input } = routedOperations[at]!;
+          const outcome = stageFor(routed, input);
+          if (isThenable(outcome)) {
+            return (outcome as Promise<StageOutcome>).then((ready) => {
+              record(routed, input, ready);
+              return stageFrom(at + 1);
             });
           }
-        });
+          record(routed, input, outcome as StageOutcome);
+        }
+        return undefined;
+      };
+      try {
+        const staging = scope(() => stageFrom(0));
+        if (isThenable(staging)) {
+          await staging;
+        }
       } catch (err) {
         for (const proposal of staged) {
           proposal?.discard();

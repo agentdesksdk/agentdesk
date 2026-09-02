@@ -32,6 +32,7 @@ export {
   StagedCommitRefused,
   StagedProposalError,
   StagedProposalStore,
+  type Forked,
   type StagedProposal,
   type StagedResolution,
   type StagingAdapter,

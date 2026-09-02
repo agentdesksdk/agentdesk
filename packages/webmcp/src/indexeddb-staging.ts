@@ -1,6 +1,6 @@
 import { CapabilityUnavailableError, unavailable, type Change } from "./capability.ts";
 import type { IndexedDbLike, PersistedRecord } from "./persistence.ts";
-import { digestOf, StagedCommitRefused, type StagingAdapter } from "./staging.ts";
+import { digestOf, StagedCommitRefused, type Forked, type StagingAdapter } from "./staging.ts";
 
 /** A row this adapter governs. `version` is the adapter's; an operation never sets it. */
 export type IndexedDbRow = { id: string; version?: number; [field: string]: unknown };
@@ -62,7 +62,13 @@ export type IndexedDbStagingOptions = {
   operations: Record<string, IndexedDbOperation>;
 };
 
-export type IndexedDbStagingAdapter = StagingAdapter<IndexedDbFork> & {
+export type IndexedDbStagingAdapter = Omit<StagingAdapter<IndexedDbFork>, "fork"> & {
+  /** Synchronous: forks derive against the mirror, so nothing is awaited. */
+  fork: (
+    operation: string,
+    input: Record<string, unknown>,
+    previous?: IndexedDbFork,
+  ) => Forked<IndexedDbFork>;
   identify: (fork: IndexedDbFork) => { fork: string; operation: string };
   /** Loads the governed rows and any open forks. Must settle before the first fork. */
   open: () => Promise<void>;

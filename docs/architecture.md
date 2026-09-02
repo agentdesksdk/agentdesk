@@ -1013,16 +1013,30 @@ prevent that.
 Staging is synchronous by contract. A handler that suspends resumes after its
 fork closed, so `defineCapability` refuses an async handler, `runStage`
 refuses a returned promise, and the demo store refuses every later write once
-a staged handler has suspended. Commit is the exception: an adapter's
-`commit` may return a promise, and the runtime awaits it before it records
-the outcome, so a store that answers later answers before anything is
-written down. A rejection is read exactly as a throw is: `StagedCommitRefused`
-or `CapabilityUnavailableError` is a refusal that releases the fork and
-audits no completion; anything else is indeterminate and keeps the record
-and the artifact. `release` may return a promise too, and its rejection is a
-failed cleanup. Fork and diff stay synchronous, because a plan's second
-operation derives against the first's staged head inside one `scope`, and
-the diff is what a person reads at request time.
+a staged handler has suspended. The adapter's hooks are the exception. Its
+`fork` may return a promise, and the runtime awaits it before `diff`, so a
+store that has to read over the network before it can stage can be driven
+by the runtime with nothing but `invoke` and `approve`. Its `commit` may
+return a promise, and the runtime awaits it before it records the outcome,
+so a store that answers later answers before anything is written down. A
+rejection is read exactly as a throw is: `StagedCommitRefused` or
+`CapabilityUnavailableError` is a refusal that releases the fork and audits
+no completion; anything else is indeterminate and keeps the record and the
+artifact. `release` may return a promise too, and its rejection is a failed
+cleanup. `diff` stays synchronous against the fork it was given: it derives
+from the artifact alone, and it is what a person reads at request time.
+
+Every path that stages awaits only when the fork answers later, so a
+synchronous adapter's timing is what it always was. Plan preparation stays
+synchronous inside the adapter's `scope` until the first fork that answers
+later, then turns the rest into a chain the scope is told to stay open for,
+each operation still deriving against the one before it; an adapter whose
+forks answer later keeps its scope open across that promise, and one whose
+forks answer now never sees one. While a fork is in flight the idempotency
+slot is already claimed, so a repeat under the same key joins the first
+request's result and forks once. An identical pending request without a
+key can fork concurrently, and the later staging is discarded when it finds
+the action already holding a proposal, as a synchronous duplicate is.
 
 Forking is the application's job, since only it knows its data layer. The SDK
 owns the artifact's identity and lifecycle and stays out of the store.
@@ -1072,9 +1086,12 @@ the demo. Its decisions, each of which the contract left to it:
   operation as a function precisely so the artifact does not clone and the
   record carries the key rather than a second copy of the rows.
 
-Fork and diff are synchronous and IndexedDB is not. The adapter keeps an
-in-process mirror of the governed rows, loaded once by `open()`, which the
-application awaits before the runtime starts; fork rows and releases go
+The adapter keeps its mirror and its synchronous fork, by decision now
+that fork may answer later: the rows an operation names are discovered by
+running it, and a synchronous fork against a mirror is what lets an
+operation read any row without declaring it. The mirror is an in-process
+copy of the governed rows, loaded once by `open()`, which the application
+awaits before the runtime starts; fork rows and releases go
 through one serialized queue that `flush()` settles, so a fork's row is
 written before the commit that deletes it. The transaction is the
 authority and the mirror follows it: the mirror moves when a commit's
@@ -1095,13 +1112,12 @@ holds the contract against a backend with no transaction and no local
 state, which is the implementation whose asynchrony the contract can now
 express. Its decisions:
 
-- *Staging is two halves*, because fork is synchronous and a REST row
-  needs a round trip. `prepare(operation, input)` fetches the rows the
-  operation names through its `rows(input)` and records each one's
-  version; `fork` then runs the operation against those rows without
-  waiting. A fork without a prepare is refused.
+- *Fork reads over the network.* It fetches the rows the operation names
+  through its `rows(input)`, records each one's version, and runs the
+  operation against them; the runtime awaits it, so a staged capability
+  over REST is driven with nothing but `invoke` and `approve`.
 - *A version* is the `ETag` header, or the field the resource declares.
-  A resource that offers neither is refused at prepare rather than
+  A resource that offers neither is refused at fork rather than
   guessed at, because a write with no `If-Match` is a write the human did
   not review. A field value is sent quoted, as the entity tag `If-Match`
   requires.
@@ -1231,8 +1247,9 @@ than a write outside what the human reviewed.
 Staging is synchronous by contract, because a handler that suspends resumes
 after its fork has closed. `defineCapability` refuses an `AsyncFunction`,
 `runStage` refuses a returned thenable, and a host store can refuse later
-writes once a staged handler has escaped. The adapter's `commit` and
-`release` are the exception and may return promises; `runInvocation`
+writes once a staged handler has escaped. The adapter's `fork`, `commit`,
+and `release` are the exception and may return promises; `stageFor` and
+`currentDigest` await the fork only when it answers later, `runInvocation`
 awaits the commit, and `buildStageHandler` classifies a rejection the way
 it classifies a throw.
 
@@ -1911,7 +1928,9 @@ packages/webmcp/src/staging.ts hydrate identify digestOf
 packages/webmcp/src/indexeddb-staging.ts indexedDbStaging IndexedDbFork IndexedDbDraft STAGING_STORE versionOf open flush resolveArtifact
 packages/webmcp/src/staging.ts StagedCommitRefused buildStageHandler
 packages/webmcp/src/runtime.ts runInvocation
-packages/webmcp/src/rest-staging.ts restStaging RestCommitPartial RestFork RestOperation RestVersionSource prepare acknowledged follows entityTag
+packages/webmcp/src/rest-staging.ts restStaging RestCommitPartial RestFork RestOperation RestVersionSource fetchRows acknowledged follows entityTag
+packages/webmcp/src/staging.ts Forked isThenable
+packages/webmcp/src/runtime.ts stageFor currentDigest queueApproval
 packages/webmcp/src/results.ts after_restart
 packages/webmcp/src/runtime.ts present PresentationRequest REVEAL_TOKEN
 packages/webmcp/src/capability.ts AgentView agentView
