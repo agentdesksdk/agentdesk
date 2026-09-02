@@ -29,6 +29,7 @@ import type {
   Settled,
   Situation,
 } from "./protocol.ts";
+import type { Grant, GrantRequest } from "./grants.ts";
 import { defaultValidator, type Validator } from "./validation.ts";
 import {
   PresentationBus,
@@ -159,6 +160,8 @@ export type RuntimeSnapshot = {
   idempotencyEntries: number;
   actor?: Actor;
   plans: OperationPlan[];
+  /** Every grant issued this session, in every state, detached. */
+  grants: Grant[];
   audit: readonly AuditEvent[];
 };
 
@@ -241,6 +244,25 @@ export type AgentDeskRuntime = {
     receiptId: string,
     by?: Actor,
   ) => { ok: true } | { ok: false; reason: string };
+  /**
+   * A person approves a bounded mandate once. The issuer must be a human
+   * and goes through the same parsing as the ambient actor, so a malformed
+   * or agent identity throws rather than minting authority. Request-shape
+   * problems, an unknown capability, a non-positive use count, or an
+   * expiry already passed, refuse with a reason.
+   */
+  grant: (
+    request: GrantRequest,
+    by?: Actor,
+  ) => { ok: true; grant: Grant } | { ok: false; reason: string };
+  /** Immediate. The next use refuses; an execution already committed is untouched. */
+  revokeGrant: (
+    grantId: string,
+    by?: Actor,
+  ) => { ok: true; grant: Grant } | { ok: false; reason: string };
+  listGrants: () => Grant[];
+  getGrant: (grantId: string) => Grant | undefined;
+
   /**
    * Optional. Reports unsupported rather than pretending every app undoes.
    *
@@ -735,6 +757,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       schemaBytes: surface.schemaBytes(),
       idempotencyEntries: idempotency.size,
       plans: plans.list(),
+      grants: [],
       ...(actor !== undefined ? { actor } : {}),
       audit: audit.list(),
     };
@@ -2666,6 +2689,18 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       });
       emit();
       return { ok: true, receipt: receipts.get(receiptId)! };
+    },
+    grant() {
+      return { ok: false, reason: "grants are not implemented" };
+    },
+    revokeGrant() {
+      return { ok: false, reason: "grants are not implemented" };
+    },
+    listGrants() {
+      return [];
+    },
+    getGrant() {
+      return undefined;
     },
     async invoke(name, input = {}) {
       if (!started) {

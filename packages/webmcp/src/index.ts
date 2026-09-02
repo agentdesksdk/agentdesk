@@ -133,6 +133,17 @@ export {
 } from "./approval.ts";
 export type { AuditEvent, AuditListener } from "./audit.ts";
 export type {
+  Grant,
+  GrantConsultation,
+  GrantId,
+  GrantRefusalCode,
+  GrantRequest,
+  GrantState,
+  LiveGrant,
+  ScopeRule,
+  ScopeValue,
+} from "./grants.ts";
+export type {
   Evidence,
   Refusal,
   RefusalStatus,

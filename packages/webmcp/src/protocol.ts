@@ -54,7 +54,8 @@ export type RefusalStatus =
   | "IDEMPOTENCY_CONFLICT"
   | "IDEMPOTENCY_CAPACITY"
   | "PREVIEW_UNAVAILABLE"
-  | "EXECUTION_CANCELLED";
+  | "EXECUTION_CANCELLED"
+  | "GRANT_REFUSED";
 
 /** The shape on the wire, discriminated by the `status` every payload carries. */
 export type ResultProtocol =

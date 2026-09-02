@@ -11,7 +11,8 @@ export type ToolCode =
   | "IDEMPOTENCY_CAPACITY"
   | "PREVIEW_UNAVAILABLE"
   | "EXECUTION_CANCELLED"
-  | "EXECUTION_INDETERMINATE";
+  | "EXECUTION_INDETERMINATE"
+  | "GRANT_REFUSED";
 
 export type ToolResult = {
   content: Array<{ type: string; text: string }>;

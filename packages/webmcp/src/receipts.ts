@@ -36,6 +36,8 @@ export type StoredReceipt = {
   capability: CapabilityName;
   executionId: string;
   planId?: string;
+  /** The grant that authorized this execution in place of an approval. */
+  grantId?: string;
   /** Who ran the capability, captured at execution. */
   executedBy?: Actor;
   /** The input the capability ran with, so a rollback can address the same entity. */
@@ -70,6 +72,8 @@ export type StoredReceipt = {
 export type ReceiptQuery = {
   capability?: string;
   planId?: string;
+  /** Every write one grant authorized. */
+  grantId?: string;
   /** Matches `executedBy.id`, the actor that ran the capability. */
   actorId?: string;
   since?: number;

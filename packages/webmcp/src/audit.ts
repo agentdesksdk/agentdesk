@@ -61,6 +61,8 @@ export type AuditEvent =
       kind: "execution_started";
       capability: string;
       executionId: string;
+      /** Set when a scoped grant, not an approval, authorized this execution. */
+      grantId?: string;
       actor?: Actor;
       at: number;
     }
