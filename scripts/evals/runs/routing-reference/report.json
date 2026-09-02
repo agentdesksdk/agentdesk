@@ -1,0 +1,1123 @@
+{
+  "schemaVersion": 1,
+  "runId": "routing-reference",
+  "at": "2026-09-02T21:50:43.640Z",
+  "taskSet": {
+    "path": "scripts/evals/routing/tasks/routing.v1.tasks.jsonl",
+    "taskCount": 55
+  },
+  "catalog": {
+    "seed": 2026,
+    "size": 408,
+    "domains": [
+      "orders",
+      "shipping",
+      "billing",
+      "invoices",
+      "payments",
+      "customers",
+      "accounts",
+      "inventory",
+      "catalog",
+      "returns",
+      "support",
+      "reports"
+    ]
+  },
+  "cells": {
+    "deterministic": {
+      "strategy": "deterministic",
+      "metrics": {
+        "terminalInRoutedSet": {
+          "name": "terminalInRoutedSet",
+          "value": 0.2909090909090909,
+          "numerator": 16,
+          "denominator": 55,
+          "provenance": "measured"
+        },
+        "terminalRank": {
+          "name": "terminalRank",
+          "value": 2.5625,
+          "mean": 2.5625,
+          "max": 5,
+          "min": 1,
+          "denominator": 16,
+          "provenance": "measured"
+        },
+        "routedSetSize": {
+          "name": "routedSetSize",
+          "value": 4.3090909090909095,
+          "mean": 4.3090909090909095,
+          "max": 5,
+          "min": 0,
+          "denominator": 55,
+          "provenance": "measured"
+        },
+        "schemaBytes": {
+          "name": "schemaBytes",
+          "value": 1249.8545454545454,
+          "mean": 1249.8545454545454,
+          "max": 1575,
+          "min": 0,
+          "denominator": 55,
+          "provenance": "measured"
+        },
+        "tieAtCut": {
+          "name": "tieAtCut",
+          "value": 0.7454545454545455,
+          "numerator": 41,
+          "denominator": 55,
+          "provenance": "measured"
+        },
+        "metadataOverlap": {
+          "name": "metadataOverlap",
+          "value": 0.08205693296602386,
+          "mean": 0.08205693296602386,
+          "max": 0.3333333333333333,
+          "min": 0,
+          "denominator": 55,
+          "provenance": "measured"
+        }
+      },
+      "failing": [
+        {
+          "taskId": "order-cancel-unshipped",
+          "prompt": "Customer 4471 changed her mind about yesterday's purchase, it hasn't left the warehouse, please stop it going out",
+          "expected": "cancel_shipment",
+          "rank": null,
+          "routed": [
+            "archive_customer",
+            "create_customer",
+            "create_customer_note",
+            "delete_customer",
+            "delete_customer_note"
+          ]
+        },
+        {
+          "taskId": "order-note-call",
+          "prompt": "Jot down on 10428 that the buyer rang and asked for delivery after the 15th",
+          "expected": "create_order_note",
+          "rank": null,
+          "routed": [
+            "archive_customer",
+            "cancel_delivery",
+            "create_customer",
+            "delete_customer",
+            "export_customer"
+          ]
+        },
+        {
+          "taskId": "order-release-block",
+          "prompt": "The finance check on 88120 came back clean, let it go out again",
+          "expected": "release_order_hold",
+          "rank": null,
+          "routed": [
+            "approve_inspection",
+            "close_inspection",
+            "get_inspection",
+            "list_inspection",
+            "refund_charge"
+          ]
+        },
+        {
+          "taskId": "shipping-where-is-parcel",
+          "prompt": "Where is parcel 1Z999 right now, the recipient says nothing has arrived",
+          "expected": "get_tracking_number",
+          "rank": null,
+          "routed": [
+            "assign_shipment",
+            "cancel_shipment",
+            "create_shipment",
+            "export_shipment",
+            "find_shipment"
+          ]
+        },
+        {
+          "taskId": "shipping-carrier-switch",
+          "prompt": "Move the Hamburg deliveries off DHL and onto the courier we used before Christmas",
+          "expected": "assign_carrier",
+          "rank": null,
+          "routed": [
+            "approve_stock_transfer",
+            "cancel_stock_transfer",
+            "approve_charge",
+            "approve_chargeback",
+            "approve_exchange"
+          ]
+        },
+        {
+          "taskId": "shipping-reschedule-drop",
+          "prompt": "Recipient on 77201 is away, push the drop to next Tuesday",
+          "expected": "schedule_delivery",
+          "rank": null,
+          "routed": [
+            "archive_carrier",
+            "archive_category",
+            "archive_customer",
+            "archive_dashboard",
+            "archive_invoice"
+          ]
+        },
+        {
+          "taskId": "billing-refund-shipping",
+          "prompt": "The customer on 10428 says we charged her for delivery she never asked for, can we give that money back",
+          "expected": "refund_shipping_fee",
+          "rank": null,
+          "routed": [
+            "archive_customer",
+            "create_customer",
+            "create_customer_note",
+            "delete_customer",
+            "delete_customer_note"
+          ]
+        },
+        {
+          "taskId": "billing-credit-for-late",
+          "prompt": "Give Acme a 200 credit against their next bill for the late delivery in March",
+          "expected": "create_credit_note",
+          "rank": 6,
+          "routed": [
+            "approve_invoice",
+            "archive_invoice",
+            "cancel_credit_note",
+            "cancel_delivery",
+            "cancel_invoice"
+          ]
+        },
+        {
+          "taskId": "billing-void-wrong-vat",
+          "prompt": "INV-2291 went out with the wrong VAT, kill it and we'll raise a fresh one",
+          "expected": "cancel_invoice",
+          "rank": null,
+          "routed": [
+            "create_address",
+            "create_api_key",
+            "create_backorder",
+            "create_carrier",
+            "create_category"
+          ]
+        },
+        {
+          "taskId": "billing-summaries-spreadsheet",
+          "prompt": "Finance wants the Q3 account summaries as a spreadsheet",
+          "expected": "export_statement",
+          "rank": null,
+          "routed": [
+            "accounts_close_account",
+            "accounts_get_account",
+            "accounts_hold_account",
+            "accounts_release_account",
+            "assign_account"
+          ]
+        },
+        {
+          "taskId": "invoices-printable",
+          "prompt": "Send me the printable version of INV-2291",
+          "expected": "get_invoice_pdf",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "invoices-sixty-days",
+          "prompt": "Acme have asked for 60 days on everything from now on instead of 30",
+          "expected": "update_payment_terms",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "invoices-month-end-run",
+          "prompt": "Run the end-of-month invoicing for all subscription customers",
+          "expected": "create_invoice_batch",
+          "rank": null,
+          "routed": [
+            "archive_customer",
+            "create_customer",
+            "create_customer_note",
+            "delete_customer",
+            "delete_customer_note"
+          ]
+        },
+        {
+          "taskId": "invoices-fold-two-bills",
+          "prompt": "Acme got two bills for the same delivery, fold them into one",
+          "expected": "merge_invoice",
+          "rank": null,
+          "routed": [
+            "approve_invoice",
+            "archive_invoice",
+            "cancel_delivery",
+            "cancel_invoice",
+            "create_invoice"
+          ]
+        },
+        {
+          "taskId": "payments-bank-reversal",
+          "prompt": "The bank has reversed the 89.00 on order 55610 and wants our side of it by Friday",
+          "expected": "update_chargeback",
+          "rank": null,
+          "routed": [
+            "archive_order",
+            "assign_order",
+            "create_order",
+            "create_order_export",
+            "create_order_hold"
+          ]
+        },
+        {
+          "taskId": "payments-partial-back",
+          "prompt": "Send 15.00 back to the card on 55610 for the missing item",
+          "expected": "refund_payment",
+          "rank": null,
+          "routed": [
+            "create_order_line",
+            "create_payment_method",
+            "create_product",
+            "delete_order_line",
+            "delete_payment_method"
+          ]
+        },
+        {
+          "taskId": "payments-expired-visa",
+          "prompt": "Take the expired Visa off Maria's profile",
+          "expected": "delete_payment_method",
+          "rank": null,
+          "routed": [
+            "accounts_close_account",
+            "accounts_get_account",
+            "accounts_hold_account",
+            "accounts_release_account",
+            "approve_charge"
+          ]
+        },
+        {
+          "taskId": "payments-proof-for-expenses",
+          "prompt": "Customer needs proof of the 89.00 they paid on the 3rd for their expenses",
+          "expected": "get_receipt",
+          "rank": null,
+          "routed": [
+            "archive_customer",
+            "create_customer",
+            "create_customer_note",
+            "delete_customer",
+            "delete_customer_note"
+          ]
+        },
+        {
+          "taskId": "customers-same-person",
+          "prompt": "maria.k@example.com and mkowalski@example.com are the same person, tidy that up",
+          "expected": "merge_contact",
+          "rank": null,
+          "routed": [
+            "find_contact",
+            "create_contact",
+            "delete_contact",
+            "find_account",
+            "find_address"
+          ]
+        },
+        {
+          "taskId": "customers-moved-offices",
+          "prompt": "Acme moved offices, their new place is 12 Harbour Street, Dublin 2",
+          "expected": "update_address",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "customers-stop-marketing",
+          "prompt": "Maria says stop emailing her marketing",
+          "expected": "update_consent",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "customers-prefers-afternoon",
+          "prompt": "Log that Acme's buyer prefers to be called after 2pm",
+          "expected": "create_customer_note",
+          "rank": null,
+          "routed": [
+            "archive_customer",
+            "create_customer",
+            "delete_customer",
+            "export_customer",
+            "find_customer"
+          ]
+        },
+        {
+          "taskId": "accounts-locked-out",
+          "prompt": "Jonas is locked out, reset his login credentials",
+          "expected": "update_password",
+          "rank": null,
+          "routed": [
+            "accounts_close_account",
+            "accounts_get_account",
+            "accounts_hold_account",
+            "accounts_release_account",
+            "assign_account"
+          ]
+        },
+        {
+          "taskId": "accounts-offboard",
+          "prompt": "Priya left the company on Friday, make sure she can't get in anymore",
+          "expected": "accounts_close_account",
+          "rank": null,
+          "routed": [
+            "accounts_get_account",
+            "get_account",
+            "get_address",
+            "get_api_key",
+            "get_backorder"
+          ]
+        },
+        {
+          "taskId": "accounts-sign-out-everywhere",
+          "prompt": "Sign Jonas out everywhere, his laptop was stolen",
+          "expected": "delete_session",
+          "rank": null,
+          "routed": [
+            "approve_charge",
+            "approve_chargeback",
+            "approve_exchange",
+            "approve_inspection",
+            "approve_invoice"
+          ]
+        },
+        {
+          "taskId": "inventory-shift-stock",
+          "prompt": "Shift 40 of SKU-778 from Dublin to the Cork depot before Monday",
+          "expected": "create_stock_transfer",
+          "rank": null,
+          "routed": [
+            "archive_warehouse",
+            "close_warehouse",
+            "create_warehouse",
+            "find_sku",
+            "find_warehouse"
+          ]
+        },
+        {
+          "taskId": "inventory-how-many",
+          "prompt": "How many of SKU-778 do we physically have across all sites",
+          "expected": "get_stock_level",
+          "rank": null,
+          "routed": [
+            "archive_warehouse",
+            "close_warehouse",
+            "create_warehouse",
+            "find_sku",
+            "find_warehouse"
+          ]
+        },
+        {
+          "taskId": "catalog-price-from-december",
+          "prompt": "The blue hoodie should be 39.90 from the 1st of December",
+          "expected": "schedule_price",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "catalog-newsletter-code",
+          "prompt": "Set up a 15 percent code for the newsletter that runs the whole of Black Friday week",
+          "expected": "create_discount",
+          "rank": null,
+          "routed": [
+            "find_sku",
+            "approve_invoice_batch",
+            "cancel_invoice_batch",
+            "create_invoice_batch",
+            "export_invoice_batch"
+          ]
+        },
+        {
+          "taskId": "catalog-discontinued-colour",
+          "prompt": "The red version of the hoodie is discontinued, hide it from the store",
+          "expected": "archive_variant",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "returns-does-not-fit",
+          "prompt": "Maria wants to send the hoodie from 10428 back, it doesn't fit",
+          "expected": "create_return",
+          "rank": null,
+          "routed": [
+            "refund_charge",
+            "refund_payment",
+            "refund_shipping_fee"
+          ]
+        },
+        {
+          "taskId": "returns-let-money-go",
+          "prompt": "Warehouse confirmed the hoodie came back in good shape, let the money go out to Maria",
+          "expected": "returns_approve_refund",
+          "rank": null,
+          "routed": [
+            "archive_warehouse",
+            "close_warehouse",
+            "create_warehouse",
+            "find_warehouse",
+            "get_warehouse"
+          ]
+        },
+        {
+          "taskId": "support-beyond-me",
+          "prompt": "This one is beyond me, hand it to someone in tier two",
+          "expected": "create_escalation",
+          "rank": null,
+          "routed": [
+            "assign_account",
+            "assign_bin",
+            "assign_carrier",
+            "assign_escalation",
+            "assign_order"
+          ]
+        },
+        {
+          "taskId": "support-three-cases",
+          "prompt": "Maria opened three cases about the same hoodie, put them together",
+          "expected": "merge_ticket",
+          "rank": null,
+          "routed": [
+            "archive_ticket",
+            "assign_ticket",
+            "close_ticket",
+            "create_ticket",
+            "delete_ticket"
+          ]
+        },
+        {
+          "taskId": "support-save-apology",
+          "prompt": "Save my apology-for-late-delivery text as something the team can reuse",
+          "expected": "create_macro",
+          "rank": null,
+          "routed": [
+            "cancel_delivery",
+            "hold_delivery",
+            "list_delivery",
+            "reopen_delivery",
+            "schedule_delivery"
+          ]
+        },
+        {
+          "taskId": "support-bring-back-up",
+          "prompt": "Maria replied to the closed conversation, bring it back up",
+          "expected": "reopen_ticket",
+          "rank": null,
+          "routed": [
+            "archive_ticket",
+            "assign_ticket",
+            "close_ticket",
+            "create_ticket",
+            "delete_ticket"
+          ]
+        },
+        {
+          "taskId": "reports-revenue-quarter",
+          "prompt": "How did revenue look last quarter compared with the one before",
+          "expected": "get_sales_report",
+          "rank": null,
+          "routed": [
+            "export_sales_report",
+            "find_account",
+            "find_address",
+            "find_charge",
+            "find_contact"
+          ]
+        },
+        {
+          "taskId": "reports-weekly-email",
+          "prompt": "Email the weekly figures to the leadership list every Monday at 8",
+          "expected": "create_report_schedule",
+          "rank": null,
+          "routed": [
+            "list_contact",
+            "approve_report",
+            "archive_report",
+            "create_contact",
+            "create_report"
+          ]
+        },
+        {
+          "taskId": "reports-ops-screen",
+          "prompt": "Build a screen for the ops team with open orders and late deliveries on it",
+          "expected": "create_dashboard",
+          "rank": null,
+          "routed": [
+            "get_order",
+            "returns_get_order",
+            "shipping_get_order",
+            "get_order_line",
+            "archive_order"
+          ]
+        }
+      ]
+    },
+    "hybrid": {
+      "strategy": "hybrid",
+      "metrics": {
+        "terminalInRoutedSet": {
+          "name": "terminalInRoutedSet",
+          "value": 0.23636363636363636,
+          "numerator": 13,
+          "denominator": 55,
+          "provenance": "measured"
+        },
+        "terminalRank": {
+          "name": "terminalRank",
+          "value": 2.5384615384615383,
+          "mean": 2.5384615384615383,
+          "max": 5,
+          "min": 1,
+          "denominator": 13,
+          "provenance": "measured"
+        },
+        "routedSetSize": {
+          "name": "routedSetSize",
+          "value": 4.454545454545454,
+          "mean": 4.454545454545454,
+          "max": 5,
+          "min": 0,
+          "denominator": 55,
+          "provenance": "measured"
+        },
+        "schemaBytes": {
+          "name": "schemaBytes",
+          "value": 1271.4727272727273,
+          "mean": 1271.4727272727273,
+          "max": 1543,
+          "min": 0,
+          "denominator": 55,
+          "provenance": "measured"
+        },
+        "tieAtCut": {
+          "name": "tieAtCut",
+          "value": 0.6909090909090909,
+          "numerator": 38,
+          "denominator": 55,
+          "provenance": "measured"
+        },
+        "metadataOverlap": {
+          "name": "metadataOverlap",
+          "value": 0.08205693296602386,
+          "mean": 0.08205693296602386,
+          "max": 0.3333333333333333,
+          "min": 0,
+          "denominator": 55,
+          "provenance": "measured"
+        }
+      },
+      "failing": [
+        {
+          "taskId": "order-cancel-unshipped",
+          "prompt": "Customer 4471 changed her mind about yesterday's purchase, it hasn't left the warehouse, please stop it going out",
+          "expected": "cancel_shipment",
+          "rank": null,
+          "routed": [
+            "get_customer",
+            "get_order",
+            "get_customer_note",
+            "get_contact",
+            "get_warehouse"
+          ]
+        },
+        {
+          "taskId": "order-note-call",
+          "prompt": "Jot down on 10428 that the buyer rang and asked for delivery after the 15th",
+          "expected": "create_order_note",
+          "rank": null,
+          "routed": [
+            "get_customer",
+            "release_customer",
+            "update_customer",
+            "archive_customer",
+            "cancel_delivery"
+          ]
+        },
+        {
+          "taskId": "order-release-block",
+          "prompt": "The finance check on 88120 came back clean, let it go out again",
+          "expected": "release_order_hold",
+          "rank": null,
+          "routed": [
+            "get_inspection",
+            "get_charge",
+            "get_payment",
+            "get_shipping_fee",
+            "update_inspection"
+          ]
+        },
+        {
+          "taskId": "order-lookup-by-email",
+          "prompt": "Which of last week's purchases belong to maria@example.com",
+          "expected": "find_order",
+          "rank": null,
+          "routed": [
+            "get_order",
+            "archive_order",
+            "export_order",
+            "release_order",
+            "assign_order"
+          ]
+        },
+        {
+          "taskId": "shipping-where-is-parcel",
+          "prompt": "Where is parcel 1Z999 right now, the recipient says nothing has arrived",
+          "expected": "get_tracking_number",
+          "rank": null,
+          "routed": [
+            "get_shipment",
+            "export_shipment",
+            "find_shipment",
+            "assign_shipment",
+            "cancel_shipment"
+          ]
+        },
+        {
+          "taskId": "shipping-carrier-switch",
+          "prompt": "Move the Hamburg deliveries off DHL and onto the courier we used before Christmas",
+          "expected": "assign_carrier",
+          "rank": null,
+          "routed": [
+            "get_stock_transfer",
+            "get_carrier",
+            "get_payout",
+            "get_invoice",
+            "get_invoice_batch"
+          ]
+        },
+        {
+          "taskId": "shipping-reschedule-drop",
+          "prompt": "Recipient on 77201 is away, push the drop to next Tuesday",
+          "expected": "schedule_delivery",
+          "rank": null,
+          "routed": [
+            "get_carrier",
+            "get_category",
+            "get_customer",
+            "get_dashboard",
+            "get_invoice"
+          ]
+        },
+        {
+          "taskId": "shipping-rate-retire",
+          "prompt": "We're no longer offering the 2-day option to Ireland, take that tariff out of the list",
+          "expected": "delete_shipping_rate",
+          "rank": null,
+          "routed": [
+            "get_shipping_rate",
+            "get_variant",
+            "list_variant",
+            "list_shipping_rate",
+            "archive_variant"
+          ]
+        },
+        {
+          "taskId": "billing-refund-shipping",
+          "prompt": "The customer on 10428 says we charged her for delivery she never asked for, can we give that money back",
+          "expected": "refund_shipping_fee",
+          "rank": null,
+          "routed": [
+            "get_customer",
+            "get_customer_note",
+            "get_contact",
+            "get_account",
+            "get_address"
+          ]
+        },
+        {
+          "taskId": "billing-credit-for-late",
+          "prompt": "Give Acme a 200 credit against their next bill for the late delivery in March",
+          "expected": "create_credit_note",
+          "rank": null,
+          "routed": [
+            "get_invoice",
+            "approve_invoice",
+            "archive_invoice",
+            "cancel_credit_note",
+            "cancel_delivery"
+          ]
+        },
+        {
+          "taskId": "billing-void-wrong-vat",
+          "prompt": "INV-2291 went out with the wrong VAT, kill it and we'll raise a fresh one",
+          "expected": "cancel_invoice",
+          "rank": null,
+          "routed": [
+            "create_category",
+            "create_report_schedule",
+            "create_address",
+            "create_order_export",
+            "create_order_line"
+          ]
+        },
+        {
+          "taskId": "billing-summaries-spreadsheet",
+          "prompt": "Finance wants the Q3 account summaries as a spreadsheet",
+          "expected": "export_statement",
+          "rank": null,
+          "routed": [
+            "get_api_key",
+            "get_role",
+            "accounts_get_account",
+            "get_account",
+            "accounts_release_account"
+          ]
+        },
+        {
+          "taskId": "invoices-printable",
+          "prompt": "Send me the printable version of INV-2291",
+          "expected": "get_invoice_pdf",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "invoices-sixty-days",
+          "prompt": "Acme have asked for 60 days on everything from now on instead of 30",
+          "expected": "update_payment_terms",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "invoices-month-end-run",
+          "prompt": "Run the end-of-month invoicing for all subscription customers",
+          "expected": "create_invoice_batch",
+          "rank": null,
+          "routed": [
+            "get_customer",
+            "get_customer_note",
+            "get_contact",
+            "get_account",
+            "get_address"
+          ]
+        },
+        {
+          "taskId": "invoices-fold-two-bills",
+          "prompt": "Acme got two bills for the same delivery, fold them into one",
+          "expected": "merge_invoice",
+          "rank": null,
+          "routed": [
+            "get_invoice",
+            "approve_invoice",
+            "archive_invoice",
+            "cancel_delivery",
+            "export_invoice"
+          ]
+        },
+        {
+          "taskId": "payments-bank-reversal",
+          "prompt": "The bank has reversed the 89.00 on order 55610 and wants our side of it by Friday",
+          "expected": "update_chargeback",
+          "rank": null,
+          "routed": [
+            "get_order",
+            "get_shipment",
+            "get_backorder",
+            "get_order_line",
+            "create_order"
+          ]
+        },
+        {
+          "taskId": "payments-partial-back",
+          "prompt": "Send 15.00 back to the card on 55610 for the missing item",
+          "expected": "refund_payment",
+          "rank": null,
+          "routed": [
+            "get_product",
+            "get_order_line",
+            "get_payment_method",
+            "create_payment_method",
+            "get_charge"
+          ]
+        },
+        {
+          "taskId": "payments-expired-visa",
+          "prompt": "Take the expired Visa off Maria's profile",
+          "expected": "delete_payment_method",
+          "rank": null,
+          "routed": [
+            "get_account",
+            "get_payout",
+            "get_invoice",
+            "get_invoice_batch",
+            "get_payment"
+          ]
+        },
+        {
+          "taskId": "payments-proof-for-expenses",
+          "prompt": "Customer needs proof of the 89.00 they paid on the 3rd for their expenses",
+          "expected": "get_receipt",
+          "rank": null,
+          "routed": [
+            "get_customer",
+            "get_customer_note",
+            "get_contact",
+            "get_account",
+            "get_address"
+          ]
+        },
+        {
+          "taskId": "customers-same-person",
+          "prompt": "maria.k@example.com and mkowalski@example.com are the same person, tidy that up",
+          "expected": "merge_contact",
+          "rank": null,
+          "routed": [
+            "get_contact",
+            "find_contact",
+            "find_address",
+            "find_customer",
+            "find_tracking_number"
+          ]
+        },
+        {
+          "taskId": "customers-moved-offices",
+          "prompt": "Acme moved offices, their new place is 12 Harbour Street, Dublin 2",
+          "expected": "update_address",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "customers-stop-marketing",
+          "prompt": "Maria says stop emailing her marketing",
+          "expected": "update_consent",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "customers-prefers-afternoon",
+          "prompt": "Log that Acme's buyer prefers to be called after 2pm",
+          "expected": "create_customer_note",
+          "rank": null,
+          "routed": [
+            "get_customer",
+            "release_customer",
+            "update_customer",
+            "archive_customer",
+            "create_address"
+          ]
+        },
+        {
+          "taskId": "customers-freeze-overdue",
+          "prompt": "Freeze everything for Acme until the overdue balance is cleared",
+          "expected": "hold_customer",
+          "rank": null,
+          "routed": [
+            "get_api_key",
+            "get_stock_level",
+            "get_account",
+            "get_customer",
+            "get_invoice"
+          ]
+        },
+        {
+          "taskId": "accounts-same-permissions",
+          "prompt": "Give the new warehouse hire the same permissions as Priya",
+          "expected": "assign_role",
+          "rank": 6,
+          "routed": [
+            "get_warehouse",
+            "get_role",
+            "get_consent",
+            "accounts_get_account",
+            "archive_warehouse"
+          ]
+        },
+        {
+          "taskId": "accounts-offboard",
+          "prompt": "Priya left the company on Friday, make sure she can't get in anymore",
+          "expected": "accounts_close_account",
+          "rank": null,
+          "routed": [
+            "accounts_get_account",
+            "get_backorder",
+            "get_carrier",
+            "get_chargeback",
+            "get_discount"
+          ]
+        },
+        {
+          "taskId": "accounts-sign-out-everywhere",
+          "prompt": "Sign Jonas out everywhere, his laptop was stolen",
+          "expected": "delete_session",
+          "rank": null,
+          "routed": [
+            "get_payout",
+            "get_charge",
+            "get_chargeback",
+            "get_inspection",
+            "get_invoice"
+          ]
+        },
+        {
+          "taskId": "inventory-how-many",
+          "prompt": "How many of SKU-778 do we physically have across all sites",
+          "expected": "get_stock_level",
+          "rank": null,
+          "routed": [
+            "get_warehouse",
+            "get_sku",
+            "archive_warehouse",
+            "close_warehouse",
+            "create_stock_transfer"
+          ]
+        },
+        {
+          "taskId": "catalog-price-from-december",
+          "prompt": "The blue hoodie should be 39.90 from the 1st of December",
+          "expected": "schedule_price",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "catalog-newsletter-code",
+          "prompt": "Set up a 15 percent code for the newsletter that runs the whole of Black Friday week",
+          "expected": "create_discount",
+          "rank": null,
+          "routed": [
+            "get_invoice_batch",
+            "get_sku",
+            "find_sku",
+            "find_address",
+            "find_tracking_number"
+          ]
+        },
+        {
+          "taskId": "catalog-discontinued-colour",
+          "prompt": "The red version of the hoodie is discontinued, hide it from the store",
+          "expected": "archive_variant",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "returns-does-not-fit",
+          "prompt": "Maria wants to send the hoodie from 10428 back, it doesn't fit",
+          "expected": "create_return",
+          "rank": null,
+          "routed": [
+            "get_charge",
+            "get_payment",
+            "get_shipping_fee",
+            "refund_charge",
+            "refund_payment"
+          ]
+        },
+        {
+          "taskId": "returns-swap-agreed",
+          "prompt": "Maria asked to swap the 10428 hoodie for a medium and the desk agreed, sign that off",
+          "expected": "approve_exchange",
+          "rank": null,
+          "routed": [
+            "get_payout",
+            "get_invoice",
+            "get_invoice_batch",
+            "get_payment",
+            "get_return"
+          ]
+        },
+        {
+          "taskId": "returns-let-money-go",
+          "prompt": "Warehouse confirmed the hoodie came back in good shape, let the money go out to Maria",
+          "expected": "returns_approve_refund",
+          "rank": null,
+          "routed": [
+            "get_warehouse",
+            "get_charge",
+            "get_payment",
+            "get_shipping_fee",
+            "archive_warehouse"
+          ]
+        },
+        {
+          "taskId": "support-beyond-me",
+          "prompt": "This one is beyond me, hand it to someone in tier two",
+          "expected": "create_escalation",
+          "rank": null,
+          "routed": [
+            "get_bin",
+            "get_carrier",
+            "get_escalation",
+            "get_order",
+            "get_return"
+          ]
+        },
+        {
+          "taskId": "support-three-cases",
+          "prompt": "Maria opened three cases about the same hoodie, put them together",
+          "expected": "merge_ticket",
+          "rank": null,
+          "routed": [
+            "get_ticket",
+            "delete_ticket",
+            "assign_ticket",
+            "create_ticket",
+            "archive_ticket"
+          ]
+        },
+        {
+          "taskId": "support-save-apology",
+          "prompt": "Save my apology-for-late-delivery text as something the team can reuse",
+          "expected": "create_macro",
+          "rank": null,
+          "routed": [
+            "cancel_delivery",
+            "hold_delivery",
+            "list_delivery",
+            "reopen_delivery",
+            "schedule_delivery"
+          ]
+        },
+        {
+          "taskId": "support-bring-back-up",
+          "prompt": "Maria replied to the closed conversation, bring it back up",
+          "expected": "reopen_ticket",
+          "rank": null,
+          "routed": [
+            "get_ticket",
+            "delete_ticket",
+            "assign_ticket",
+            "create_ticket",
+            "find_address"
+          ]
+        },
+        {
+          "taskId": "reports-weekly-email",
+          "prompt": "Email the weekly figures to the leadership list every Monday at 8",
+          "expected": "create_report_schedule",
+          "rank": null,
+          "routed": [
+            "get_contact",
+            "list_contact",
+            "list_customer",
+            "list_export",
+            "approve_report"
+          ]
+        },
+        {
+          "taskId": "reports-auditors-spreadsheet",
+          "prompt": "Pull the stock-on-hand numbers into a spreadsheet for the auditors",
+          "expected": "export_inventory_report",
+          "rank": null,
+          "routed": [
+            "get_stock_transfer",
+            "get_stock_level",
+            "get_inventory_report",
+            "get_tracking_number",
+            "update_stock_level"
+          ]
+        },
+        {
+          "taskId": "reports-ops-screen",
+          "prompt": "Build a screen for the ops team with open orders and late deliveries on it",
+          "expected": "create_dashboard",
+          "rank": null,
+          "routed": [
+            "get_order",
+            "get_shipment",
+            "get_backorder",
+            "get_order_line",
+            "create_order"
+          ]
+        }
+      ]
+    }
+  },
+  "unavailable": []
+}

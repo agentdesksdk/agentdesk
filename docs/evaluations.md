@@ -342,6 +342,116 @@ entry named; both are the correct reading, not a failure.
 To keep a transcript-backed run, pass `--run-id <name>`; only
 `scripts/evals/runs/eval-*` is ignored by git.
 
+## Routing stress evaluation
+
+Roadmap item 2.2 says the lexical scorer works for a seeded demo and will
+not survive a real catalog. This is the number that says so, measured
+without a model, so a replacement has a baseline to beat rather than an
+opinion to argue with. It is a second evaluation beside the task eval
+above; the v2 task set and its reference are untouched.
+
+Run it with `node scripts/evals/routing/run.mjs`. The committed reference
+is `scripts/evals/runs/routing-reference/`, produced with
+`--run-id routing-reference --out scripts/evals/runs/routing-reference`.
+
+### The catalog
+
+`scripts/evals/routing/catalog.mjs` generates the catalog from a seed, 2026
+in the reference: 408 capabilities across twelve domains, each with a
+name, title, description, domain, intents, keywords, risk, an input schema,
+and relationships, defined through the published SDK. Nothing in it is
+hand-authored to suit a task, and the same seed produces the same catalog
+on every host; a test asserts both. The vocabulary overlaps on purpose,
+because shared vocabulary is what breaks a lexical scorer: order,
+shipment, invoice, refund, charge, customer, account, note, label, and
+statement each live in several domains, and 45 keywords are shared by
+three or more. A verb and object that repeat across domains keep the
+first name and prefix the later one with its domain, `returns_find_order`,
+the way a real catalog disambiguates. Every write requires the read of its
+object when one exists, and every capability names one related sibling,
+so the hybrid strategy has a graph to walk.
+
+### The held-out tasks, and the leakage rule as a number
+
+`scripts/evals/routing/tasks/routing.v1.tasks.jsonl` holds 55 messy
+phrasings, at least four per domain, each naming the one capability that
+completes it. They were authored from a capability's name and what it
+does, which a person knows, and not from its intents and keywords, which
+only the scorer reads. That rule is not left to trust. `tokenOverlap` in
+`scripts/evals/routing/overlap.mjs` computes, for every task, the share of
+its content tokens (the router's own tokenization, minus function words
+and bare numbers) that appear in the expected capability's name, intents,
+keywords, and domain. A task above the threshold of 0.5 is refused by the
+loader with the task and the figure, before anything is scored, because a
+prompt that quotes the metadata measures the author and not the scorer.
+The figure rides on every record and the report carries its mean, 0.08 in
+the reference. The author of the task set also wrote the generator's
+vocabulary tables; the overlap row is what keeps that from mattering.
+
+### The metrics
+
+All runtime-measured, none needing a model. Each task is routed through
+the SDK's `routeTask` with no application context, under the
+`deterministic` strategy, which is what `find_capabilities` runs, and
+under `hybrid`.
+
+| Metric | How it is counted |
+| --- | --- |
+| Expected capability in the routed set | Whether the capability that completes the task is among the first five the router returns, the set `find_capabilities` registers. |
+| Rank | Where it landed, averaged over the tasks where it landed at all. The router is asked for six, so rank is within its reach; a capability it never returned has none. |
+| Routed set size | How many the router returned, up to the budget of five. |
+| Schema bytes | What the routed set would register, serialized the way `ToolSurfaceManager` counts a live tool, without the four bootstrap tools. A test holds this equal to a runtime's own `schemaBytes` less the bootstrap figure. |
+| Tie at the cut | Whether the fifth and sixth scores were equal, so codepoint order of the name decided what was published. This is the fragility #19 recorded. |
+| Prompt overlap | The leakage figure above. |
+
+Every figure recomputes from `records.<strategy>.jsonl`, and a test
+rebuilds `report.json` byte for byte and `report.md` from it.
+
+### Reference run
+
+| Metric | Deterministic (shipped default) | Hybrid | Provenance |
+| --- | --- | --- | --- |
+| Expected capability in the routed set | 29.1% (16 of 55) | 23.6% (13 of 55) | measured |
+| Rank of the expected capability, when routed (mean) | 2.56 | 2.54 | measured |
+| Routed set size (mean) | 4.31 | 4.45 | measured |
+| Schema bytes the routed set registers (mean) | 1,250 | 1,271 | measured |
+| Tie at the cut | 74.5% | 69.1% | measured |
+| Prompt overlap with the expected metadata (mean) | 0.08 | 0.08 | measured |
+
+### What the current scorer gets wrong
+
+The full list, with what was routed instead, is in
+`scripts/evals/runs/routing-reference/report.md`. The shape of it:
+
+- **39 of 55 tasks do not route their capability.** Under the shipped
+  scorer the agent would be handed a set of five that does not contain the
+  tool it needs seven times in ten, and in 38 of those 39 the capability is
+  not in the router's top six at all; six tasks route nothing.
+- **No shared word, no route.** "Send me the printable version of
+  INV-2291", "Acme moved offices, their new place is 12 Harbour Street",
+  and "Maria says stop emailing her marketing" route nothing. The scorer
+  has no notion of meaning, only of tokens, and a phrasing with none of the
+  metadata's tokens scores zero everywhere.
+- **One shared word picks the wrong domain.** "The customer on 10428 says
+  we charged her for delivery" routes five `customer` capabilities, none of
+  them a refund, because `customer` is a keyword in the customers domain
+  and nothing in the prompt is a keyword in billing.
+- **The cut is decided by the alphabet.** In 74.5% of tasks the fifth and
+  sixth scores are equal. 39 of the 55 routed sets are capabilities on one
+  identical score, and 185 of the 237 routed entries carry the two points
+  of a single keyword hit, so codepoint order of the name chooses what is
+  published: `approve_*` and `archive_*` win because they sort first. That
+  is the tie #19 found could not happen on the six-task reference; on a
+  real catalog it is the common case.
+- **Hybrid is worse here, not better.** Its `requires` edges pull the
+  `get_*` prerequisite of every matched write into the set, so the budget
+  is spent on reads, and it loses six tasks the deterministic scorer got
+  while gaining three. The graph helps when the match is right; it cannot
+  repair a match that is wrong.
+
+These are the figures 2.2 must beat, on this catalog and this task set,
+under the same loader and the same threshold.
+
 ## Relationship to `docs/benchmark.md`
 
 No claim there changes. That document measures the demo's 78-capability
