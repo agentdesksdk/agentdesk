@@ -9,6 +9,26 @@ const HUMAN = { id: "operator-1", name: "Amein", kind: "human" as const };
 
 const pendingId = () => agentdesk.getSnapshot().pending[0]!.id;
 
+/**
+ * jsdom has no user activation. The runtime reads the platform's answer
+ * through `navigator.userActivation`, so the test injects one that is in
+ * progress for the duration of the click it stands for.
+ */
+async function approveFromClick(id: string): Promise<void> {
+  Object.defineProperty(navigator, "userActivation", {
+    value: { isActive: true },
+    configurable: true,
+  });
+  try {
+    await agentdesk.approve(id, agentdesk.issueApprovalGesture({ actionId: id }, HUMAN));
+  } finally {
+    Object.defineProperty(navigator, "userActivation", {
+      value: { isActive: false },
+      configurable: true,
+    });
+  }
+}
+
 async function proposeCancellation() {
   await act(async () => {
     await agentdesk.invoke("cancel_order", {
@@ -56,7 +76,7 @@ describe("the ghost shows only what is still proposed", () => {
 
     const id = pendingId();
     await act(async () => {
-      await agentdesk.approve(id, HUMAN);
+      await approveFromClick(id);
     });
 
     expect(view.container.textContent).toBe("");

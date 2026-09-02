@@ -10,6 +10,26 @@ import { resetStore } from "../src/data/store.ts";
 
 const HUMAN = { id: "operator-1", name: "Amein", kind: "human" as const };
 
+/**
+ * The demo runtime requires a gesture. jsdom has no user activation, so the
+ * test injects one through `navigator.userActivation` for the duration of
+ * the click it stands for, mints a token, and approves with it.
+ */
+async function approveFromClick(id: string): Promise<void> {
+  Object.defineProperty(navigator, "userActivation", {
+    value: { isActive: true },
+    configurable: true,
+  });
+  try {
+    await agentdesk.approve(id, agentdesk.issueApprovalGesture({ actionId: id }, HUMAN));
+  } finally {
+    Object.defineProperty(navigator, "userActivation", {
+      value: { isActive: false },
+      configurable: true,
+    });
+  }
+}
+
 const HERO_QUERY =
   "Find Alice Johnson's unshipped order. If she paid shipping, refund the shipping fee.";
 
@@ -99,7 +119,7 @@ describe("the overview narrates the demo from the live snapshot", () => {
 
     const id = agentdesk.getSnapshot().pending[0]!.id;
     await act(async () => {
-      await agentdesk.approve(id, HUMAN);
+      await approveFromClick(id);
     });
     const after = agentdesk.getSnapshot();
     expect(counter(view.container, "pending-approvals")).toBe("0");
@@ -191,7 +211,7 @@ describe("the inspector shows the routing decision", () => {
     await act(async () => {
       await agentdesk.invoke("refund_shipping", { order_id: "10428" });
       const id = agentdesk.getSnapshot().pending[0]!.id;
-      await agentdesk.approve(id, HUMAN);
+      await approveFromClick(id);
     });
     await act(async () => {
       await agentdesk.setContext({
