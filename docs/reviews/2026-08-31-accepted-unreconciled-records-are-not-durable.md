@@ -1,6 +1,6 @@
 # Accepted risk: unreconciled records and artifacts do not survive a restart
 
-Status: **RESOLVED** in wave 1 item 1.7 (`feat/wave1-durability`), against the
+Status: **RESOLVED** in wave 1 item 1.7 as #46, landed on `main` by #52 (`f7835ea`), against the
 three requirements below.
 
 Raised at commit `16e405d`, during the review that found no remaining

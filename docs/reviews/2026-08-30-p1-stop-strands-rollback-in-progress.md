@@ -1,6 +1,6 @@
 # P1: stop strands an interrupted rollback in progress
 
-Status: **PARTIALLY FIXED** in `bf079ca`
+Status: **RESOLVED** on `main` as #9 (`02e08c7`), after the session boundary of #10; see "Resolved on PR #9" below
 
 Reviewed branch: `fix/reset-epoch-and-approval-identity` at `104149e`
 
