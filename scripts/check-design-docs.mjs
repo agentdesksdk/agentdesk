@@ -165,6 +165,10 @@ const CLAIMS = [
   ["docs/architecture.md", /Migration without a flag day/, "present", "architecture says how existing approve calls migrate"],
   ["docs/architecture.md", /The seam WebAuthn plugs into/, "present", "architecture names the seam a stronger gesture uses"],
   ["docs/architecture.md", /untrusted_content_ignored/, "present", "architecture names the audit half of the adversarial note"],
+  ["docs/architecture.md", /Minting outside an activation throws/, "present", "architecture says a token requires a user activation"],
+  ["docs/architecture.md", /It does not prove which human/, "present", "architecture states what the token does not prove"],
+  ["docs/architecture.md", /hands its runtime to untrusted script/, "present", "architecture says a page that exposes its runtime has no gesture guarantee"],
+  ["docs/architecture.md", /only the flagged reads between the request and the\s+approval count/, "present", "architecture states the scope of untrusted_content_ignored"],
   ["docs/architecture.md", /adoptHumanActor/, "present", "architecture names the identity boundary a grant issuer crosses"],
 ];
 
