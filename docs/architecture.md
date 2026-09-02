@@ -704,11 +704,21 @@ nobody can hand back would settle nothing in the application.
 
 **What survives and what does not.** The record is saved the moment it is
 made and again when an approval or a plan attaches its ids; it is removed
-when `reconcile` settles it. An idempotency claim is saved when it is won.
-Only the claim survives, not the result it produced, so a repeat of the
-same call after reload is refused with `IDEMPOTENCY_CONFLICT` and
-`cause: "after_restart"` rather than replayed or re-executed: the write may
-have landed and nothing can hand back what it returned. `reset` clears the
+when `reconcile` settles it. An idempotency claim is saved when it is won
+and again, with the receipt id, when the execution records a receipt.
+Only the claim survives, not the result it produced. That is a stated
+limit, decided rather than defaulted: a repeat of the same call after
+reload is refused with `IDEMPOTENCY_CONFLICT` and `cause: "after_restart"`,
+never replayed and never re-executed, because the write may have landed
+and nothing can hand back what it returned, and persisting results would
+mean persisting handler output the agent view has not projected. The
+refusal is in the result protocol. No capability repairs it, so it carries
+no `repair`; the receipt the earlier write recorded rides as evidence when
+there is one, `next` names the receipts query for the capability, and
+`nowPossible` lists the capability itself when it is callable. A claim
+never maps to a pending action, because the approval path returns before
+the idempotency claim is made and approvals deduplicate by input rather
+than by key, so `get_action_status` is never the repair. `reset` clears the
 in-memory claims as it always did and leaves the adapter alone.
 
 **On start.** `rehydrate` runs before the tool surface is built. Every
@@ -722,12 +732,21 @@ approval's `actionId` still finds it and the counter moves past it;
 reconcile takes the same path a live record takes. Loaded claims are
 remembered by slot.
 
-**Byte for byte.** What is loaded is what was saved: the seal proves the
-evidence did not change on disk, and a hydrated record is cloned and deep
-frozen at the store boundary exactly as a live one is, so it is as
-immutable through the public API. Saves are queued in order and never
-awaited by the path that made the record; an adapter that throws cannot
-change an outcome, only lose its own copy, and says so on the console.
+**Byte for byte.** What is loaded is what was saved, to the extent an
+unkeyed seal can say so. The seal is an integrity check against corruption
+and accidental change, not authentication: `sealOf` is a plain digest with
+no key, so anything with write access to the store can rewrite a record
+and recompute its seal, and page-controlled storage such as IndexedDB is
+writable by anything that can write the page. A record that comes back
+with a matching seal is one the store did not corrupt and nobody edited by
+hand; it is not one nobody could have forged. The upgrade, if that matters
+for a deployment, is a keyed seal with the key held outside the store,
+behind the same `sealOf` and `verifyRecord` seam. A hydrated record is
+cloned and deep frozen at the store boundary exactly as a live one is, so
+it is as immutable through the public API. Saves are queued in order and
+never awaited by the path that made the record; an adapter that throws
+cannot change an outcome, only lose its own copy, and says so on the
+console.
 
 **Two adapters ship.** `memoryPersistence` is the in-memory one, the double
 the tests use, and what a runtime that declares nothing behaves like: a
