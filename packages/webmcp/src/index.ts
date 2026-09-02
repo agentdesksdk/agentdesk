@@ -173,6 +173,7 @@ export {
   receipt,
   toolRetired,
   validationFailed,
+  viewUnavailable,
   type AffectedObject,
   type Receipt,
 } from "./results.ts";

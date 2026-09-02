@@ -249,18 +249,18 @@ describe("agent-view projection: a throwing projection fails closed", () => {
   });
 
   it("still tells the agent a write completed when only its view failed", async () => {
-    let calls = 0;
-    const failsAfterPreview: AgentView = ({ state: view }) => {
-      calls += 1;
-      if (calls > 1) {
-        throw new Error("view down");
+    let broken = false;
+    const failsLater: AgentView = ({ state: view }) => {
+      if (broken) {
+        throw new Error(`view down on ${TOKEN}`);
       }
       return dropToken({ state: view });
     };
-    const { runtime } = await booted({ agentView: failsAfterPreview });
+    const { runtime } = await booted({ agentView: failsLater });
     await runtime.invoke("rotate_token", {});
     const actionId = runtime.getSnapshot().pending[0]!.id;
 
+    broken = true;
     const approved = await runtime.approve(actionId, HUMAN);
 
     expect(approved.code).toBe("VIEW_UNAVAILABLE");
