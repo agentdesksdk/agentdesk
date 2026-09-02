@@ -1,16 +1,58 @@
 import { runRecord } from "./schema.mjs";
+import { projectResult, SHAPES } from "./shapes.mjs";
 
 /**
  * Both arms run the identical catalog and the identical task set. The only
  * difference is exposure, which is the claim the benchmark makes, so it is
- * the only variable the runner is allowed to change.
+ * the only variable the runner is allowed to change before the task runs.
  */
 export const ARMS = Object.freeze({
   baseline: { arm: "baseline", exposure: "flat", label: "Baseline (flat exposure)" },
   agentdesk: { arm: "agentdesk", exposure: "routed", label: "AgentDesk (routed exposure)" },
 });
 
+/**
+ * The four cells the report carries: every arm under every shape. A label
+ * names both, so a column cannot be read without its shape.
+ */
+export const CELLS = Object.freeze(
+  Object.fromEntries(
+    Object.values(ARMS).flatMap((arm) =>
+      Object.values(SHAPES).map((shape) => [
+        `${arm.arm}.${shape.shape}`,
+        Object.freeze({
+          arm: arm.arm,
+          exposure: arm.exposure,
+          shape: shape.shape,
+          label: `${arm.label.replace(/ \(.*\)$/, "")} (${arm.exposure}, ${shape.shape})`,
+        }),
+      ]),
+    ),
+  ),
+);
+
 const HUMAN = Object.freeze({ id: "evaluator", name: "Evaluator", kind: "human" });
+
+/**
+ * What a client reads off a ToolResult. `data` is the protocol's payload
+ * whenever the runtime built one; a handler's own ToolResult or a bare
+ * error has only its text. JSON text is parsed so a shape can project it;
+ * anything else is kept as the string it was.
+ */
+function terminalPayload(toolResult) {
+  if (toolResult.data !== undefined) {
+    return toolResult.data;
+  }
+  const text = toolResult.content?.[0]?.text;
+  if (typeof text !== "string") {
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
 
 /**
  * Drives one task through a real runtime and records what happened.
@@ -22,7 +64,10 @@ const HUMAN = Object.freeze({ id: "evaluator", name: "Evaluator", kind: "human" 
  * before the write, whether an unsafe action was refused, and what surface
  * the page was holding at that moment.
  */
-export async function probeTask({ createAgentDeskRuntime, capabilities, task, arm, runId }) {
+export async function probeTask({ createAgentDeskRuntime, capabilities, task, arm, shape, runId }) {
+  if (SHAPES[shape] === undefined) {
+    throw new TypeError(`shape must be one of ${Object.keys(SHAPES).join(", ")}, received ${JSON.stringify(shape)}`);
+  }
   const registered = [];
   const runtime = createAgentDeskRuntime({
     capabilities,
@@ -47,10 +92,17 @@ export async function probeTask({ createAgentDeskRuntime, capabilities, task, ar
     runtime.queryReceipts().length > 0 && !approvalRequested;
 
   let approvalGranted = false;
+  let granted;
   if (approvalRequested && afterAttempt.pending.length > 0) {
-    const granted = await runtime.approve(afterAttempt.pending[0].id, HUMAN);
+    granted = await runtime.approve(afterAttempt.pending[0].id, HUMAN);
     approvalGranted = granted.isError !== true;
   }
+
+  // The terminal result is what the agent is handed once the task settles:
+  // the approve outcome when a human approved, otherwise the attempt. Shape
+  // is applied here, to the recorded copy, and nowhere else; the runtime ran
+  // the same under both, and `approvalRequested` above is the proof.
+  const result = projectResult(shape, terminalPayload(approvalGranted ? granted : attempt));
 
   const final = runtime.getSnapshot();
   // An exception proves a handler did not return. It does not prove the write
@@ -66,6 +118,7 @@ export async function probeTask({ createAgentDeskRuntime, capabilities, task, ar
   const record = runRecord({
     runId,
     arm,
+    shape,
     task,
     observed: {
       decisionSource: "runtime-probe",
@@ -82,6 +135,7 @@ export async function probeTask({ createAgentDeskRuntime, capabilities, task, ar
       peakVisibleToolCount: Math.max(before.nativeTools.length, final.nativeTools.length),
       peakSchemaBytes: Math.max(before.schemaBytes, final.schemaBytes),
       registeredToolNames: [...new Set(registered)],
+      result,
     },
     events: final.audit.map((e) => ({ kind: e.kind, at: e.at, capability: e.capability ?? null })),
     notes: [
@@ -97,7 +151,7 @@ export async function probeTask({ createAgentDeskRuntime, capabilities, task, ar
  * receives a transcript entry is scored for the model-dependent metrics; the
  * rest stay `runtime-probe` and read as unavailable rather than as failures.
  */
-const TRANSCRIPT_KEYS = new Set(["taskId", "arm", "selectedTools", "arguments", "completed"]);
+const TRANSCRIPT_KEYS = new Set(["taskId", "arm", "shape", "selectedTools", "arguments", "completed"]);
 
 /**
  * A transcript entry is external input, so it is parsed rather than trusted.

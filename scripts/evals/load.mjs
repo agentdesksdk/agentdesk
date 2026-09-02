@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { relative } from "node:path";
 import { parseTranscriptEntry } from "./arms.mjs";
-import { parseTask } from "./schema.mjs";
+import { parseRecord, parseTask, SHAPES } from "./schema.mjs";
 
 /**
  * Import-safe. These loaders live apart from the CLI because a helper worth
@@ -35,6 +35,29 @@ export function loadTasks(path, { repoRoot = process.cwd(), arms } = {}) {
   }
   void arms;
   return tasks;
+}
+
+/**
+ * Stored records come back through `parseRecord`, so a committed record the
+ * runner would refuse to write cannot be scored by a test that read it raw.
+ * The refusal that matters is the bare record still carrying a structured
+ * field; it is named with the line it sits on.
+ */
+export function loadRecords(path, { repoRoot = process.cwd() } = {}) {
+  const source = relative(repoRoot, path);
+  return readFileSync(path, "utf8")
+    .split(String.fromCharCode(10))
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .map((line, index) => {
+      let parsed;
+      try {
+        parsed = JSON.parse(line);
+      } catch (err) {
+        throw new SyntaxError(`${source}: line ${index + 1} is not valid JSON: ${err.message}`);
+      }
+      return parseRecord(parsed, `${source} line ${index + 1}`);
+    });
 }
 
 const ARM_NAMES_FALLBACK = ["baseline", "agentdesk"];
@@ -72,10 +95,19 @@ export function loadTranscript(path, tasks, { repoRoot = process.cwd(), armNames
     if (!armNames.includes(entry.arm)) {
       throw new TypeError(`${at} names arm ${JSON.stringify(entry.arm)}, not one of ${armNames.join(", ")}`);
     }
+    // A transcript is captured against one shape. Without the shape on the
+    // entry, a run driven on structured results would score the bare cell
+    // too, which is a model result nobody observed.
+    if (typeof entry.shape !== "string") {
+      throw new TypeError(`${at} must name a shape, one of ${SHAPES.join(", ")}`);
+    }
+    if (!SHAPES.includes(entry.shape)) {
+      throw new TypeError(`${at} names shape ${JSON.stringify(entry.shape)}, not one of ${SHAPES.join(", ")}`);
+    }
     if (!known.has(entry.taskId)) {
       throw new TypeError(`${at} names task ${JSON.stringify(entry.taskId)}, which is not in the task set`);
     }
-    const key = `${entry.arm}:${entry.taskId}`;
+    const key = `${entry.arm}:${entry.shape}:${entry.taskId}`;
     if (byKey.has(key)) {
       throw new TypeError(`${at} is a duplicate entry for ${key}`);
     }

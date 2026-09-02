@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { applyTranscript, ARMS, probeTask } from "./arms.mjs";
+import { applyTranscript, ARMS, CELLS, probeTask } from "./arms.mjs";
 import { buildCatalog } from "./catalog.mjs";
 import { computeMetrics } from "./metrics.mjs";
 import { buildReport, renderMarkdown } from "./report.mjs";
@@ -11,13 +11,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
 const dist = join(repoRoot, "packages", "webmcp", "dist", "index.js");
 const ARM_NAMES = Object.keys(ARMS);
-const NEWLINE = String.fromCharCode(10);
 
 function argValue(flag, fallback) {
   const index = process.argv.indexOf(flag);
   return index === -1 ? fallback : process.argv[index + 1];
 }
-
 
 async function main() {
   if (!existsSync(dist)) {
@@ -36,8 +34,11 @@ async function main() {
   const outDir = resolve(repoRoot, argValue("--out", join(here, "runs", runId)));
   mkdirSync(outDir, { recursive: true });
 
-  const arms = {};
-  for (const arm of Object.keys(ARMS)) {
+  // Every arm under every shape. Each cell runs every task on its own fresh
+  // runtime; shape is applied to the recorded result, so the runtime's
+  // behaviour in a cell is the arm's and nothing else.
+  const cells = {};
+  for (const [key, cell] of Object.entries(CELLS)) {
     const records = [];
     for (const task of tasks) {
       // A fresh catalog per task, so one task's writes cannot decide the
@@ -47,17 +48,18 @@ async function main() {
         createAgentDeskRuntime: sdk.createAgentDeskRuntime,
         capabilities,
         task,
-        arm,
+        arm: cell.arm,
+        shape: cell.shape,
         runId,
       });
-      records.push(applyTranscript(probed, transcript.get(`${arm}:${task.id}`)));
+      records.push(applyTranscript(probed, transcript.get(`${cell.arm}:${cell.shape}:${task.id}`)));
     }
     writeFileSync(
-      join(outDir, `records.${arm}.jsonl`),
+      join(outDir, `records.${key}.jsonl`),
       records.map((r) => JSON.stringify(r)).join("\n") + "\n",
       "utf8",
     );
-    arms[arm] = { label: ARMS[arm].label, exposure: ARMS[arm].exposure, metrics: computeMetrics(records) };
+    cells[key] = { ...cell, metrics: computeMetrics(records) };
   }
 
   const report = buildReport({
@@ -65,7 +67,7 @@ async function main() {
     at: new Date().toISOString(),
     taskSetPath: relative(repoRoot, tasksPath).split("\\").join("/"),
     taskCount: tasks.length,
-    arms,
+    cells,
   });
   writeFileSync(join(outDir, "report.json"), JSON.stringify(report, null, 2) + "\n", "utf8");
   writeFileSync(join(outDir, "report.md"), renderMarkdown(report), "utf8");

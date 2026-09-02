@@ -34,8 +34,8 @@ test("an entry missing a field is refused with the line number and the field nam
   withJsonl(
     join(evals, "test", "tmp-runbook-missing.jsonl"),
     [
-      { arm: "agentdesk", taskId: first.id, selectedTools: ["find_capabilities", first.terminalTool], arguments: {}, completed: true },
-      { arm: "agentdesk", taskId: second.id, selectedTools: ["find_capabilities"], arguments: {} },
+      { arm: "agentdesk", shape: "structured", taskId: first.id, selectedTools: ["find_capabilities", first.terminalTool], arguments: {}, completed: true },
+      { arm: "agentdesk", shape: "structured", taskId: second.id, selectedTools: ["find_capabilities"], arguments: {} },
     ],
     (path) =>
       assert.throws(
@@ -55,11 +55,11 @@ test("a transcript saved under scripts/evals/transcripts loads by path", () => {
   const [task] = tasks;
   withJsonl(
     join(dir, "tmp-runbook-good.jsonl"),
-    [{ arm: "baseline", taskId: task.id, selectedTools: [task.terminalTool], arguments: task.expectedArguments, completed: true }],
+    [{ arm: "baseline", shape: "structured", taskId: task.id, selectedTools: [task.terminalTool], arguments: task.expectedArguments, completed: true }],
     (path) => {
       const loaded = loadTranscript(path, tasks, { repoRoot });
       assert.equal(loaded.size, 1);
-      assert.ok(loaded.has(`baseline:${task.id}`));
+      assert.ok(loaded.has(`baseline:structured:${task.id}`));
     },
   );
 });
@@ -74,7 +74,7 @@ test(
     const out = join(evals, "test", "tmp-runbook-cli-out");
     withJsonl(
       join(evals, "test", "tmp-runbook-cli.jsonl"),
-      [{ arm: "baseline", taskId: tasks[0].id, selectedTools: [], arguments: {} }],
+      [{ arm: "baseline", shape: "structured", taskId: tasks[0].id, selectedTools: [], arguments: {} }],
       (path) => {
         const result = spawnSync(process.execPath, [join(evals, "run.mjs"), "--transcript", path, "--out", out], {
           cwd: repoRoot,

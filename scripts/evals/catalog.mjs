@@ -42,6 +42,10 @@ export function buildCatalog(defineCapability, receipt, unavailable) {
           entity: `Order #${id}`,
           changes: [{ field: "shipping_refunded", before: false, after: true }],
           undoable: true,
+          // Authored, so the link is the value that changed and not just the
+          // page. The route is this catalog's, not the demo's; the eval page
+          // serves no order routes, and the link is measured, not followed.
+          evidence: [{ label: `Shipping line on order #${id}`, route: `/orders/${id}`, reveal: "shipping_refunded" }],
           result: { order_id: id, shipping_refunded: true },
         });
       },
@@ -57,6 +61,7 @@ export function buildCatalog(defineCapability, receipt, unavailable) {
         return receipt({
           entity: `Customer ${input.customer_id}`,
           changes: [{ field: "status", before: "active", after: "closed" }],
+          evidence: [{ label: `Status on customer ${input.customer_id}`, route: `/customers/${input.customer_id}`, reveal: "status" }],
           result: { closed: true },
         });
       },
