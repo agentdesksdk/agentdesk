@@ -112,7 +112,12 @@ export function ApprovalCards() {
             <button
               className="primary"
               onClick={() => {
-                void agentdesk.approve(action.id, OPERATOR);
+                // The click is the gesture. The token is minted here, in the
+                // handler, and consumed by approve; nothing else can mint one.
+                void agentdesk.approve(
+                  action.id,
+                  agentdesk.issueApprovalGesture({ actionId: action.id }, OPERATOR),
+                );
               }}
             >
               Approve

@@ -107,7 +107,9 @@ export type AuditEvent =
        * runtime saw it and treated it as data, not as authority.
        */
       kind: "untrusted_content_ignored";
-      actionId: string;
+      /** The approval it was recorded against: a single action or a plan. */
+      actionId?: string;
+      planId?: string;
       capability: string;
       /** The capabilities whose untrusted output was in context. */
       sources: string[];

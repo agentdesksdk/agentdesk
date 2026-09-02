@@ -39,6 +39,11 @@ export const agentdesk = createAgentDeskRuntime({
   // describes a change and the code that performs it are not both supplied
   // by whoever declared the operation.
   staging: stagingAdapter,
+  // The approval card mints a gesture token on click. This stays optional
+  // until every caller of this instance mints one; ghost-dom.test.tsx still
+  // approves with an asserted identity, and flipping to "required" here is
+  // the demo lane's follow-up once it does.
+  approvalGesture: "optional",
   // Cheap revision over the mutable parts of the store. A plan approved
   // against one revision refuses to commit against another.
   revision: () => {

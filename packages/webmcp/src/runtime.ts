@@ -58,7 +58,12 @@ import {
   type VerificationResult,
 } from "./plan.ts";
 import type { EvidenceLink, Receipt } from "./results.ts";
-import { isApprovalGesture, type ApprovalGesture, type GestureBinding } from "./gesture.ts";
+import {
+  GestureStore,
+  isApprovalGesture,
+  type ApprovalGesture,
+  type GestureBinding,
+} from "./gesture.ts";
 import {
   ReceiptStore,
   type ReceiptQuery,
@@ -371,6 +376,15 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   // for an approval, so a grant can narrow what needs a human and never
   // widen what policy allows.
   const grants = new GrantStore();
+  // Tokens minted on a human click and consumed at approve time. A token
+  // stands for a gesture the runtime can verify, where an asserted
+  // identity was a claim it had to take on trust.
+  const gestures = new GestureStore();
+  const gestureMode: "optional" | "required" = options.approvalGesture ?? "optional";
+  // Capabilities flagged untrustedContentHint whose output entered the
+  // agent's context this session. Named on an approval made while any is
+  // present, so the record says the runtime treated it as data.
+  const untrustedSources = new Set<string>();
   // Staged proposals live here, keyed by the runtime identity that owns
   // each one, never by business input. Disposal is this store's job on
   // every path that resolves an owner without committing it.
@@ -466,6 +480,37 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       throw new TypeError(refusal);
     }
     return adopted;
+  }
+
+  /**
+   * Who is approving, and how the runtime knows. A gesture token is
+   * verified and consumed here and yields the human who minted it; an
+   * asserted identity is parsed as before, or refused outright when the
+   * runtime requires a gesture. This is the seam a WebAuthn assertion
+   * plugs into: a second gesture kind, a second verifier, the same callers.
+   */
+  function resolveApprover(
+    supplied: Actor | ApprovalGesture | undefined,
+    binding: GestureBinding,
+    refusal: string,
+  ):
+    | { ok: true; actor: HumanActor; gestureId?: string }
+    | { ok: false; reason: string } {
+    if (isApprovalGesture(supplied)) {
+      const verdict = gestures.consume(supplied, binding, now());
+      if (!verdict.ok) {
+        return verdict;
+      }
+      return { ok: true, actor: deepFreeze(verdict.by), gestureId: verdict.id };
+    }
+    if (gestureMode === "required") {
+      return {
+        ok: false,
+        reason:
+          "an approval must carry a token issued on a human click through issueApprovalGesture; an asserted identity is not accepted by this runtime",
+      };
+    }
+    return resolveHumanActor(supplied, refusal);
   }
 
   let actor: Actor | undefined = adoptActor(options.actor);
@@ -2169,6 +2214,9 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       // One terminal outcome, committed together. Presentation runs after the
       // governance evidence is durable and cannot change it.
       audit.append(event);
+      if (capability.annotations.untrustedContentHint) {
+        untrustedSources.add(capability.name);
+      }
       const stored = pending ? receipts.record(pending) : undefined;
       const evidence: Evidence[] = [
         ...(stored ? [{ kind: "receipt" as const, id: stored.id }] : []),
@@ -2656,10 +2704,14 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     routedNames = next;
   }
 
-  async function approveInner(actionId: string, by?: Actor): Promise<ToolResult> {
+  async function approveInner(
+    actionId: string,
+    by?: Actor | ApprovalGesture,
+  ): Promise<ToolResult> {
     const session = claimSession();
-    const authorizer = resolveHumanActor(
+    const authorizer = resolveApprover(
       by ?? actor,
+      { actionId },
       "an approval must name a human; pass one explicitly rather than relying on the acting actor",
     );
     if (!authorizer.ok) {
@@ -2826,11 +2878,21 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         refusal(routed, missing.repair, claimed),
       );
     }
+    if (untrustedSources.size > 0) {
+      audit.append({
+        kind: "untrusted_content_ignored",
+        actionId,
+        capability: action.capability,
+        sources: [...untrustedSources].sort(compareNames),
+        at: now(),
+      });
+    }
     audit.append({
       kind: "approval_approved",
       actionId,
       capability: action.capability,
       approvedBy: authorizer.actor,
+      ...(authorizer.gestureId !== undefined ? { gestureId: authorizer.gestureId } : {}),
       at: now(),
     });
     const outcome = await executeNow(routed, action.input, {
@@ -3015,6 +3077,8 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       plans.clear();
       receipts.clear();
       grants.clear();
+      gestures.clear();
+      untrustedSources.clear();
       routedNames = new Set();
       lastRouting = null;
       if (started) {
@@ -3155,9 +3219,6 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     },
 
     approvePlan(planId, by) {
-      if (isApprovalGesture(by)) {
-        by = { id: "stub-human", kind: "human" };
-      }
       // An approval is the record that a person authorized this plan.
       // Falling back to the ambient actor would let the requesting agent
       // sign off on its own plan, which is the one claim it exists to make.
@@ -3165,8 +3226,9 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       // neither a refusal nor an unrecordable identity can strand the plan
       // in APPROVED, and the plan and the audit event carry one value the
       // caller can no longer influence.
-      const approver = resolveHumanActor(
+      const approver = resolveApprover(
         by ?? actor,
+        { planId },
         "a plan approval must name a human authorizer; pass one to approvePlan rather than relying on the acting actor",
       );
       if (!approver.ok) {
@@ -3177,10 +3239,20 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         return { ok: false, reason: `plan ${planId} is not awaiting approval` };
       }
       plans.resolve(planId, { approvedBy: approver.actor });
+      if (untrustedSources.size > 0) {
+        audit.append({
+          kind: "untrusted_content_ignored",
+          planId,
+          capability: claimed.operations.map((operation) => operation.capability).join(", "),
+          sources: [...untrustedSources].sort(compareNames),
+          at: now(),
+        });
+      }
       audit.append({
         kind: "plan_approved",
         planId,
         actor: approver.actor,
+        ...(approver.gestureId !== undefined ? { gestureId: approver.gestureId } : {}),
         at: now(),
       });
       emit();
@@ -3707,13 +3779,27 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       }
       return runCapability(routed, input, "invoke");
     },
-    issueApprovalGesture() {
-      return { kind: "page-token", id: "GST-stub", secret: "stub" };
+    issueApprovalGesture(binding, by) {
+      // Identity first, the same way a grant is minted: a malformed or
+      // non-human issuer throws where the ambient actor would.
+      const issuer = adoptHumanActor(
+        by ?? actor,
+        "an approval token must be minted by a human; pass one to issueApprovalGesture rather than relying on the acting actor",
+      );
+      const bound =
+        typeof binding === "object" && binding !== null
+          ? "actionId" in binding && typeof binding.actionId === "string"
+            ? { actionId: binding.actionId }
+            : "planId" in binding && typeof binding.planId === "string"
+              ? { planId: binding.planId }
+              : undefined
+          : undefined;
+      if (bound === undefined) {
+        throw new TypeError("an approval token is bound to one actionId or one planId");
+      }
+      return gestures.issue(bound, issuer, now());
     },
     async approve(actionId, by) {
-      if (isApprovalGesture(by)) {
-        by = { id: "stub-human", kind: "human" };
-      }
       // The acting identity is read once, here, for the approval and for
       // the view its result crosses.
       const viewer = actor;
