@@ -471,11 +471,20 @@ result leaves through one seam, `crossing`, which projects the current
 state, takes every string that was in the state and is not in the
 projection as a hidden value, and withholds each occurrence in the
 result's text and data, in any key and inside any sentence. This is what
-makes "never appears" true rather than "not under that key". Only strings
-are matched: a hidden number or boolean is too short and too common to
-withhold by value without withholding the rest of the result, so a secret
-has to be a string to get this protection. The cost is that a hidden value
-which also legitimately appears elsewhere is withheld there too.
+makes "never appears" true rather than "not under that key". There are
+two tiers. Every hidden string is withheld by whole-value equality, at any
+depth under any key, which keeps the re-label case closed for a value of
+any length. Inside free text only a hidden string of at least eight
+characters is matched, longest first, because a shorter one is too common
+a substring: a hidden `US` would tear `STATUS` and `USB-C Dock`, a hidden
+`ok` would mangle `token`. So a secret shorter than eight characters is
+protected structurally and by whole value, not inside free text, and an
+author who needs a short value protected inside sentences must not write
+it into sentences. Only strings are matched: a hidden number or boolean is
+too short and too common to withhold by value without withholding the rest
+of the result, so a secret has to be a string to get this protection. The
+cost that remains is that a long hidden value which also legitimately
+appears elsewhere is withheld there too.
 
 **Exception text is withheld when a view is declared.** An exception
 message is written by whoever threw, and it can carry a field the view

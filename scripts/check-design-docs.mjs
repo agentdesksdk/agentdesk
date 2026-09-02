@@ -150,6 +150,7 @@ const CLAIMS = [
   ["docs/architecture.md", /withheld wherever it appears/, "present", "architecture states the hidden value backstop"],
   ["docs/architecture.md", /VIEW_UNAVAILABLE/, "present", "architecture names the failed view refusal"],
   ["docs/architecture.md", /The human side is not projected/, "present", "architecture says the snapshot and audit stay whole"],
+  ["docs/architecture.md", /shorter than eight characters is\s+protected structurally and by whole value/, "present", "architecture states the in-text matching limit of the backstop"],
   ["docs/architecture.md", /adoptHumanActor/, "present", "architecture names the identity boundary a grant issuer crosses"],
 ];
 
