@@ -22,6 +22,13 @@ describe their own application: discovery, compilation, execution,
 authentication, request binding, validation, receipts, and drift
 detection.
 
+`frappe-adapter.md` designs the third staging adapter, over Frappe, written
+against the staging contract as it stands after the IndexedDB and REST
+adapters: fork is a draft, diff is derived from the draft with the Version
+doctype as the audit Frappe already keeps, commit is submit behind a
+modified-stamp check, and an amended-cancel cycle is what a plan means
+there.
+
 `roadmap.md` sequences the work after PR #20 into three waves and four
 lanes, with the SDK work serialized as one stack because every guarantee
 lands in `runtime.ts`, and a per-PR review checklist.
