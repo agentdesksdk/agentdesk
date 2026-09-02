@@ -95,7 +95,7 @@ asserted into demonstrated.
 
 **Status, 2026-09-03: complete on `main`.** 1.1 as #34; 1.2 as #36, with the
 demo's grant card #38 and the pending-grant fix #43; 1.3 as #37; 1.4 as #40;
-1.5 as #41, with the demo half still open as #47; 1.6 as #44; 1.7 as #46,
+1.5 as #41, with the demo half #47; 1.6 as #44; 1.7 as #46,
 with the demo's reload recovery #50 and the reveal replay #49. #41, #43,
 #44, #46, and #50 were merged into their own stack branches and re-landed on
 `main` as #52. The 0.2.0 changelog carries the wave as #56.

@@ -210,6 +210,11 @@ const CLAIMS = [
   ["docs/routing.md", /##\s*[\d.]+% on a real-sized catalog/, "present", "routing states what the scorer measures at on a real-sized catalog"],
   ["docs/routing.md", /scripts\/evals\/runs\/routing-reference/, "present", "routing names the committed routing stress run"],
   ["docs/routing.md", /Hybrid does worse/, "present", "routing says hybrid does worse on the stress catalog, and why"],
+
+  ["frappe-adapter.md", /##\s*What the contract as written cannot express/, "present", "the Frappe design names the contract gaps in the adapter-contract shape"],
+  ["frappe-adapter.md", /thrown before any write is dispatched/, "present", "the Frappe design refuses a stale stamp before submit is called"],
+  ["frappe-adapter.md", /the stamp is a\s+coarser version than a row digest, in both directions/, "present", "the Frappe design states what the modified stamp does to the digest guarantee"],
+  ["frappe-adapter.md", /A response that never arrived is indeterminate/, "present", "the Frappe design treats a lost submit response as indeterminate, not failed"],
 ];
 
 /**
