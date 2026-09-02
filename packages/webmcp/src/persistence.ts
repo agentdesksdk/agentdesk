@@ -165,7 +165,10 @@ export function memoryPersistence(): PersistenceAdapter & {
       claims.set(claim.slot, structuredClone(claim));
     },
     loadIdempotencyClaims: () => [...claims.values()].map((claim) => structuredClone(claim)),
-    clear: () => {},
+    clear: () => {
+      records.clear();
+      claims.clear();
+    },
   };
 }
 
@@ -243,7 +246,10 @@ export function indexedDbPersistence(
       run(CLAIMS, "readwrite", (s) => s.put(claim)).then(() => undefined),
     loadIdempotencyClaims: () =>
       run<PersistedIdempotencyClaim[]>(CLAIMS, "readonly", (s) => s.getAll()),
-    clear: () => {},
+    clear: () =>
+      run(RECORDS, "readwrite", (s) => s.clear())
+        .then(() => run(CLAIMS, "readwrite", (s) => s.clear()))
+        .then(() => undefined),
     ...(options.resolveArtifact !== undefined
       ? { resolveArtifact: options.resolveArtifact }
       : {}),

@@ -749,6 +749,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   };
   const IDEMPOTENCY_LIMIT = 512;
   const idempotency = new Map<string, IdempotencyEntry>();
+  /**
+   * Keys claimed at an approval request, by action id, so the execution
+   * the approval releases settles the same claim and records its receipt,
+   * and a rejection settles it with the rejection.
+   */
+  const approvalClaims = new Map<string, Extract<IdempotencyClaim, { kind: "won" }>>();
 
   /**
    * Makes room for one more key by evicting settled entries oldest-first.
@@ -1626,6 +1632,25 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       return policyDenied(capability.name, decision.reason, refusal(capability));
     }
 
+    // A previous call of this exact operation may already have written. A
+    // repeat would apply it twice, so it is refused until a human has said
+    // what happened, on every path: the approval path was reachable around
+    // this guard, so a repeat after a restart was asked for approval again
+    // and, once approved, executed a second time with the record still open.
+    const unresolved = unreconciled.forOperation(
+      operationKey(capability.name, input),
+    );
+    if (unresolved) {
+      emit();
+      return executionIndeterminate(
+        capability.name,
+        unresolved.id,
+        agentText(unresolved.detail),
+        changesThroughView(unresolved.changes, capability, invocationActor),
+        settled(capability, [{ kind: "record", id: unresolved.id }]),
+      );
+    }
+
     present(capability, "capability_started", input, invocationActor);
     // A grant is consulted only where policy would ask for an approval. It
     // sits after policy, so a denial is final before any mandate is read,
@@ -1647,26 +1672,30 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       }
     }
     if (decision.kind === "require_approval" && authorizing === undefined) {
-      return queueApproval(capability, input, signal, invocationActor, considered);
+      // The key is claimed here, at the request, not at the execution the
+      // approval releases later. A repeat with the same key while the
+      // action is pending replays the same approval rather than opening a
+      // second one; a claim that survives a restart refuses the repeat
+      // before any approval is asked. The claim settles with the approval
+      // result now and is settled again with the outcome when a person
+      // decides, so a later repeat replays what actually happened.
+      const claim = claimIdempotency(capability, input, idempotencyKey);
+      if (claim.kind === "refused") {
+        return claim.result;
+      }
+      if (claim.kind === "replay") {
+        return await claim.result;
+      }
+      const asked = queueApproval(capability, input, signal, invocationActor, considered);
+      if (claim.kind === "won") {
+        claim.settle(asked);
+        const actionId = asked.code === "APPROVAL_REQUIRED" ? asked.data?.approval_id : undefined;
+        if (typeof actionId === "string") {
+          approvalClaims.set(actionId, claim);
+        }
+      }
+      return asked;
     }
-    // A previous call of this exact operation may already have written. A
-    // repeat would apply it twice, so it is refused until a human has said
-    // what happened. This guards the unapproved path, which is the one a
-    // caller can reach without anyone looking.
-    const unresolved = unreconciled.forOperation(
-      operationKey(capability.name, input),
-    );
-    if (unresolved) {
-      emit();
-      return executionIndeterminate(
-        capability.name,
-        unresolved.id,
-        agentText(unresolved.detail),
-        changesThroughView(unresolved.changes, capability, invocationActor),
-        settled(capability, [{ kind: "record", id: unresolved.id }]),
-      );
-    }
-
     // Ownership of the idempotency slot is settled before anything is
     // staged. A replay or a refusal that staged first would leave behind a
     // proposal that neither commits nor is discarded, because only the
@@ -2271,11 +2300,13 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       slot,
       fingerprint,
       settle: (result) => {
-        if (entry.settled) {
-          return;
-        }
+        // The first settle resolves the promise concurrent callers joined;
+        // every settle records the latest result, so a key claimed at an
+        // approval request replays the approval while it is pending and
+        // the outcome once a person has decided.
         entry.settled = true;
         resolve(result);
+        entry.inFlight = Promise.resolve(result);
       },
     };
   }
@@ -3150,10 +3181,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       ...(authorizer.gestureId !== undefined ? { gestureId: authorizer.gestureId } : {}),
       at: now(),
     });
+    const held = approvalClaims.get(actionId);
     const outcome = await executeNow(routed, action.input, {
       actor: actingActor,
       humanInitiated: true,
       ...(action.stateVersion !== undefined ? { stateVersion: action.stateVersion } : {}),
+      ...(held !== undefined ? { claim: held } : {}),
       ...(proposal ? { commit: proposal.commit } : {}),
     });
     // approvals.resolve inserts, so resolving after a reset put the cleared
@@ -3333,6 +3366,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       approvals.clear();
       idempotency.clear();
       restoredClaims.clear();
+      approvalClaims.clear();
       plans.clear();
       receipts.clear();
       grants.clear();
@@ -4080,6 +4114,14 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       const viewer = actor;
       const owner = approvals.get(actionId)?.action.capability;
       const result = await approveInner(actionId, by);
+      // Once the action is no longer pending, the key claimed at its
+      // request settles with what happened, whatever path answered.
+      const status = approvals.get(actionId)?.status;
+      const held = approvalClaims.get(actionId);
+      if (held !== undefined && status !== "PENDING" && status !== "EXECUTING") {
+        held.settle(result);
+        approvalClaims.delete(actionId);
+      }
       return crossing(
         result,
         owner === undefined ? undefined : catalog.get(owner),
@@ -4207,11 +4249,17 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         at: now(),
       });
       emit();
-      return toToolResult({
+      const rejected = toToolResult({
         status: "REJECTED",
         approval_id: actionId,
         capability: action.capability,
       });
+      const held = approvalClaims.get(actionId);
+      if (held !== undefined) {
+        held.settle(rejected);
+        approvalClaims.delete(actionId);
+      }
+      return rejected;
     },
   };
 }
