@@ -26,6 +26,15 @@ export {
 } from "./capability.ts";
 export { CapabilityCatalog } from "./catalog.ts";
 export {
+  catalogHierarchy,
+  hierarchicalScorer,
+  type CatalogDomain,
+  type CatalogHierarchy,
+  type CatalogSubdomain,
+  type CatalogTree,
+  type HierarchyMember,
+} from "./hierarchy.ts";
+export {
   digestOf,
   stateDigest,
   StagedCommitIndeterminate,

@@ -181,6 +181,8 @@ export type Capability = {
   description: string;
   title?: string;
   domain?: string;
+  /** Where this sits under its domain in the catalog tree; defaults to the domain. */
+  subdomain?: string;
   /** Intent phrases; a phrase matches when all its words appear in the query. */
   intents: readonly string[];
   /** Single-word keywords; name tokens are always included. */
@@ -335,6 +337,7 @@ type CapabilitySpecBase = {
   id?: string;
   title?: string;
   domain?: string;
+  subdomain?: string;
   intents?: readonly string[];
   keywords?: readonly string[];
   entities?: readonly string[];
@@ -548,6 +551,9 @@ export function defineCapability(spec: CapabilitySpec): Capability {
   };
   if (staged) {
     capability.stagedOperation = staging.operation;
+  }
+  if (spec.subdomain !== undefined) {
+    capability.subdomain = spec.subdomain;
   }
   if (spec.domain !== undefined) {
     capability.domain = spec.domain;

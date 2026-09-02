@@ -44,7 +44,38 @@ matched write into the set and spend the budget on reads; the graph helps
 when the base match is right and cannot repair one that is wrong. The
 committed run is `scripts/evals/runs/routing-reference/`, and
 `pnpm check:docs` holds the figures here to that run's `report.json`.
-These are the numbers roadmap item 2.2 has to beat.
+These are the numbers roadmap item 2.2 has to beat; the section below
+reports its lexical step against them.
+
+## 36.4% with a lexical domain step
+
+`hierarchicalScorer` is the domain step of "Narrowing in two calls" run
+with no client to choose the domain: the query's content tokens, folded to
+forms the catalog's vocabulary contains, choose a domain by inverse
+capability frequency, a second is kept when it nearly ties, and the
+deterministic scorer runs inside with ties at the cut reduced by
+description overlap. Run through the same evaluation as a custom scorer,
+`--scorer packages/webmcp/examples/hierarchical-scorer.mjs`, it routes the
+expected capability into the published set for 36.4% of tasks, 20 of 55,
+beside the reference's 29.1% for the deterministic cell of the same run,
+with a tie at the cut in 61.8% of tasks against 74.5%. It gains 7 tasks
+and loses 3. The committed run is `scripts/evals/runs/routing-2.2/`, held
+here by `pnpm check:docs` the way the reference is.
+
+That is not a wide margin, and it was measured once: the tasks are held
+out and the scorer was not tuned against them. What moved is what a
+domain step can move. The refund phrased around the customer lands
+`refund_shipping_fee` under billing instead of five customer tools; proof
+of a payment lands `get_receipt`; the month-end invoicing run lands
+`create_invoice_batch`; the carrier switch lands `assign_carrier`. What
+did not move cannot move lexically: "Send me the printable version of
+INV-2291" shares no token with any domain and scores nothing anywhere,
+and "put them together" is a merge only to a reader. The three losses are
+near-ties between domains where the second domain's members spent the
+budget. The lexical step is the floor for the two-call flow, in which the
+client reads the tree's descriptions and chooses the domain the way a
+person would; that choice is what roadmap item 2.4 measures with
+transcripts.
 
 ## Three strategies
 
@@ -151,6 +182,62 @@ published almost the whole catalog.
 
 Nothing widens the surface. A graph edge can change which capabilities are
 visible; it cannot change how many.
+
+## Narrowing in two calls
+
+A catalog of four hundred capabilities does not fit in one ranked answer,
+and no model runs on the page to pick the right five. So `find_capabilities`
+answers at two levels. Called with a `query` and no `domain`, it is the
+single call it always was, ranked by the deterministic scorer over the
+routable catalog, and it carries `domains` beside the matches: the
+catalog's tree, each domain with a description drawn from its members'
+vocabulary, a count, and its subdomains when it has more than one. Called
+with `domain`, or `domain/subdomain`, it ranks inside that branch under
+the same budget and the same `routable` predicate, so a denied capability
+is absent from every level: not counted, not in a description, not ranked
+when the query names it. An unknown domain routes nothing and answers with
+the tree. A client that skips the first call loses nothing; a client that
+reads the tree chooses the domain the way a person would, and that choice
+is what removes the cross-domain collision the reference lists, the refund
+phrased around the customer that routed five customer tools.
+
+- **How a capability declares its subdomain.** `subdomain` beside
+  `domain`; absent, it defaults from its domain. A domain lists
+  subdomains only when its members declare more than one, so a flat
+  catalog pays no bytes for a level it does not have. A capability with
+  no domain lives under `uncategorized`.
+- **How the tree is derived and cached.** `catalogHierarchy` is built
+  once per runtime and tokenizes every capability's name, keywords,
+  intents, and description at construction. A call pays the routable
+  filter and a count, because policy is a function of the moment and
+  cannot be cached; the tree is cached by the admitted set, so two calls
+  that admit the same members share one object. A domain's description
+  is the six keyword terms most concentrated in it, weighted by count
+  squared over catalog-wide count, so "add" and "view", which every
+  domain carries, describe none of them, and a denied capability's words
+  leave the description when it leaves the count.
+- **What the report carries.** `RoutingReport.domain` when the call
+  narrowed, and `RoutingReport.domains` when it returned the tree, so the
+  demo's Inspector can show what the client was choosing from.
+- **The byte bound.** A first-level answer's `domains` serializes below
+  the bootstrap surface's own schema bytes on a catalog the stress
+  evaluation's size, twelve domains of thirty-four; a test holds it there.
+  The bootstrap surface itself does not change: `domain` is accepted by
+  `find_capabilities` and not declared in its schema, because those bytes
+  are the budget every published set is measured against and the figure
+  the task evaluation's reference records. The narrowing input is
+  announced in every first-level answer's `instruction`, beside the
+  `domains` it applies to, so a client that reads the tree can use it and
+  a client that reads only schemas sees the surface it always saw.
+- **How ties at the cut are reduced.** Inside a branch the deterministic
+  scorer runs as it does everywhere, and every content word the query
+  shares with a capability's title, name, or description adds 0.05,
+  capped at eight words, so the bump decides among capabilities the
+  scorer could not tell apart and never outranks a signal it found. The
+  context domain already weighs 4 in that scorer, so a tie between
+  domains breaks on it before the name with no further rule. A capability
+  the scorer gave nothing can rank on the bump alone inside a branch,
+  because the domain step already established the query is about it.
 
 ## Supplying your own scorer
 
@@ -259,4 +346,6 @@ Every match carries `reasons`, in the order the contributions applied, so
 packages/webmcp/src/router.ts routeTask rankCapabilities RoutingStrategy CapabilityScorer RoutingResult RELATION_WEIGHTS ROUTING_WEIGHTS MAX_ROUTED DEFAULT_ROUTED scoredExternally degradedFrom
 packages/webmcp/src/capability.ts CapabilityRelationships relationships
 packages/webmcp/src/runtime.ts routable partition visibleRepair findCapabilities
+packages/webmcp/src/hierarchy.ts catalogHierarchy hierarchicalScorer rankWithin baseScore CatalogTree CatalogDomain UNCATEGORIZED NEAR_TIE OVERLAP_WEIGHT OVERLAP_CAP DESCRIPTION_TERMS
+packages/webmcp/src/capability.ts subdomain
 -->
