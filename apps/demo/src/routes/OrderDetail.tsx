@@ -30,7 +30,13 @@ export function OrderDetail() {
     <>
       <div className="detail-header">
         <h1>Order #{order.id}</h1>
-        <Pill value={order.status} />
+        <span
+          data-reveal="order-status"
+          role="region"
+          aria-label={`Status of order #${order.id}`}
+        >
+          <Pill value={order.status} />
+        </span>
         {order.tags.map((tag) => (
           <span key={tag} className="pill normal">
             {tag}

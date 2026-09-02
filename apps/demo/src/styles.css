@@ -531,7 +531,9 @@ input[type="text"]:focus {
 
 .event {
   display: grid;
-  grid-template-columns: 58px 1fr;
+  /* minmax(0, 1fr), not 1fr: a row of controls must wrap inside the
+     column rather than widen it past the rail. */
+  grid-template-columns: 58px minmax(0, 1fr);
   gap: 10px;
   padding: 6px 0;
   border-bottom: 1px dashed var(--line);
@@ -793,7 +795,9 @@ input[type="text"]:focus {
 }
 
 .receipt-actions {
-  flex: none;
+  /* Shrinks and wraps; flex: none sized it to every control on one line. */
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -1438,4 +1442,23 @@ input[type="text"]:focus {
 
 .durability-card .durability-result:empty {
   display: none;
+}
+
+/* "Show me proof": the kind (value or page) is part of the text. A long
+   label wraps inside the control; it never widens the rail. */
+.undo.proof {
+  white-space: normal;
+  text-align: left;
+  max-width: 100%;
+}
+
+.undo.proof .proof-kind {
+  font-weight: 500;
+  color: var(--ink-soft);
+  margin-left: 4px;
+}
+
+.proof-row {
+  justify-content: flex-start;
+  margin-top: 4px;
 }

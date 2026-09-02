@@ -22,7 +22,12 @@ export function Inventory() {
         <StatCard label="Low stock" value={low.length} hint="at or below reorder point" />
         <StatCard label="Valuation" value={fmtMoney(valuation)} hint="at list price" />
       </div>
-      <div className="panel">
+      <div
+        className="panel"
+        data-reveal="inventory-table"
+        role="region"
+        aria-label="Products"
+      >
         <table className="data">
           <thead>
             <tr>

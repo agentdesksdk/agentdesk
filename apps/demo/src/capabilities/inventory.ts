@@ -2,6 +2,7 @@ import {
   CapabilityUnavailableError,
   unavailable,
   type Capability,
+  receipt,
 } from "@agentdesk/webmcp";
 import { getState, mutate } from "../data/store.ts";
 import {
@@ -280,7 +281,18 @@ export const inventoryCapabilities: Capability[] = [
           target.discontinued = true;
         }
       });
-      return { sku: product.sku, discontinued: true };
+      return receipt({
+        entity: `Product ${product.sku}`,
+        changes: [{ field: `${product.name} discontinued`, before: false, after: true }],
+        evidence: [
+          {
+            label: `${product.name} (${product.sku}) in the inventory list`,
+            route: "/inventory",
+            reveal: "inventory-table",
+          },
+        ],
+        result: { sku: product.sku, discontinued: true },
+      });
     },
   }),
 ];

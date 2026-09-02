@@ -10,6 +10,7 @@ import type {
 import { useAnnouncer } from "./announcer.ts";
 import { receiptAuthorityText } from "./grant-text.ts";
 import { render } from "./ApprovalCards.tsx";
+import { EvidenceControls } from "./EvidenceControls.tsx";
 import { useRuntime } from "./hooks.ts";
 import {
   describeAction,
@@ -37,6 +38,7 @@ function collapse(events: readonly AuditEvent[]): Rendered[] {
   let toolBatch: { kind: "tool_registered" | "tool_retired"; count: number; at: number } | null =
     null;
   let index = 0;
+  let position = -1;
 
   const flush = () => {
     if (toolBatch) {
@@ -53,6 +55,7 @@ function collapse(events: readonly AuditEvent[]): Rendered[] {
   };
 
   for (const event of events) {
+    position += 1;
     if (event.kind === "tool_registered" || event.kind === "tool_retired") {
       if (toolBatch && toolBatch.kind === event.kind) {
         toolBatch.count += 1;
@@ -111,9 +114,19 @@ function collapse(events: readonly AuditEvent[]): Rendered[] {
           meta: event.summary,
         });
         break;
-      case "approval_approved":
-        out.push({ key, at: event.at, head: "Human approved", meta: event.actionId });
+      case "approval_approved": {
+        // The execution this approval authorized starts next for the same
+        // capability; its stored receipt is where the proof lives.
+        const started = events
+          .slice(position + 1)
+          .find((e) => e.kind === "execution_started" && e.capability === event.capability);
+        const row: Rendered = { key, at: event.at, head: "Human approved", meta: event.actionId };
+        if (started !== undefined && started.kind === "execution_started") {
+          row.executionId = started.executionId;
+        }
+        out.push(row);
         break;
+      }
       case "approval_rejected":
         out.push({ key, at: event.at, head: "Human rejected", meta: event.actionId });
         break;
@@ -447,6 +460,11 @@ export function ActivityPanel() {
                   {row.head}
                 </div>
                 {row.meta ? <div className="meta">{row.meta}</div> : null}
+                {!row.receipt && entry ? (
+                  <div className="receipt-actions proof-row">
+                    <EvidenceControls capability={entry.capability} links={entry.receipt.evidence ?? []} />
+                  </div>
+                ) : null}
                 {row.receipt ? (
                   <section
                     className="receipt"
@@ -482,6 +500,7 @@ export function ActivityPanel() {
                             {verificationLabel(entry.verification)}
                           </span>
                           <div className="receipt-actions">
+                            <EvidenceControls capability={entry.capability} links={entry.receipt.evidence ?? []} />
                             {(entry.receipt.affected ?? []).map((object) => (
                               <button
                                 key={`${object.kind}-${object.id}`}

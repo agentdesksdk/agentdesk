@@ -422,6 +422,22 @@ export const orderCapabilities: Capability[] = [
             : []),
         ],
         undoable: false,
+        evidence: [
+          {
+            label: `Status of Order #${order.id}`,
+            route: `/orders/${order.id}`,
+            reveal: "order-status",
+          },
+          ...(invoiceBefore
+            ? [
+                {
+                  label: `Invoice ${invoiceBefore.id} status on Order #${order.id}`,
+                  route: `/orders/${order.id}`,
+                  reveal: "order-billing",
+                },
+              ]
+            : []),
+        ],
         result: { order_id: order.id, status: "cancelled" },
       });
     },

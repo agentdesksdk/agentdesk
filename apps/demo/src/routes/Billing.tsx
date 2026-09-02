@@ -28,7 +28,12 @@ export function Billing() {
         />
       </div>
       <div className="grid-2">
-        <div className="panel">
+        <div
+          className="panel"
+          data-reveal="invoices-table"
+          role="region"
+          aria-label="Invoices"
+        >
           <h2>Invoices</h2>
           <table className="data">
             <thead>

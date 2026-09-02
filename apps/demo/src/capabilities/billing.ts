@@ -4,6 +4,7 @@ import {
   unavailable,
   type Capability,
   type Unavailability,
+  receipt,
 } from "@agentdesk/webmcp";
 import { getState, mutate, nowIso } from "../data/store.ts";
 import {
@@ -281,7 +282,20 @@ export const billingCapabilities: Capability[] = [
           issuedAt: nowIso(),
         });
       });
-      return { credit_id: creditId, customer: customer.name, amount };
+      return receipt({
+        entity: `Customer ${customer.name}`,
+        changes: [
+          { field: "Credit issued", before: null, after: `${creditId} · ${money(amount)}` },
+        ],
+        evidence: [
+          {
+            label: `Credit ${creditId} for ${customer.name}`,
+            route: `/customers/${customer.id}`,
+            reveal: "customer-credits",
+          },
+        ],
+        result: { credit_id: creditId, customer: customer.name, amount },
+      });
     },
   }),
   createStateTransitionCapability({
@@ -319,20 +333,54 @@ export const billingCapabilities: Capability[] = [
         throw new CapabilityUnavailableError(blocker);
       }
       const refundable = refundableBalance(input)!;
+      const invoiceBefore = getState().invoices.find((inv) => inv.orderId === order.id);
+      let creditId = "";
       mutate((draft) => {
         const target = draft.invoices.find((inv) => inv.orderId === order.id);
         if (target) {
           target.status = "void";
         }
+        creditId = `CR-${4001 + draft.credits.length}`;
         draft.credits.push({
-          id: `CR-${4001 + draft.credits.length}`,
+          id: creditId,
           customerId: order.customerId,
           amount: refundable.amount,
           reason: `Refund of collected balance for order ${order.id}`,
           issuedAt: nowIso(),
         });
       });
-      return { order_id: order.id, refunded: true, amount: refundable.amount };
+      return receipt({
+        entity: `Order #${order.id}`,
+        changes: [
+          ...(invoiceBefore
+            ? [
+                {
+                  field: `Invoice ${invoiceBefore.id} status`,
+                  before: invoiceBefore.status,
+                  after: "void",
+                },
+              ]
+            : []),
+          {
+            field: "Credit issued",
+            before: null,
+            after: `${creditId} · ${money(refundable.amount)}`,
+          },
+        ],
+        evidence: [
+          {
+            label: `Invoice status on Order #${order.id}`,
+            route: `/orders/${order.id}`,
+            reveal: "order-billing",
+          },
+          {
+            label: `Credit ${creditId} for customer ${order.customerId}`,
+            route: `/customers/${order.customerId}`,
+            reveal: "customer-credits",
+          },
+        ],
+        result: { order_id: order.id, refunded: true, amount: refundable.amount },
+      });
     },
   }),
   createStateTransitionCapability({
@@ -361,7 +409,25 @@ export const billingCapabilities: Capability[] = [
           target.status = "void";
         }
       });
-      return { invoice_id: invoice.id, status: "void" };
+      return receipt({
+        entity: `Invoice ${invoice.id}`,
+        changes: [
+          { field: `Invoice ${invoice.id} status`, before: invoice.status, after: "void" },
+        ],
+        evidence: [
+          {
+            label: `Invoice ${invoice.id} status on Order #${invoice.orderId}`,
+            route: `/orders/${invoice.orderId}`,
+            reveal: "order-billing",
+          },
+          {
+            label: `Invoice ${invoice.id} in the invoice list`,
+            route: "/billing",
+            reveal: "invoices-table",
+          },
+        ],
+        result: { invoice_id: invoice.id, status: "void" },
+      });
     },
   }),
   createUpdateCapability({
