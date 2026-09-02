@@ -89,7 +89,10 @@ export function UnreconciledPanel() {
             Each of these wrote and then failed to report, so the runtime cannot
             say what happened. Kept across reloads in{" "}
             {demoPersistence.kind === "indexeddb" ? "IndexedDB" : "memory"}. A
-            person decides; the same call is refused until then.
+            person decides; the same call is refused until then. Meridian Ops
+            keeps its own data in memory and reseeds on load, so after a reload
+            the truthful answer here is that the write did not land; a real
+            application with a backend would check its store.
           </p>
           {records.map((record) => (
             <article key={record.id} className="unreconciled-record" data-record={record.id}>
