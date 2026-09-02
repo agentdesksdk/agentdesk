@@ -155,6 +155,8 @@ const CLAIMS = [
   ["docs/architecture.md", /##\s*A receipt says where its proof can be seen/, "present", "architecture states the evidence link contract"],
   ["docs/architecture.md", /Authored wins; otherwise derived; otherwise empty/, "present", "architecture says where evidence comes from"],
   ["docs/architecture.md", /A link crosses through the agent view like every other field/, "present", "architecture says evidence is projected"],
+  ["docs/architecture.md", /An authored link is the value/, "present", "architecture says an authored evidence link points at the value"],
+  ["docs/architecture.md", /A derived link is page-level/, "present", "architecture says a derived evidence link points at the page"],
   ["docs/architecture.md", /adoptHumanActor/, "present", "architecture names the identity boundary a grant issuer crosses"],
 ];
 

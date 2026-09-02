@@ -518,12 +518,22 @@ an element to highlight. A receipt carries that as `evidence`, a list of
 is identical whether it is read off a result or off a stored receipt.
 
 ```ts
-type EvidenceLink = {
+type AuthoredEvidenceLink = {
   label: string;   // what a person will see: "Shipping line on the invoice"
   route: string;   // a page in the application, starting with "/"
   reveal?: string; // an opaque anchor the application registered, never a selector
 };
+type EvidenceLink = AuthoredEvidenceLink & { source: "authored" | "derived" };
 ```
+
+**The type says which is which.** `source` is set by the runtime when it
+settles the receipt, never by the capability: an author's link is stamped
+`authored` and anything an author put in `source` is overwritten. An
+authored link is the value: the author knew where the changed value lives
+and pointed at it. A derived link is page-level: a presentation hint names
+the write's page and its anchor, not necessarily the field that changed. A
+consequential capability should author its links, and the roadmap gate
+that a link resolves to the value that changed applies to authored ones.
 
 The shape is exactly what the demo's `reveal.ts` needs to navigate and
 highlight, and nothing more. `reveal` is the same registered token the
@@ -1548,7 +1558,7 @@ packages/webmcp/src/results.ts completed capabilityUnavailable approvalRequired 
 packages/webmcp/src/grants.ts Grant LiveGrant GrantRequest ScopeRule ConsideredGrant GrantOutcome GrantStore parseScope parseGrantRequest matchesScope consult spend revoke liveCapabilities
 packages/webmcp/src/runtime.ts adoptHumanActor authorizing considered queueApproval revokeGrant listGrants getGrant currentDigest hasPreviewSource
 packages/webmcp/src/staging.ts stateDigest
-packages/webmcp/src/results.ts approvalStale viewUnavailable EvidenceLink evidence
+packages/webmcp/src/results.ts approvalStale viewUnavailable EvidenceLink AuthoredEvidenceLink evidence source
 packages/webmcp/src/runtime.ts deriveEvidence linksThroughView settledReceipt
 packages/webmcp/src/protocol.ts link
 packages/webmcp/src/capability.ts AgentView agentView
