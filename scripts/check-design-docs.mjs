@@ -181,6 +181,8 @@ const CLAIMS = [
   ["docs/architecture.md", /never replayed and never re-executed/, "present", "architecture states refusal after restart as a decided limit"],
   ["docs/architecture.md", /claimed at the request, not at the\s+execution the approval releases later/, "present", "architecture says a key on the approval path is claimed at the request"],
   ["docs/architecture.md", /The runtime never\s+calls `clear`/, "present", "architecture says clear belongs to the page's reset"],
+  ["docs/architecture.md", /A page can replay a reveal/, "present", "architecture states runtime.present"],
+  ["docs/architecture.md", /no\s+WebMCP tool reaches it/, "present", "architecture says present is not a tool"],
   ["docs/architecture.md", /adoptHumanActor/, "present", "architecture names the identity boundary a grant issuer crosses"],
 ];
 

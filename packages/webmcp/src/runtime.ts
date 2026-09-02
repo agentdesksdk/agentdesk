@@ -42,9 +42,18 @@ import { defaultValidator, type Validator } from "./validation.ts";
 import {
   PresentationBus,
   resolvePresentation,
+  type FocusPolicy,
+  type PresentationEvent,
   type PresentationListener,
   type PresentationPhase,
 } from "./presentation.ts";
+
+/**
+ * A reveal target is an opaque id the application registered on one of its
+ * own elements. Constraining the token here is what keeps a selector out
+ * of a replayed reveal, whatever a page passes.
+ */
+const REVEAL_TOKEN = /^[a-z0-9][a-z0-9-]*$/i;
 import {
   PlanStore,
   highestRisk,
@@ -161,6 +170,19 @@ export type RoutedMatch = {
   suggestedCapability?: string;
 };
 
+/**
+ * What a page may ask the runtime to present: the navigate and reveal
+ * shape the runtime already emits for a completed write, without the
+ * fields only an execution can supply.
+ */
+export type PresentationRequest = {
+  capability: string;
+  route?: string;
+  reveal?: string;
+  message?: string;
+  focus?: FocusPolicy;
+};
+
 export type RoutingReport = {
   query: string;
   matches: RoutedMatch[];
@@ -204,6 +226,14 @@ export type AgentDeskRuntime = {
    * WebMCP result is authoritative whether or not anyone subscribes.
    */
   subscribePresentation: (listener: PresentationListener) => () => void;
+  /**
+   * Replays a presentation event on demand, so a page can navigate to and
+   * reveal an evidence link through the same consumer the runtime drives.
+   * A presentation event, not an execution: it changes no state, needs no
+   * actor beyond the page, is not reachable through any WebMCP tool, and
+   * never enters a result.
+   */
+  present: (event: PresentationRequest) => void;
   /**
    * Streams audit events as they happen, for export to an external
    * observability backend. A throwing listener cannot affect execution.
@@ -3396,6 +3426,44 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     },
     subscribePresentation(listener) {
       return presentation.subscribe(listener);
+    },
+    present(request) {
+      // A replay is a presentation event, not an execution. It is checked
+      // the way the runtime checks its own hints, then emitted on the same
+      // bus with the same phase a completed write uses, so the consumer
+      // that reveals a write reveals its proof the same way. Nothing only
+      // an execution can supply is set: no executionId, so the focus
+      // handoff cannot fire; no humanInitiated; no actor.
+      if (typeof request !== "object" || request === null) {
+        throw new TypeError("present takes a presentation request object");
+      }
+      if (typeof request.capability !== "string" || request.capability.trim() === "") {
+        throw new TypeError("a presentation request names the capability it presents");
+      }
+      if (request.route !== undefined && (typeof request.route !== "string" || !request.route.startsWith("/"))) {
+        throw new TypeError(`a presentation route must start with "/", received ${JSON.stringify(request.route)}`);
+      }
+      if (request.reveal !== undefined && (typeof request.reveal !== "string" || !REVEAL_TOKEN.test(request.reveal))) {
+        throw new TypeError(
+          "a presentation reveal is an opaque anchor token the application registered, never a selector",
+        );
+      }
+      if (request.message !== undefined && typeof request.message !== "string") {
+        throw new TypeError("a presentation message must be a string when present");
+      }
+      if (request.focus !== undefined && request.focus !== "never" && request.focus !== "on_explicit_request") {
+        throw new TypeError("a presentation focus policy is never or on_explicit_request");
+      }
+      const event: PresentationEvent = {
+        phase: "capability_completed",
+        capability: request.capability,
+        ...(request.route !== undefined ? { route: request.route } : {}),
+        ...(request.reveal !== undefined ? { reveal: request.reveal } : {}),
+        ...(request.message !== undefined ? { message: request.message } : {}),
+        ...(request.focus !== undefined ? { focus: request.focus } : {}),
+        at: now(),
+      };
+      presentation.emit(event);
     },
     subscribeAudit(listener) {
       return audit.subscribe(listener);

@@ -84,6 +84,7 @@ export {
   createAgentDeskRuntime,
   type AgentDeskRuntime,
   type Exposure,
+  type PresentationRequest,
   type RoutedMatch,
   type RoutingReport,
   type RuntimeSnapshot,
