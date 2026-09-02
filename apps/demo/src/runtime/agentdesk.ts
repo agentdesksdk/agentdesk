@@ -9,7 +9,7 @@ import {
 } from "@agentdesk/webmcp";
 import { capabilities } from "../capabilities/index.ts";
 import { stagingAdapter } from "../capabilities/staged.ts";
-import { getState } from "../data/store.ts";
+import { getState, resetStore } from "../data/store.ts";
 import { createDemoPersistence } from "./persistence.ts";
 
 type ModelContextHost = { modelContext?: { registerTool?: unknown } };
@@ -51,6 +51,7 @@ export function createMeridianRuntime(options: {
     registerTool: options.registerTool ?? (async () => {}),
     actor: { id: "agent", name: "Agent", kind: "agent" },
     staging: stagingAdapter,
+    ...(options.persistence !== undefined ? { persistence: options.persistence } : {}),
     ...(options.approvalGesture !== undefined ? { approvalGesture: options.approvalGesture } : {}),
   });
 }
@@ -63,6 +64,8 @@ export const agentdesk = createAgentDeskRuntime({
   // describes a change and the code that performs it are not both supplied
   // by whoever declared the operation.
   staging: stagingAdapter,
+  // An unknown outcome and a claimed idempotency key survive a reload.
+  persistence: demoPersistence.adapter,
   // An approval must carry a token minted on a click. The card's handler
   // mints one inside the click; nothing that only asserts an identity is
   // accepted by this instance.
@@ -104,6 +107,34 @@ export const agentdesk = createAgentDeskRuntime({
 });
 
 void agentdesk.start();
+
+/**
+ * Reset Demo. The runtime's own reset keeps unreconciled records on purpose,
+ * and the persisted store is the page's, so a reset settles each open
+ * record as the operator (the seed the store returns to holds none of it),
+ * empties the persisted store, and only then resets the document and the
+ * runtime. A record that cannot be settled is kept and named.
+ */
+export async function resetDemo(): Promise<{ settled: number; kept: string[] }> {
+  const kept: string[] = [];
+  let settled = 0;
+  for (const record of agentdesk.listUnreconciled()) {
+    const resolution =
+      record.kind === "cleanup_failed"
+        ? ({ kind: "cleanup_disposed" } as const)
+        : ({ kind: "commit_not_applied" } as const);
+    const outcome = agentdesk.reconcile(record.id, resolution, OPERATOR);
+    if (outcome.ok) {
+      settled += 1;
+    } else {
+      kept.push(`${record.id}: ${outcome.reason}`);
+    }
+  }
+  await demoPersistence.clear();
+  resetStore();
+  await agentdesk.reset();
+  return { settled, kept };
+}
 
 let cached: RuntimeSnapshot = agentdesk.getSnapshot();
 agentdesk.subscribe((snapshot) => {
