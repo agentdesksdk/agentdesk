@@ -684,9 +684,12 @@ authorized the write, the `artifact`, and a `seal`. A
 `PersistedIdempotencyClaim` carries the `slot` and the input `fingerprint`
 a key was claimed for. The adapter is
 `{ saveRecord, settleRecord, loadOpenRecords, saveIdempotencyClaim,
-loadIdempotencyClaims, resolveArtifact? }`; every method may be
-synchronous or return a promise, and the roadmap's four names grew by two
-because a settled record has to be removed and a claim has to be loaded.
+loadIdempotencyClaims, clear, resolveArtifact? }`; every method may be
+synchronous or return a promise, and the roadmap's four names grew by
+three because a settled record has to be removed, a claim has to be
+loaded, and a page's Reset has to be able to forget durable state with one
+call that does not name the adapter's stores by hand. The runtime never
+calls `clear`.
 
 **How an artifact is written down.** `describeArtifact` clones the staging
 adapter's artifact and stores it as `{ kind: "value" }`. An artifact that
@@ -705,8 +708,15 @@ nobody can hand back would settle nothing in the application.
 **What survives and what does not.** The record is saved the moment it is
 made and again when an approval or a plan attaches its ids; it is removed
 when `reconcile` settles it. An idempotency claim is saved when it is won
-and again, with the receipt id, when the execution records a receipt.
-Only the claim survives, not the result it produced. That is a stated
+and again, with the receipt id, when the execution records a receipt. A
+key travelling the approval path is claimed at the request, not at the
+execution the approval releases later, so a repeat with the same key while
+the action is pending replays the same approval rather than opening a
+second one, and a claim that survives a restart refuses the repeat before
+any approval is asked; the open record's `operationKey` guard runs ahead
+of the approval branch too, so a repeat of an unknown commit is refused on
+every path with the record named. Only the claim survives, not the result
+it produced. That is a stated
 limit, decided rather than defaulted: a repeat of the same call after
 reload is refused with `IDEMPOTENCY_CONFLICT` and `cause: "after_restart"`,
 never replayed and never re-executed, because the write may have landed
@@ -1761,7 +1771,7 @@ packages/webmcp/src/gesture.ts ApprovalGesture GestureBinding GestureStore GESTU
 packages/webmcp/src/runtime.ts resolveApprover issueApprovalGesture userActivation untrustedReads untrustedSince requestedAtTick approvalGesture
 packages/webmcp/src/audit.ts untrusted_content_ignored gestureId
 packages/webmcp/src/persistence.ts PersistedRecord PersistedIdempotencyClaim PersistedArtifact PersistenceAdapter memoryPersistence indexedDbPersistence sealOf verifyRecord
-packages/webmcp/src/runtime.ts persistOpen rehydrate describeArtifact restoredClaims
+packages/webmcp/src/runtime.ts persistOpen rehydrate describeArtifact restoredClaims approvalClaims
 packages/webmcp/src/staging.ts hydrate identify digestOf
 packages/webmcp/src/results.ts after_restart
 packages/webmcp/src/capability.ts AgentView agentView

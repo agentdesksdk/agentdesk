@@ -179,6 +179,8 @@ const CLAIMS = [
   ["docs/architecture.md", /integrity check against corruption\s+and accidental change, not authentication/, "present", "architecture says what the seal is and is not"],
   ["docs/architecture.md", /the seal proves the evidence did not change on disk/, "absent", "the seal is not described as proof against an adversary"],
   ["docs/architecture.md", /never replayed and never re-executed/, "present", "architecture states refusal after restart as a decided limit"],
+  ["docs/architecture.md", /claimed at the request, not at the\s+execution the approval releases later/, "present", "architecture says a key on the approval path is claimed at the request"],
+  ["docs/architecture.md", /The runtime never\s+calls `clear`/, "present", "architecture says clear belongs to the page's reset"],
   ["docs/architecture.md", /adoptHumanActor/, "present", "architecture names the identity boundary a grant issuer crosses"],
 ];
 
