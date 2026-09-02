@@ -27,28 +27,23 @@ function adapterInMemory() {
 /** The call, sent the way a client sends it: by name, with an idempotency key. */
 const THE_CALL = { name: "refund_shipping", input: { order_id: ORDER }, idempotency_key: KEY };
 
-/**
- * The operator's mandate. Under a grant the call takes the unapproved path,
- * the one the runtime guards by operation key and by idempotency claim;
- * the record then carries the grant that authorized the write.
- */
-function grantRefund(runtime: Runtime) {
-  const issued = runtime.grant(
-    { capability: "refund_shipping", scope: { order_id: ORDER }, uses: 2, expiresAt: Date.now() + 600_000 },
-    OPERATOR,
-  );
-  expect(issued.ok, JSON.stringify(issued)).toBe(true);
+/** How many times a person has been asked, so a repeat can be shown not to ask again. */
+function approvalsAsked(runtime: Runtime): number {
+  return runtime.getSnapshot().audit.filter((e) => e.kind === "approval_requested").length;
 }
 
 /**
  * The interrupted operation: a shipping refund whose commit writes and then
- * throws. The runtime cannot know whether the write landed, so it records
- * an unreconciled outcome instead of a success or a failure.
+ * throws. The refund is consequential, so the call asks for approval and a
+ * person approves it; the runtime then cannot know whether the write landed,
+ * so it records an unreconciled outcome instead of a success or a failure.
  */
 async function interrupt(runtime: Runtime): Promise<ToolResult> {
-  grantRefund(runtime);
   armCommitFault("refund_shipping");
-  const done = await runtime.invoke("invoke_capability", THE_CALL);
+  const asked = await runtime.invoke("invoke_capability", THE_CALL);
+  expect(asked.code, asked.content[0]?.text).toBe("APPROVAL_REQUIRED");
+  const actionId = runtime.getSnapshot().pending[0]!.id;
+  const done = await runtime.approve(actionId, OPERATOR);
   expect(done.code, done.content[0]?.text).toBe("EXECUTION_INDETERMINATE");
   return done;
 }
@@ -71,7 +66,9 @@ describe("an unknown outcome survives a restart of Meridian Ops", () => {
     expect(record.capability).toBe("refund_shipping");
     expect(record.operationKey).toBeDefined();
     expect(record.executedBy).toBeDefined();
-    expect(record.grantId).toMatch(/^GRT-/);
+    // Authorized by the person's approval, not by a grant.
+    expect(record.actionId).toBeDefined();
+    expect(record.grantId).toBeUndefined();
     expect(record.changes.map((c) => c.field)).toContain(`Order #${ORDER} shipping refunded`);
     // The fork is not cloneable, so it was written down by the identity the
     // staging adapter gave it, not as two copies of the document.
@@ -89,12 +86,13 @@ describe("an unknown outcome survives a restart of Meridian Ops", () => {
     expect(after[0]!.id).toBe(record.id);
     expect(after[0]!.operationKey).toBe(record.operationKey);
     expect(after[0]!.executedBy).toEqual(record.executedBy);
-    expect(after[0]!.grantId).toBe(record.grantId);
+    expect(after[0]!.actionId).toBe(record.actionId);
+    expect(after[0]!.grantId).toBeUndefined();
     expect(JSON.stringify(after[0]!.changes)).toBe(JSON.stringify(record.changes));
     await second.stop();
   });
 
-  it("refuses the same call again after the restart, with its cause, instead of repeating it", async () => {
+  it("refuses the same call again after the restart, with its cause, before any approval is asked", async () => {
     const adapter = adapterInMemory();
     const first = createMeridianRuntime({ persistence: adapter });
     await first.start();
@@ -106,30 +104,33 @@ describe("an unknown outcome survives a restart of Meridian Ops", () => {
     resetStore();
     const second = createMeridianRuntime({ persistence: adapter });
     await second.start();
-    // Grants do not survive a reload; the operator issues one again, which
-    // is what the page's control does. The call then meets the guard.
-    grantRefund(second);
     // Refused twice over. While the record is open, its operation key guards
-    // the same call: the runtime names the record and executes nothing.
+    // the same call ahead of the approval gate: the runtime names the
+    // record, asks nobody, and executes nothing.
     const id = second.listUnreconciled()[0]!.id;
     const guarded = await second.invoke("invoke_capability", THE_CALL);
     expect(guarded.code, guarded.content[0]?.text).toBe("EXECUTION_INDETERMINATE");
     expect(guarded.data?.record_id).toBe(id);
+    expect(approvalsAsked(second)).toBe(0);
     expect(second.getSnapshot().pending).toEqual([]);
     expect(getState().orders.find((o) => o.id === ORDER)!.shippingRefunded).toBe(false);
-    // Once a person settles the record, the claim on the key still survives,
-    // and the same call is refused for that reason, never replayed.
+    // Once a person settles the record, the claim the approval request made
+    // on the key still survives, and the same call is refused for that
+    // reason, never replayed and never asked again.
     expect(second.reconcile(id, { kind: "commit_not_applied" }, OPERATOR)).toEqual({ ok: true });
     const again = await second.invoke("invoke_capability", THE_CALL);
     expect(again.code).toBe("IDEMPOTENCY_CONFLICT");
     expect(again.data?.cause).toBe("after_restart");
     expect(String(again.data?.reason)).toMatch(/restart/);
+    expect(approvalsAsked(second)).toBe(0);
     expect(second.getSnapshot().pending).toEqual([]);
     expect(getState().orders.find((o) => o.id === ORDER)!.shippingRefunded).toBe(false);
     // The card's words for each: the guard's refusal has the same shape as
     // a fresh unknown outcome and is told apart by the record already open.
-    expect(describeAttempt(guarded, new Set([id]))).toMatch(/^Refused \(EXECUTION_INDETERMINATE\)/);
-    expect(describeAttempt(guarded, new Set([id]))).toContain(id);
+    const words = describeAttempt(guarded, { open: new Set([id]) });
+    expect(words).toMatch(/^Refused \(EXECUTION_INDETERMINATE\)/);
+    expect(words).toContain(id);
+    expect(words).toMatch(/no approval was asked/);
     expect(describeAttempt(again)).toMatch(/^Refused \(IDEMPOTENCY_CONFLICT, cause after_restart\)/);
     await second.stop();
   });
@@ -195,16 +196,55 @@ async function frames(count: number) {
   }
 }
 
-/** Presses the card's control: one click issues the grant and runs the call. */
-async function interruptThroughThePage(view: RenderResult) {
-  const card = view.getByRole("region", { name: `Interrupted operations on order #${ORDER}` });
+const cardOf = (view: RenderResult) =>
+  view.getByRole("region", { name: `Interrupted operations on order #${ORDER}` });
+const resultOf = (card: HTMLElement) =>
+  card.querySelector("[data-durability-result]")?.textContent ?? "";
+
+/** Presses the card's control: one click sends the keyed refund. */
+async function press(view: RenderResult): Promise<HTMLElement> {
+  const card = cardOf(view);
   await act(async () => {
     fireEvent.click(
       within(card).getByRole("button", { name: `Interrupt a shipping refund on order #${ORDER}` }),
     );
   });
   await frames(1);
-  expect(agentdesk.getSnapshot().pending, "the call runs under a grant, not an approval").toEqual([]);
+  return card;
+}
+
+/**
+ * The person's decision on the approval card. The page's runtime requires
+ * a gesture token minted inside a click; jsdom has no user activation, so
+ * one is injected for the duration of the click it stands for.
+ */
+async function approveOnTheCard(view: RenderResult) {
+  const dialog = view.getByRole("alertdialog");
+  Object.defineProperty(navigator, "userActivation", {
+    value: { isActive: true },
+    configurable: true,
+  });
+  try {
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Approve" }));
+    });
+  } finally {
+    Object.defineProperty(navigator, "userActivation", {
+      value: { isActive: false },
+      configurable: true,
+    });
+  }
+  await frames(1);
+}
+
+/** The whole interruption through the page: the press, the approval, the unknown outcome. */
+async function interruptThroughThePage(view: RenderResult): Promise<HTMLElement> {
+  const card = await press(view);
+  expect(agentdesk.getSnapshot().pending, "the refund asks for approval").toHaveLength(1);
+  expect(resultOf(card)).toMatch(/^Approval requested/);
+  await approveOnTheCard(view);
+  expect(agentdesk.getSnapshot().pending).toEqual([]);
+  expect(agentdesk.listUnreconciled()).toHaveLength(1);
   return card;
 }
 
@@ -214,7 +254,7 @@ describe("the page shows the record, refuses the repeat, and lets a person settl
     for (const record of agentdesk.listUnreconciled()) {
       agentdesk.reconcile(record.id, { kind: "commit_not_applied" }, OPERATOR);
     }
-    await demoPersistence.clear();
+    await demoPersistence.adapter.clear();
     resetStore();
     globalThis.localStorage = memoryStorage();
     localStorage.setItem("agentdesk-presence-mode", "fast");
@@ -226,15 +266,21 @@ describe("the page shows the record, refuses the repeat, and lets a person settl
     localStorage.removeItem("agentdesk-presence-mode");
   });
 
-  it("the Inspector lists the record with what it carried, in text", async () => {
+  it("the card says what the approval came to, once, and the Inspector lists the record in text", async () => {
     // jsdom has no IndexedDB, so the page's adapter is the memory one.
     expect(demoPersistence.kind).toBe("memory");
     const view = mountAt(`/agentdesk/orders/${ORDER}`);
-    await interruptThroughThePage(view);
+    const card = await interruptThroughThePage(view);
 
     const record = agentdesk.listUnreconciled()[0]!;
-    expect(record).toBeDefined();
-    expect(demoPersistence.records!.size).toBe(1);
+    expect(record.actionId).toBeDefined();
+    expect(await demoPersistence.adapter.loadOpenRecords()).toHaveLength(1);
+    // The decision came through the approval card, so this card reads it
+    // off the runtime: approved, then unknown, naming the record.
+    const words = resultOf(card);
+    expect(words).toMatch(/^Approved/);
+    expect(words).toMatch(/unknown/i);
+    expect(words).toContain(record.id);
 
     const panel = view.getByRole("region", { name: "Unreconciled outcomes" });
     const text = panel.textContent ?? "";
@@ -243,25 +289,30 @@ describe("the page shows the record, refuses the repeat, and lets a person settl
     expect(text).toContain(record.operationKey!);
     expect(text).toContain(record.executedBy!.name!);
     expect(text).toContain(`Order #${ORDER} shipping refunded`);
-    expect(text).toMatch(new RegExp(`grant ${record.grantId}`));
+    expect(text).toContain(`approval ${record.actionId}, approved by a person`);
+    expect(text).not.toMatch(/grant/i);
     expect(text).toMatch(/unknown/i);
     expect(view.container.querySelector("[data-unreconciled]")?.textContent).toBe("1");
   });
 
-  it("shows the refusal of the same call again, in words, with its cause", async () => {
+  it("shows the refusal of the same call again, in words, without asking for approval again", async () => {
     const view = mountAt(`/agentdesk/orders/${ORDER}`);
     const card = await interruptThroughThePage(view);
-    await act(async () => {
-      fireEvent.click(
-        within(card).getByRole("button", { name: `Interrupt a shipping refund on order #${ORDER}` }),
-      );
-    });
-    await frames(1);
-    // Refused outright: nothing is pending and nothing ran again.
+    // The reload's half that jsdom can stand in for: the document back at
+    // its seed, which is what a reloaded page finds, while the runtime and
+    // its open record stay. Without it the write that landed answers first,
+    // through the capability's own already-refunded precondition.
+    resetStore();
+    const askedBefore = approvalsAsked(agentdesk);
+    await press(view);
+    // Refused outright: no approval card, nothing pending, nothing ran again.
+    expect(view.queryByRole("alertdialog")).toBeNull();
     expect(agentdesk.getSnapshot().pending).toEqual([]);
-    const result = card.querySelector("[data-durability-result]")!.textContent ?? "";
-    expect(result).toMatch(/refused/i);
-    expect(result).toMatch(/because|cause/i);
+    expect(approvalsAsked(agentdesk)).toBe(askedBefore);
+    const result = resultOf(card);
+    expect(result).toMatch(/^Refused/);
+    expect(result).toMatch(/because/i);
+    expect(result).toMatch(/no approval was asked/);
     // Whatever code the runtime chose, it is in the words, not only a colour.
     expect(result).toMatch(/[A-Z_]{6,}/);
     expect(agentdesk.listUnreconciled()).toHaveLength(1);
@@ -274,7 +325,7 @@ describe("the page shows the record, refuses the repeat, and lets a person settl
     const panel = view.getByRole("region", { name: "Unreconciled outcomes" });
     // The live region outlives the list, so an announcement about the last
     // record is not unmounted with it.
-    const region = view.container.querySelector('[data-unreconciled-status]')!;
+    const region = view.container.querySelector("[data-unreconciled-status]")!;
     const seen: string[] = [];
     new MutationObserver(() => seen.push(region.textContent ?? "")).observe(region, {
       childList: true,
@@ -288,7 +339,7 @@ describe("the page shows the record, refuses the repeat, and lets a person settl
       );
     });
     expect(agentdesk.listUnreconciled()).toEqual([]);
-    expect(demoPersistence.records!.size).toBe(0);
+    expect(await demoPersistence.adapter.loadOpenRecords()).toEqual([]);
     expect(
       agentdesk.getSnapshot().audit.filter((e) => e.kind === "staged_reconciled" && e.recordId === record.id),
     ).toHaveLength(1);
@@ -301,16 +352,16 @@ describe("the page shows the record, refuses the repeat, and lets a person settl
   it("Reset Demo leaves nothing persisted and nothing listed", async () => {
     const view = mountAt(`/agentdesk/orders/${ORDER}`);
     await interruptThroughThePage(view);
-    expect(demoPersistence.records!.size).toBe(1);
-    expect(demoPersistence.claims!.size).toBeGreaterThan(0);
+    expect(await demoPersistence.adapter.loadOpenRecords()).toHaveLength(1);
+    expect((await demoPersistence.adapter.loadIdempotencyClaims()).length).toBeGreaterThan(0);
 
     await act(async () => {
       fireEvent.click(view.getByRole("button", { name: "Reset Demo" }));
     });
     await frames(2);
     expect(agentdesk.listUnreconciled()).toEqual([]);
-    expect(demoPersistence.records!.size).toBe(0);
-    expect(demoPersistence.claims!.size).toBe(0);
+    expect(await demoPersistence.adapter.loadOpenRecords()).toEqual([]);
+    expect(await demoPersistence.adapter.loadIdempotencyClaims()).toEqual([]);
     expect(getState().orders.find((o) => o.id === ORDER)!.shippingRefunded).toBe(false);
     expect(view.queryByRole("region", { name: "Unreconciled outcomes" })).toBeNull();
   });
