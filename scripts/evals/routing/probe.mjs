@@ -1,4 +1,5 @@
 import { ROUTED_BUDGET, routingRecord } from "./schema.mjs";
+import { resolveStrategy } from "./strategies.mjs";
 
 const encoder = new TextEncoder();
 
@@ -33,14 +34,26 @@ export function definitionBytes(capability) {
  * `MAX_ROUTED`; a capability it never returned has no rank.
  */
 export async function probeRouting({ routeTask, capabilities, task, strategy, runId, context }) {
+  // A bare name is a built-in; a resolved object may be a custom scorer
+  // from strategies.mjs. Either way the record is named after the cell.
+  const resolved = typeof strategy === "string" ? resolveStrategy(strategy) : strategy;
   const ctx = context ?? { route: "/", state: {} };
   const result = await routeTask(
     capabilities,
     { query: task.prompt, context: ctx, limit: ROUTED_BUDGET + 1 },
-    { kind: strategy },
+    resolved.strategy,
   );
+  // A refusal or a degraded result stops the run. The alternative, a
+  // deterministic number printed under a custom cell's name, is the one
+  // thing this report must never do.
   if (result.ok !== true) {
-    throw new Error(`routing refused for ${task.id} under ${strategy}: ${result.reason}`);
+    throw new Error(`routing refused for ${task.id} under ${resolved.name}: ${result.reason}`);
+  }
+  if (result.strategy !== resolved.kind) {
+    throw new Error(
+      `routing for ${task.id} under ${resolved.name} ran ${result.strategy} instead` +
+        (result.degradedBecause ? `: ${result.degradedBecause}` : ""),
+    );
   }
   const ranked = result.matches.map((m) => ({ name: m.capability.name, score: m.score }));
   const routed = ranked.slice(0, ROUTED_BUDGET);
@@ -52,10 +65,12 @@ export async function probeRouting({ routeTask, capabilities, task, strategy, ru
 
   return routingRecord({
     runId,
-    strategy,
+    strategy: resolved.name,
+    ...(resolved.kind === "custom" ? { scorer: { kind: "custom", path: resolved.path } } : {}),
     task,
     observed: {
       strategyRan: result.strategy,
+      scoredExternally: result.scoredExternally === true,
       budget: ROUTED_BUDGET,
       routed,
       rank,

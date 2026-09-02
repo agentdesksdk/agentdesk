@@ -7,9 +7,16 @@ export const ROUTING_TASK_SCHEMA_VERSION = 1;
 export const ROUTING_RECORD_SCHEMA_VERSION = 1;
 export const ROUTING_REPORT_SCHEMA_VERSION = 1;
 
-/** The two built-in strategies. A custom scorer is what 2.2 will plug in. */
+/**
+ * The two built-in strategies, which the committed reference runs. A cell
+ * may also be a custom scorer, named `custom:<name>`; strategies.mjs owns
+ * how one is loaded.
+ */
 export const STRATEGIES = Object.freeze(["deterministic", "hybrid"]);
 const STRATEGY_SET = new Set(STRATEGIES);
+const CUSTOM_NAME = /^custom:[A-Za-z0-9_.-]+$/;
+const isStrategy = (name) => STRATEGY_SET.has(name) || CUSTOM_NAME.test(name);
+const STRATEGY_HELP = `one of ${STRATEGIES.join(", ")}, or custom:<name>`;
 
 /**
  * `DEFAULT_ROUTED` in router.ts, which `find_capabilities` registers. It is
@@ -57,15 +64,20 @@ export function parseRoutingTask(value, source) {
   });
 }
 
-/** One task, one strategy, one run. Everything an aggregate reads is here. */
-export function routingRecord({ runId, strategy, task, observed, notes = [] }) {
-  if (!STRATEGY_SET.has(strategy)) {
-    throw new TypeError(`strategy must be one of ${STRATEGIES.join(", ")}, received ${JSON.stringify(strategy)}`);
+/**
+ * One task, one strategy, one run. Everything an aggregate reads is here.
+ * `scorer` is provenance for a custom cell, the module that scored it; a
+ * built-in needs none beyond its name.
+ */
+export function routingRecord({ runId, strategy, task, observed, notes = [], scorer }) {
+  if (!isStrategy(strategy)) {
+    throw new TypeError(`strategy must be ${STRATEGY_HELP}, received ${JSON.stringify(strategy)}`);
   }
   return {
     schemaVersion: ROUTING_RECORD_SCHEMA_VERSION,
     runId,
     strategy,
+    ...(scorer !== undefined ? { scorer: { ...scorer } } : {}),
     taskId: task.id,
     prompt: task.prompt,
     expected: task.expected,
@@ -85,8 +97,11 @@ export function parseRoutingRecord(value, source) {
       `${at("schemaVersion")} must be ${ROUTING_RECORD_SCHEMA_VERSION}, received ${JSON.stringify(value.schemaVersion)}`,
     );
   }
-  if (!STRATEGY_SET.has(value.strategy)) {
-    throw new TypeError(`${at("strategy")} must be one of ${STRATEGIES.join(", ")}, received ${JSON.stringify(value.strategy)}`);
+  if (!isStrategy(value.strategy)) {
+    throw new TypeError(`${at("strategy")} must be ${STRATEGY_HELP}, received ${JSON.stringify(value.strategy)}`);
+  }
+  if (value.scorer !== undefined && (typeof value.scorer !== "object" || value.scorer === null || typeof value.scorer.kind !== "string")) {
+    throw new TypeError(`${at("scorer")} must name the kind of scorer that produced the record`);
   }
   if (typeof value.taskId !== "string" || value.taskId.trim() === "") {
     throw new TypeError(`${at("taskId")} must be a non-empty string`);

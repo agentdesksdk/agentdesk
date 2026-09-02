@@ -5,6 +5,12 @@ const LABELS = Object.freeze({
   hybrid: "Hybrid (lexical plus graph and session)",
 });
 
+/** A custom cell is labelled as external, by the name its module gave it. */
+function label(key) {
+  if (LABELS[key] !== undefined) return LABELS[key];
+  return key.startsWith("custom:") ? `Custom scorer (${key.slice("custom:".length)}, external)` : key;
+}
+
 const pct = (v) => (v === null ? "unavailable" : `${(v * 100).toFixed(1)}%`);
 const num = (v) => (v === null ? "unavailable" : Math.round(v).toLocaleString("en-US"));
 const dec = (v) => (v === null ? "unavailable" : v.toFixed(2));
@@ -49,7 +55,7 @@ export function renderRoutingMarkdown(report) {
     "what the router publishes for a messy phrasing, not what an agent then",
     "does with it. `unavailable` means nothing observed the value.",
     "",
-    `| Metric | ${keys.map((k) => LABELS[k] ?? k).join(" | ")} | Provenance |`,
+    `| Metric | ${keys.map((k) => label(k)).join(" | ")} | Provenance |`,
     `| --- | ${keys.map(() => "---").join(" | ")} | --- |`,
   ];
   for (const [name, row] of Object.entries(ROWS)) {
@@ -62,7 +68,7 @@ export function renderRoutingMarkdown(report) {
   for (const key of keys) {
     const cell = report.cells[key];
     const metric = cell.metrics.terminalInRoutedSet;
-    lines.push(`### ${LABELS[key] ?? key}`, "");
+    lines.push(`### ${label(key)}`, "");
     if (metric.value === null) {
       lines.push("No tasks ran.", "");
       continue;
