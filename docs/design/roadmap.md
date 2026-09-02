@@ -32,7 +32,18 @@ Every PR lands its failing test in a commit before the fix, and the test is
 proven to fail at the parent commit in a throwaway worktree. That is the
 cadence #20 used and it is the rule from here on.
 
+One rule the wave 1 stack taught: a stacked PR is merged only after it is
+retargeted to `main`. Five of them, #41, #43, #44, #46, and #50, were merged
+into the branches they were stacked on, so `main` never received them and
+they had to be re-landed together as #52.
+
 ## Wave 0, before submission
+
+**Status, 2026-09-03: shipped on `main`.** 0.1 and 0.2 as #23; 0.3 as #24;
+0.4's runbook as #25 and #31 and its eval page as #27 with the #29 fix,
+though no transcript has been captured yet, so the four model-dependent rows
+of the reference run are still `unavailable`; 0.5 as #26 and #45; 0.6 as
+#22. The review follow-ups landed as #32.
 
 Nothing here touches `packages/webmcp/src`. Everything reads state the
 runtime already exposes.
@@ -81,6 +92,13 @@ If only three ship: 0.1 with 0.2, 0.3, and 0.4. Those turn the thesis from
 asserted into demonstrated.
 
 ## Wave 1, product guarantees
+
+**Status, 2026-09-03: complete on `main`.** 1.1 as #34; 1.2 as #36, with the
+demo's grant card #38 and the pending-grant fix #43; 1.3 as #37; 1.4 as #40;
+1.5 as #41, with the demo half still open as #47; 1.6 as #44; 1.7 as #46,
+with the demo's reload recovery #50 and the reveal replay #49. #41, #43,
+#44, #46, and #50 were merged into their own stack branches and re-landed on
+`main` as #52. The 0.2.0 changelog carries the wave as #56.
 
 One stack. Each PR branches from the previous PR's head. Order is by
 dependency, not by value. 1.1 comes first because every later feature
@@ -175,6 +193,17 @@ reload, recover the indeterminate record, refuse the repeat, reconcile.
 Gate: the frozen-evidence guarantees survive the round trip byte for byte.
 
 ## Wave 2, adoption
+
+**Status, 2026-09-03.** 2.1: the release workflow #33 with its pins #35 and
+the 0.2.0 changelog #56 are merged; nothing is tagged yet, so nothing is
+published. 2.2: in progress on the SDK lane; the measurement it has to beat
+is merged as #59, 29.1% expected-in-routed-set on the 408-capability
+catalog, with #61 letting a replacement scorer report against that
+reference. 2.3: the IndexedDB adapter #53 and the REST adapter #57 are
+merged, with #55 and #60 for the asynchronous commit and fork they needed,
+and their contract findings are folded into `adapter-contract.md` under
+"What the staging contract did not say"; Frappe is not started. 2.4:
+merged as #51 with the four-cell reference. 2.5: not started.
 
 **2.1 Publish to npm.** Release lane, small, can run any time after wave 0.
 `packages/webmcp/package.json` is at 0.2.0 with `publishConfig` set and the
