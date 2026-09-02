@@ -53,6 +53,19 @@ registers tools; native and compatibility calls share one pipeline;
 availability is re-checked at execution and approval time; consequential
 calls return immediately with an `approval_id`.
 
+## Installing the SDK
+
+The runtime is published as [`@agentdesk/webmcp`](https://www.npmjs.com/package/@agentdesk/webmcp).
+It has no runtime dependencies and needs Node 18 or newer:
+
+```bash
+npm install @agentdesk/webmcp
+```
+
+The package README shows the first capability; [webmcp-runtime.md](webmcp-runtime.md)
+explains what registering it does. Release notes are in
+[`packages/webmcp/CHANGELOG.md`](../packages/webmcp/CHANGELOG.md).
+
 ## Running locally
 
 ```bash
