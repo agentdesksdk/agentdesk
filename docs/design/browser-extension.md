@@ -246,30 +246,30 @@ Inferred capabilities route exactly like authored ones, because
 `Capability.execute` is an arbitrary function and the runtime accepts an
 injectable adapter.
 
-The `@agentdesk/core` extraction that follows is real refactoring, and an
-earlier draft understated it. The adapter is referenced in four files,
-which is where the "rename" reading came from, but the runtime does not
-merely reference it. `createAgentDeskRuntime` constructs the concrete
-WebMCP adapter as its default and then constructs the tool surface around
-it, so the WebMCP provider role is wired in by construction rather than
-injected at a boundary.
+The provider boundary this document assumed has been extracted, and the
+shape that landed is narrower than the sketch here first proposed. A
+`CapabilityProvider` in `packages/webmcp/src/provider.ts` supplies
+`capabilities()`, an `adapter` the runtime's tool surface drives, and an
+optional `subscribe` that announces a changed catalog; it does not start or
+stop the surface, because the surface stays the runtime's.
+`createAgentDeskRuntime` takes one and constructs no WebMCP-specific
+object; `nativeProvider` is the shipped path, and a source-scan test holds
+`provider.ts` as the only place the adapter is built.
 
-```ts
-type CapabilityProvider = {
-  readonly kind: "webmcp" | "extension";
-  readonly supported: boolean;
-  start(surface: ToolSurface): Promise<void>;
-  stop(): Promise<void>;
-};
-```
-
-The interface comes first and the extraction follows it. Until the
-runtime takes a `CapabilityProvider` rather than building one, the native
-SDK and the extension cannot share governance, and any document claiming
-they already do is describing an intention.
+What the seam now satisfies of this document's assumptions: inferred
+capabilities route, apply policy, and audit exactly like authored ones,
+because they arrive through the same `capabilities()`; the extension's
+`registerTool`, run from whichever world Gate 2 settles on, is the
+`adapter` it hands the runtime and the runtime never reaches past it; and
+a catalog that changes as the page changes is announced through
+`subscribe`, on which the runtime reconciles the surface. What it does not
+yet satisfy: provenance per capability beyond `untrustedContentHint`, the
+four-dimension `CapabilityProvenance` above, which is still a proposal;
+and the extension provider itself, which is milestone 4.
 
 <!-- code-anchors
-packages/webmcp/src/runtime.ts createWebMcpAdapter ToolSurfaceManager
+packages/webmcp/src/provider.ts CapabilityProvider nativeProvider subscribe
+packages/webmcp/src/runtime.ts ToolSurfaceManager provider
 packages/webmcp/src/capability.ts untrustedContentHint RiskLevel
 packages/webmcp/src/webmcp-adapter.ts createWebMcpAdapter
 -->

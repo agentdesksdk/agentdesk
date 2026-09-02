@@ -44,7 +44,10 @@ document.modelContext.registerTool(...)
 3. **The adapter is the only `document.modelContext` integration point.**
    `webmcp-adapter.ts` is the single file that touches the browser API. A
    source-scan test enforces this too. Tests and the demo inject a mock
-   `registerTool` through the same seam.
+   `registerTool` through the same seam. The adapter is constructed in one
+   place as well, the provider seam in `provider.ts`; a third source-scan
+   test holds that, so `createAgentDeskRuntime` constructs no
+   WebMCP-specific object and a second provider can hand it another.
 
 4. **Native and compatibility execution share one pipeline.** A native typed
    tool call and `invoke_capability` both resolve through:
@@ -101,8 +104,50 @@ document.modelContext.registerTool(...)
 | `grants.ts` | Scoped authority grants: the `Grant` state union, scope parsing and matching, and the `GrantStore` that spends uses |
 | `results.ts` | Structured tool results (`TOOL_RETIRED`, `APPROVAL_REQUIRED`, `CAPABILITY_UNAVAILABLE`, `completed`), each built from a situation |
 | `tool-surface.ts` | Reconciliation, AbortController lifecycle, tombstones, schema-byte accounting |
+| `provider.ts` | The capability seam: what a runtime's capabilities are and how they are published, with the native provider as the shipped one |
 | `runtime.ts` | The pipeline, bootstrap tools, exposure modes, snapshots |
 | `webmcp-adapter.ts` | The only `document.modelContext` touchpoint |
+
+## The provider seam
+
+A runtime takes a `CapabilityProvider`. A provider supplies three things
+and nothing else: `capabilities()`, read at construction and again
+whenever the provider announces a change; `adapter`, the registration
+seam the runtime's `ToolSurfaceManager` drives; and, optionally,
+`subscribe`, the way it announces. It never supplies policy, approval,
+routing, audit, results, or the surface itself. Those stay the runtime's,
+which is what lets the native SDK and the extension share governance: two
+providers under one runtime are governed by one pipeline.
+
+`nativeProvider({ capabilities, registerTool, adapter })` is the shipped
+path as the first provider, and a runtime built with those options builds
+it for you, so nothing observable moved: a test runs the demo catalog
+through the hero flow both ways and finds the same results, tools,
+snapshot, and audit. A runtime handed a provider beside those options is
+refused. The seam sits above the surface and the adapter rather than
+replacing them: `ToolSurfaceManager` is still the only registration
+manager, `webmcp-adapter.ts` still the only `document.modelContext`
+touchpoint, and `provider.ts` the only file that constructs the adapter.
+
+One provider, bound once at construction like the staging adapter. A
+runtime holds one catalog with one change stream, because capability
+names are unique across it and every routing report, approval, and audit
+line names capabilities from that one catalog; a composite of sources is
+a provider's job, not the runtime's. When a provider announces a change
+the runtime reads the catalog again, rebuilds it and its tree, re-checks
+that every staged capability is backed, drops routed names that no
+longer resolve, and reconciles the surface, so a retired capability
+leaves the native tools and a new one can be routed. A catalog the
+runtime cannot accept, a duplicate name or a staged capability nothing
+backs, is refused back to the provider and the one it had stays. It
+listens from `start` to `stop`.
+
+What the extension needs from the seam that the native provider does not
+is exactly the optional half: `subscribe`, because its scanner discovers
+and retires capabilities as the page changes, and an `adapter` whose
+`registerTool` is its own, run from the world it registers in. The native
+provider's catalog never changes and its adapter is the page's model
+context, so it uses neither.
 
 ## WebMCP surface coverage
 
@@ -1925,6 +1970,8 @@ packages/webmcp/src/audit.ts untrusted_content_ignored gestureId
 packages/webmcp/src/persistence.ts PersistedRecord PersistedIdempotencyClaim PersistedArtifact PersistenceAdapter memoryPersistence indexedDbPersistence sealOf verifyRecord
 packages/webmcp/src/runtime.ts persistOpen rehydrate describeArtifact restoredClaims approvalClaims
 packages/webmcp/src/staging.ts hydrate identify digestOf
+packages/webmcp/src/provider.ts CapabilityProvider nativeProvider subscribe
+packages/webmcp/src/runtime.ts catalogChanged assertStagingBacked provider
 packages/webmcp/src/indexeddb-staging.ts indexedDbStaging IndexedDbFork IndexedDbDraft STAGING_STORE versionOf open flush resolveArtifact
 packages/webmcp/src/staging.ts StagedCommitRefused buildStageHandler
 packages/webmcp/src/runtime.ts runInvocation
