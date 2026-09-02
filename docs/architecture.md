@@ -277,6 +277,118 @@ The chosen mode rides on the `APPROVAL_REQUIRED` payload as
 `approvalEvidence`, so a caller can tell whether "approved" meant a human
 read a diff the handler produced, a diff the author wrote, or a sentence.
 
+### The human approves the operation, not a description of it
+
+An author-written preview is a second description of an operation, and two
+descriptions drift. If they drift, the human consented to something that did
+not happen the way it was described, which is the failure this runtime exists
+to prevent.
+
+So a capability that writes does not describe its change. It declares `stage`
+instead of `execute`, runs on a fork of application state, and the diff is
+read off that fork:
+
+```text
+agent calls refund_shipping
+  → the capability stages on a fork; live state is untouched
+  → diff(fork) → will_change on APPROVAL_REQUIRED, ghosted in the UI
+  → human approves → the runtime commits that same fork
+```
+
+The runtime owns the proposal from the moment it is created until it is
+committed or discarded, and disposes it on rejection, denial, unavailability,
+reset, stop, a failed commit, and a successful one. It is keyed by the
+pending action's id, or by a plan id and operation index, never by business
+input, so two approvals never share or overwrite an artifact. A staged
+capability has no runnable handler, so an approval whose artifact is gone
+fails closed with `STAGED_PROPOSAL_MISSING` rather than running the write
+outside what was reviewed.
+
+`approvalEvidence: "derived"` is not selectable, and neither is the proposal.
+A capability names an operation the adapter owns and supplies no code at all,
+so it can neither describe its own change nor reach live state outside the
+fork (this example is `packages/webmcp/examples/staged-capability.ts`, which
+`pnpm typecheck` compiles):
+
+```ts
+const refundShipping = defineCapability({
+  name: "refund_shipping",
+  description: "Refund the shipping fee for an order.",
+  risk: "CONSEQUENTIAL",
+  // No execute, no previewChanges, no approvalEvidence, no code at all. The
+  // capability names an operation the adapter owns and the runtime hands it
+  // the validated input.
+  staging: { operation: "refund_shipping" },
+});
+
+const runtime = createAgentDeskRuntime({
+  capabilities: [refundShipping],
+  // Bound once. The adapter owns the operations, the diff, and the commit,
+  // so a capability can neither describe its own change nor reach live state
+  // outside the fork this opens.
+  staging: meridianStaging,
+});
+```
+
+The adapter is bound once at `createAgentDeskRuntime` and supplies
+`operations`, `scope`, `fork`, `diff`, `commit`, and `release`. Starting with
+a staged capability whose operation the adapter does not own is refused, as is
+starting with no adapter bound at all.
+
+A commit that throws is not treated as a clean failure. The exception proves
+the adapter did not return, not that nothing landed, so every path reports it
+the same way: an approval resolves `INDETERMINATE`, a plan resolves
+`INDETERMINATE` and stops rather than writing on top of an unknown result, and
+a direct write returns `EXECUTION_INDETERMINATE` naming the record and saying
+not to retry. The same call is then refused until a human reconciles it, so a
+caller cannot apply the change twice by asking twice.
+
+The staged diff is cloned and frozen before anything is dispatched, so
+evidence that could not be recorded is refused while refusing is still free.
+`listUnreconciled` holds the record until `reconcile` hands the artifact back
+to the adapter, and only a resolution the record can accept, and only the
+adapter's successful return, settles it. Reset does not clear these records. An adapter that knows nothing was dispatched
+says so with `StagedCommitRefused`, which is an ordinary refusal. A `release`
+that throws is an attempted cleanup rather than a completed one, so it is
+recorded and the artifact stays listed.
+
+The application that composes the runtime still supplies the adapter, so that
+is one audited integration point rather than per-operation code. An adapter
+whose `diff` disagrees with its `commit`, or whose operation writes outside
+its own fork, can still lie. Nothing below the application's data layer can
+prevent that.
+
+Staging is synchronous by contract. A handler that suspends resumes after its
+fork closed, so `defineCapability` refuses an async handler, `runStage`
+refuses a returned promise, and the demo store refuses every later write once
+a staged handler has suspended.
+
+Forking is the application's job, since only it knows its data layer. The SDK
+owns the artifact's identity and lifecycle and stays out of the store.
+Meridian Ops forks in `apps/demo/src/data/store.ts`, derives and merges in
+`apps/demo/src/data/branch.ts`, and stages in
+`apps/demo/src/capabilities/staged.ts`.
+
+### The human keeps working while an approval is pending
+
+Because the agent writes to a fork, nothing is locked. The human can edit the
+same order the agent is proposing against, and on approval a three-way merge
+lands both.
+
+Row presence is decided explicitly, so a row the agent deleted is deleted and
+a cleared array stays cleared. A field they both wrote is a real conflict, and
+the runtime refuses it rather than resolving it. The card warns as soon as the
+document moves, and approving anyway fails closed with `APPROVAL_STALE`
+instead of applying part of a reviewed change. A capability whose output
+depends on state the human might move declares `commitMode: "rederive"`,
+which re-runs the handler at approval and refuses if the result no longer
+matches what was approved.
+
+A plan stages every operation inside one scope, so the second operation
+derives against what the first one staged rather than against state the first
+is about to change. Commit consumes those same artifacts in order, and a plan
+that has lost one fails whole rather than landing part of itself.
+
 ### Staged proposals
 
 A staged capability declares `staging: { operation }`, a name and nothing
@@ -394,6 +506,42 @@ to the state the human actually reviewed.
 Three artifacts sit behind this section. The plan says what will happen and
 who asked for it. The verification says whether it did happen. The receipt
 history says who made it happen and lets it be undone.
+
+### Plans, verification, and rollback in brief
+
+Some work is several actions that a human should review as one unit.
+`prepare()` builds a versioned plan with a preview per operation and
+executes nothing.
+The plan pins the application revision it was reviewed against, so if the
+application moves before commit, the commit is refused and the plan is
+marked `DRIFTED` rather than running against state nobody approved. Commit
+is an atomic claim, so a double commit executes once.
+
+```ts
+const plan = await runtime.prepare({
+  operations: [
+    { capability: "refund_shipping", input: { order_id: "10428" } },
+    { capability: "add_order_note", input: { order_id: "10428", note: "Refunded." } },
+  ],
+});
+// The approver is named explicitly and must be human; the agent that asked
+// for the plan cannot authorize it.
+runtime.approvePlan(plan.id, { id: "operator-1", name: "Amein", kind: "human" });
+await runtime.commitPlan(plan.id);
+
+// Who did what, and whether reading state back confirmed it.
+const [entry] = runtime.queryReceipts({ planId: plan.id });
+if (entry) {
+  await runtime.rollback(entry.id); // refused if the capability cannot undo
+}
+```
+
+A capability can also declare `verify`, which reads state back after the
+write, so a handler that reports a change it did not make is recorded as a
+`MISMATCH`. A capability with no verifier reports `UNSUPPORTED` instead of
+implying it was checked. Rollback is optional in the same way and says so
+plainly rather than inventing a compensating action. Detail in the
+subsections that follow.
 
 ### Versioned operation plans
 
@@ -859,6 +1007,42 @@ Three rules keep this from leaking into the judged path:
 
 `AgentPresence` in the demo consumes this stream, with a guided/fast
 toggle. Execution is byte-identical in both modes.
+
+### Guided execution
+
+The agent calls tools; it does not click through the UI. But a human
+watching a screen should still see what the agent is acting on. AgentDesk
+separates execution from presentation:
+
+```text
+agent intent → WebMCP capability executes → presentation events
+            → UI navigates, reveals the affected value, narrates
+```
+
+A capability declares presentation hints alongside its schema:
+
+```ts
+defineCapability({
+  name: "get_order_shipping",
+  presentation: {
+    route: (input) => `/orders/${input.order_id}`,
+    reveal: "shipping-summary",
+    message: (input) => `Checking whether shipping was paid on order #${input.order_id}`,
+  },
+  // ...
+});
+```
+
+The runtime resolves those to plain data and emits them on a separate
+stream (`runtime.subscribePresentation`); navigating, scrolling, and
+highlighting stay the UI's job. The WebMCP result is authoritative whether
+or not anyone subscribes, and a throwing presentation listener cannot
+affect execution. Toggle **Presence: guided / fast** in the header; `fast`
+executes identically with no UI movement.
+
+There is deliberately no simulated cursor. Every motion in guided mode
+reflects state the agent actually touched, rather than pantomiming an
+input device it never used.
 
 ## Hardening contract (from the 2026-08-28 stress test)
 
