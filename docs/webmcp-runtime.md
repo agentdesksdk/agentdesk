@@ -36,6 +36,27 @@ Aborting the controller unregisters the tool. Every registered tool keeps its
 serialized definition length, so the "schema bytes" figure in the demo is
 measured from what was actually registered, not estimated.
 
+### Native mode
+
+The unabstracted integration point (`packages/webmcp/src/webmcp-adapter.ts`
+and `tool-surface.ts`):
+
+```ts
+const controller = new AbortController();
+await document.modelContext.registerTool(
+  {
+    name: "refund_shipping",
+    description: "Refund the shipping fee for an order…",
+    inputSchema: { type: "object", required: ["order_id"], properties: { … } },
+    annotations: { readOnlyHint: false, untrustedContentHint: false },
+    execute: async (input) => runCapabilityPipeline(input),
+  },
+  { signal: controller.signal },
+);
+// retiring the tool later:
+controller.abort();
+```
+
 ## Bootstrap surface
 
 Registered at document startup and never retired:
@@ -64,6 +85,20 @@ Zero-score capabilities are never routed. Top 5 by default, hard cap 6.
 Page context materially changes results: with `orderId` in context state,
 order-scoped capabilities (`inspect_order`, `refund_shipping`) outrank
 generic search.
+
+## Compatibility mode
+
+Clients cache tool lists. `invoke_capability` is always registered and
+executes any catalog capability by name through the exact same pipeline as
+the native tools, so an agent with a stale list is never stranded. Stale
+native calls hit a tombstone and get a structured `TOOL_RETIRED` response
+telling them to call `find_capabilities` again.
+
+Measured client behavior (Codex in-app browser, 2026-08-28): AgentDesk
+dynamically updates the native WebMCP surface, with client rediscovery
+occurring when the client refreshes its tool snapshot, typically the next
+turn; `invoke_capability` covers clients whose discovery lags behind the
+page. Full matrix in [testing.md](testing.md).
 
 ## Retired tools
 
@@ -104,3 +139,18 @@ agent: get_action_status {approval_id: "APR-1001"}
 Rejection resolves the record as `REJECTED` with zero side effects. If state
 changed while pending (e.g. the fee was already refunded), approval fails
 closed as `FAILED_UNAVAILABLE` with the reason code.
+
+### Approval is a state machine, not a modal
+
+Every consequential action gets an auditable record with an
+execution-time re-check, so approving stale state fails closed instead of
+mutating:
+
+```text
+PENDING ──approve──▶ re-check availability + input ──▶ APPROVED_EXECUTED (result attached)
+   │                          │
+   │                          └─ state changed while pending ──▶ FAILED_UNAVAILABLE (reason code)
+   └──reject──▶ REJECTED (zero side effects)
+```
+
+Agents confirm outcomes later via `get_action_status(approval_id)`.
