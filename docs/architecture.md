@@ -654,6 +654,94 @@ hole navigates nowhere. The stored receipt keeps every link for the person.
 The demo half, a "show me proof" control on the receipt that follows the
 link, is the demo lane's item.
 
+## An unknown outcome survives a restart
+
+The accepted-risk record of 2026-08-31 stated what a restart lost: the
+unreconciled record with its `operationKey`, so the repeat guard was gone;
+the approved changes and the ids binding the record to an approval or a
+plan, so nothing surfaced it; and the adapter's artifact, held by identity,
+so `reconcile` had nothing to hand back. A runtime that declares
+`persistence` keeps all three.
+
+```ts
+const runtime = createAgentDeskRuntime({
+  capabilities,
+  staging: meridianStaging,
+  persistence: indexedDbPersistence({
+    name: "meridian-ops",
+    resolveArtifact: (record) =>
+      record.artifact.kind === "reference" ? reopenBranch(record.artifact.reference) : undefined,
+  }),
+});
+```
+
+**The shapes.** A `PersistedRecord` carries everything the accepted-risk
+record listed as lost and everything wave 1 added: `id`, `kind`,
+`capability`, `detail`, the approved `changes`, `at`, `operationKey`,
+`actionId`, `planId`, `operationIndex`, the `executedBy` actor, the
+`stateVersion` the approval was bound to, the `grantId` when a grant
+authorized the write, the `artifact`, and a `seal`. A
+`PersistedIdempotencyClaim` carries the `slot` and the input `fingerprint`
+a key was claimed for. The adapter is
+`{ saveRecord, settleRecord, loadOpenRecords, saveIdempotencyClaim,
+loadIdempotencyClaims, resolveArtifact? }`; every method may be
+synchronous or return a promise, and the roadmap's four names grew by two
+because a settled record has to be removed and a claim has to be loaded.
+
+**How an artifact is written down.** `describeArtifact` clones the staging
+adapter's artifact and stores it as `{ kind: "value" }`. An artifact that
+cannot be cloned is handed to the staging adapter's optional `identify`,
+and what comes back is stored as `{ kind: "reference" }`: a durable key the
+application can rebuild from. An artifact that is neither is stored as
+`{ kind: "lost" }`. All three surface the record and guard the repeat; only
+a value can be handed straight back. `resolveArtifact` on the persistence
+adapter is synchronous, because `reconcile` is: it is given the loaded
+record and returns the live artifact the staging adapter can settle, or
+`undefined`. A reference or a lost artifact that the resolver cannot
+rebuild leaves the record open, audits `staged_reconcile_failed` with the
+reason, and `reconcile` returns it, because closing a record whose artifact
+nobody can hand back would settle nothing in the application.
+
+**What survives and what does not.** The record is saved the moment it is
+made and again when an approval or a plan attaches its ids; it is removed
+when `reconcile` settles it. An idempotency claim is saved when it is won.
+Only the claim survives, not the result it produced, so a repeat of the
+same call after reload is refused with `IDEMPOTENCY_CONFLICT` and
+`cause: "after_restart"` rather than replayed or re-executed: the write may
+have landed and nothing can hand back what it returned. `reset` clears the
+in-memory claims as it always did and leaves the adapter alone.
+
+**On start.** `rehydrate` runs before the tool surface is built. Every
+loaded record is verified: the version must be the one the runtime writes,
+and the `seal`, a digest over every field but itself computed at save, must
+match. A record that fails is refused at load and audited as
+`staged_reconcile_failed` naming it, rather than trusted. A verified record
+is put back with `UnreconciledStore.hydrate` under its saved id, so an
+approval's `actionId` still finds it and the counter moves past it;
+`listUnreconciled` surfaces it, `operationKey` guards the repeat, and a
+reconcile takes the same path a live record takes. Loaded claims are
+remembered by slot.
+
+**Byte for byte.** What is loaded is what was saved: the seal proves the
+evidence did not change on disk, and a hydrated record is cloned and deep
+frozen at the store boundary exactly as a live one is, so it is as
+immutable through the public API. Saves are queued in order and never
+awaited by the path that made the record; an adapter that throws cannot
+change an outcome, only lose its own copy, and says so on the console.
+
+**Two adapters ship.** `memoryPersistence` is the in-memory one, the double
+the tests use, and what a runtime that declares nothing behaves like: a
+fresh runtime with no `persistence` is byte for byte what it was. Two
+runtimes that share one memory adapter share a restart.
+`indexedDbPersistence({ name, indexedDB?, resolveArtifact? })` is the
+browser one: one database per application, two object stores, opened once
+and lazily, one transaction per operation. Its factory is injectable, and
+the tests drive it through a small in-test double of the API surface it
+uses, because no fake-indexeddb shim is in the workspace lockfile.
+
+The demo half, an interrupted operation, a reload, the record recovered,
+the repeat refused, and a reconcile, is the demo lane's item.
+
 ## Execution lifecycle
 
 Every execution gets an `executionId` that correlates its
@@ -1653,6 +1741,10 @@ packages/webmcp/src/protocol.ts link
 packages/webmcp/src/gesture.ts ApprovalGesture GestureBinding GestureStore GESTURE_TTL_MS isApprovalGesture consume
 packages/webmcp/src/runtime.ts resolveApprover issueApprovalGesture userActivation untrustedReads untrustedSince requestedAtTick approvalGesture
 packages/webmcp/src/audit.ts untrusted_content_ignored gestureId
+packages/webmcp/src/persistence.ts PersistedRecord PersistedIdempotencyClaim PersistedArtifact PersistenceAdapter memoryPersistence indexedDbPersistence sealOf verifyRecord
+packages/webmcp/src/runtime.ts persistOpen rehydrate describeArtifact restoredClaims
+packages/webmcp/src/staging.ts hydrate identify digestOf
+packages/webmcp/src/results.ts after_restart
 packages/webmcp/src/capability.ts AgentView agentView
 packages/webmcp/src/runtime.ts throughView changesThroughView hiddenStrings withhold crossing agentText viewFailed runInvocation approveInner
 packages/webmcp/src/approval.ts stateVersion
