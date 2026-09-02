@@ -122,6 +122,14 @@ const CLAIMS = [
   ["docs/architecture.md", /rollbackEvidence/, "present", "architecture names the deliberate opt-out"],
   ["docs/architecture.md", /the receipt returns to READY/, "absent", "a thrown rollback no longer returns to READY"],
   ["docs/architecture.md", /rollbackState` of READY, ROLLING_BACK, or\s+ROLLED_BACK/, "absent", "the three-state enumeration is stale"],
+
+  ["docs/architecture.md", /##\s*The result protocol/, "present", "architecture states the one result shape"],
+  ["docs/architecture.md", /nowPossible/, "present", "architecture names what a result says is possible"],
+  ["docs/architecture.md", /blockedCapabilities/, "present", "architecture names what a result says is blocked"],
+  ["docs/architecture.md", /Denied is invisible; unavailable is visible/, "present", "architecture states the denied/unavailable line"],
+  ["docs/architecture.md", /suggested alternatives/, "absent", "availability carries a checked repair, not a free-text suggestion"],
+  ["docs/routing.md", /the runtime's behaviour is unchanged by this document/, "absent", "the runtime now filters denied capabilities before ranking"],
+  ["docs/routing.md", /##\s*The report's situation/, "present", "routing states what the report lists as possible and blocked"],
 ];
 
 const failures = [];

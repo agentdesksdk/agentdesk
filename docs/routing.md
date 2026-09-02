@@ -94,12 +94,32 @@ can, and a custom scorer receives only what survived the filter, so it
 cannot resurrect something the runtime already declined to offer. A scorer
 that returns a capability it was not given is refused rather than trusted.
 
-This differs from `find_capabilities` in the runtime, which ranks first and
-then annotates each match with its availability, including the unavailable
-ones and the reason. That is deliberate. Telling an agent why it cannot do
-something is more useful than pretending the capability does not exist.
-`routeTask` is the newer surface and takes the stricter position; the
-runtime's behaviour is unchanged by this document.
+`find_capabilities` in the runtime applies the same idea with one predicate
+of its own, `routable`, which asks policy with no input because routing has
+none. A capability policy denies is filtered out before ranking, so it is
+absent from the report: not its name, not its description, not a reason.
+A capability that is merely unavailable is ranked, annotated with its
+`reasonCode` and `reason`, and not activated. That split is deliberate.
+Telling an agent why it cannot do something is more useful than pretending
+the capability does not exist, and pretending a denied capability does not
+exist is the point of denying it.
+
+The same predicate decides what the native surface registers and what
+every result lists as possible or blocked, so the report, the tools, and
+the answers on a refusal can never disagree about what the agent may reach.
+`docs/architecture.md` covers the result side.
+
+## The report's situation
+
+The routing report answers the same questions every other result does.
+`nowPossible` and `blockedCapabilities` are the matches it offered plus the
+repairs those matches named, partitioned by availability through
+`routable`; `evidence` is empty, because routing proves nothing. Each
+unavailable match carries its author's `repair` only when the runtime
+checked that the named capability exists, is routable, and is available,
+with `suggestedCapability` derived from it for readers of the old name. A
+repair naming a denied capability is dropped from the match and from the
+lists, so a routing report leaks no more than a refusal does.
 
 ## The visible-capability budget
 
@@ -220,4 +240,5 @@ Every match carries `reasons`, in the order the contributions applied, so
 <!-- code-anchors
 packages/webmcp/src/router.ts routeTask rankCapabilities RoutingStrategy CapabilityScorer RoutingResult RELATION_WEIGHTS ROUTING_WEIGHTS MAX_ROUTED DEFAULT_ROUTED scoredExternally degradedFrom
 packages/webmcp/src/capability.ts CapabilityRelationships relationships
+packages/webmcp/src/runtime.ts routable partition visibleRepair findCapabilities
 -->
