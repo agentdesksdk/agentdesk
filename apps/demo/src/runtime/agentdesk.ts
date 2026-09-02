@@ -39,11 +39,10 @@ export const agentdesk = createAgentDeskRuntime({
   // describes a change and the code that performs it are not both supplied
   // by whoever declared the operation.
   staging: stagingAdapter,
-  // The approval card mints a gesture token on click. This stays optional
-  // until every caller of this instance mints one; ghost-dom.test.tsx still
-  // approves with an asserted identity, and flipping to "required" here is
-  // the demo lane's follow-up once it does.
-  approvalGesture: "optional",
+  // An approval must carry a token minted on a click. The card's handler
+  // mints one inside the click; nothing that only asserts an identity is
+  // accepted by this instance.
+  approvalGesture: "required",
   // Cheap revision over the mutable parts of the store. A plan approved
   // against one revision refuses to commit against another.
   revision: () => {
@@ -121,10 +120,19 @@ export function contextForPath(pathname: string): {
   };
 }
 
+/**
+ * What the page exposes for inspection. Minting is deliberately not on it:
+ * a token proves a call made during a user activation by code with access
+ * to the runtime, so only the approval card's click handler closes over
+ * `issueApprovalGesture`, and a script that reaches `window.agentdesk`
+ * cannot mint.
+ */
+const { issueApprovalGesture: _mintOnlyFromTheCard, ...inspectable } = agentdesk;
+
 declare global {
   interface Window {
-    agentdesk: typeof agentdesk;
+    agentdesk: Omit<typeof agentdesk, "issueApprovalGesture">;
   }
 }
 
-window.agentdesk = agentdesk;
+window.agentdesk = inspectable;

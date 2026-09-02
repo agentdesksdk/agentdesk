@@ -387,10 +387,37 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   // identity was a claim it had to take on trust.
   const gestures = new GestureStore();
   const gestureMode: "optional" | "required" = options.approvalGesture ?? "optional";
-  // Capabilities flagged untrustedContentHint whose output entered the
-  // agent's context this session. Named on an approval made while any is
-  // present, so the record says the runtime treated it as data.
-  const untrustedSources = new Set<string>();
+  /**
+   * Whether a person is interacting right now. A token minted outside a
+   * user activation proves nothing a plain identity did not, so minting
+   * asks this first. The default reads the browser's own answer and says
+   * no wherever there is none; a seam that throws counts as no.
+   */
+  const userActivation: () => boolean = options.gesture?.userActivation ?? (() => {
+    const host = globalThis as { navigator?: { userActivation?: { isActive?: unknown } } };
+    return host.navigator?.userActivation?.isActive === true;
+  });
+  /**
+   * Flagged reads, in order. Each approval remembers the tick it was
+   * requested at, and at approve time only the reads after that tick count,
+   * so a note read this morning does not mark an approval requested this
+   * afternoon, and two pending approvals each answer for their own window.
+   */
+  let untrustedTick = 0;
+  const untrustedReads: Array<{ name: string; tick: number }> = [];
+  const requestedAtTick = new Map<string, number>();
+  const UNTRUSTED_READS_LIMIT = 200;
+
+  function untrustedSince(key: string): string[] {
+    const since = requestedAtTick.get(key) ?? Number.POSITIVE_INFINITY;
+    const names = new Set<string>();
+    for (const read of untrustedReads) {
+      if (read.tick > since) {
+        names.add(read.name);
+      }
+    }
+    return [...names].sort(compareNames);
+  }
   // Staged proposals live here, keyed by the runtime identity that owns
   // each one, never by business input. Disposal is this store's job on
   // every path that resolves an owner without committing it.
@@ -1657,6 +1684,11 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       staged.proposal?.discard();
       throw err;
     }
+    // The window this approval answers for opens here. An identical pending
+    // request keeps its original window rather than moving it later.
+    if (!requestedAtTick.has(action.id)) {
+      requestedAtTick.set(action.id, untrustedTick);
+    }
     if (staged.proposal) {
       // An identical pending request returns the action that already
       // exists, whose preview came from the proposal held for it.
@@ -2221,7 +2253,10 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       // governance evidence is durable and cannot change it.
       audit.append(event);
       if (capability.annotations.untrustedContentHint) {
-        untrustedSources.add(capability.name);
+        untrustedReads.push({ name: capability.name, tick: ++untrustedTick });
+        if (untrustedReads.length > UNTRUSTED_READS_LIMIT) {
+          untrustedReads.splice(0, untrustedReads.length - UNTRUSTED_READS_LIMIT);
+        }
       }
       const stored = pending ? receipts.record(pending) : undefined;
       const evidence: Evidence[] = [
@@ -2884,12 +2919,13 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         refusal(routed, missing.repair, claimed),
       );
     }
-    if (untrustedSources.size > 0) {
+    const flagged = untrustedSince(actionId);
+    if (flagged.length > 0) {
       audit.append({
         kind: "untrusted_content_ignored",
         actionId,
         capability: action.capability,
-        sources: [...untrustedSources].sort(compareNames),
+        sources: flagged,
         at: now(),
       });
     }
@@ -3084,7 +3120,8 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       receipts.clear();
       grants.clear();
       gestures.clear();
-      untrustedSources.clear();
+      untrustedReads.length = 0;
+      requestedAtTick.clear();
       routedNames = new Set();
       lastRouting = null;
       if (started) {
@@ -3208,6 +3245,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         ...(revision !== undefined ? { expectedRevision: revision } : {}),
         ...(requester !== undefined ? { requestedBy: requester } : {}),
       });
+      requestedAtTick.set(plan.id, untrustedTick);
       staged.forEach((proposal, index) => {
         if (proposal) {
           proposals.put(StagedProposalStore.planKey(plan.id, index), proposal);
@@ -3245,12 +3283,13 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         return { ok: false, reason: `plan ${planId} is not awaiting approval` };
       }
       plans.resolve(planId, { approvedBy: approver.actor });
-      if (untrustedSources.size > 0) {
+      const flagged = untrustedSince(planId);
+      if (flagged.length > 0) {
         audit.append({
           kind: "untrusted_content_ignored",
           planId,
           capability: claimed.operations.map((operation) => operation.capability).join(", "),
-          sources: [...untrustedSources].sort(compareNames),
+          sources: flagged,
           at: now(),
         });
       }
@@ -3802,6 +3841,19 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           : undefined;
       if (bound === undefined) {
         throw new TypeError("an approval token is bound to one actionId or one planId");
+      }
+      // A token stands for a click. Minted outside one, it would prove
+      // nothing the asserted identity did not, one call further away.
+      let active = false;
+      try {
+        active = userActivation() === true;
+      } catch {
+        active = false;
+      }
+      if (!active) {
+        throw new Error(
+          "an approval token can only be minted during a user activation; call issueApprovalGesture from the click handler itself, not before or after it",
+        );
       }
       return gestures.issue(bound, issuer, now());
     },
