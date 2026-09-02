@@ -18,6 +18,7 @@ import {
 } from "./capability.ts";
 import { CapabilityCatalog } from "./catalog.ts";
 import { decidePolicy, riskBasedPolicy, type PolicyEngine } from "./policy.ts";
+import type { Repair } from "./protocol.ts";
 import { defaultValidator, type Validator } from "./validation.ts";
 import {
   PresentationBus,
@@ -115,6 +116,7 @@ export type RoutedMatch = {
   requiresApproval: boolean;
   reasonCode?: string;
   reason?: string;
+  repair?: Repair;
   suggestedCapability?: string;
 };
 

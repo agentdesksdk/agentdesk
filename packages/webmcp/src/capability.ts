@@ -31,6 +31,7 @@ export type ExecutionContext = AppContext & {
 
 import type { FocusPolicy } from "./presentation.ts";
 import type { VerificationResult } from "./plan.ts";
+import type { Repair } from "./protocol.ts";
 
 
 export type RiskLevel = "READ" | "WRITE" | "CONSEQUENTIAL";
@@ -105,6 +106,8 @@ export type Unavailability = {
   available: false;
   reasonCode: string;
   reason: string;
+  /** The capability that repairs this, with the input to call it with. */
+  repair?: Repair;
   suggestedCapability?: string;
 };
 
@@ -115,11 +118,12 @@ export const AVAILABLE: Availability = { available: true };
 export function unavailable(
   reasonCode: string,
   reason: string,
-  suggestedCapability?: string,
+  repair?: Repair | string,
 ): Unavailability {
   const result: Unavailability = { available: false, reasonCode, reason };
-  if (suggestedCapability !== undefined) {
-    result.suggestedCapability = suggestedCapability;
+  if (repair !== undefined) {
+    result.repair = typeof repair === "string" ? { capability: repair } : repair;
+    result.suggestedCapability = result.repair.capability;
   }
   return result;
 }
