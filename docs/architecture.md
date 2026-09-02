@@ -516,6 +516,68 @@ is being prepared queues nothing.
 and the presentation stream carry the whole application. Only what crosses
 to the agent is projected.
 
+## An approval is bound to a gesture
+
+`approve` and `approvePlan` took `{ kind: "human" }` as an assertion: a
+claim the runtime had to take on trust. They now take a gesture the
+runtime can verify. Page code mints a token on a human click, from its
+click handler, through `issueApprovalGesture`; the runtime verifies and
+consumes it at approve time; and an approval without a valid token is
+refused wherever a runtime requires one.
+
+```ts
+// in the click handler, and nowhere else
+const token = runtime.issueApprovalGesture({ actionId: action.id }, OPERATOR);
+await runtime.approve(action.id, token);
+```
+
+**What a token is.** `{ kind: "page-token", id, secret }`, issued by
+`GestureStore` with a random secret, bound to exactly one action id or one
+plan id, valid for sixty seconds (`GESTURE_TTL_MS`), and single use. Any
+verification attempt that presents the right secret spends it, whatever
+the verdict, so a token tried against the wrong action cannot then be tried
+against the right one. A token is not one this runtime issued, was already
+used, has expired, or was issued for a different approval: each is a
+refusal with that reason, and the pending action or plan is untouched.
+
+**Who can mint one.** The issuer goes through `adoptHumanActor`, the same
+boundary a grant's issuer crosses, so an agent identity, the ambient actor
+when it is the agent, and a malformed identity all throw `TypeError`. A
+token stands for a person's click, and the runtime records that person as
+the approver when the token is consumed, not whoever presented it. Only
+page code can reach `issueApprovalGesture`; an agent acting through tools
+cannot.
+
+**What the audit records.** `approval_approved` and `plan_approved` carry
+`gestureId` when a token carried the approval, alongside the human it
+recorded, so a record can say which click authorized what. An asserted
+identity leaves no `gestureId`. Issuing is not itself audited; the token's
+only meaning is the approval it carries.
+
+**Migration without a flag day.** `approvalGesture` on the runtime is
+`optional` by default: an asserted human identity is still accepted, so
+every existing caller keeps working while page code migrates to minting.
+`required` refuses an asserted identity with a reason naming
+`issueApprovalGesture`. The demo's approval card mints a token on click and
+its runtime stays `optional`, because a test still approves through that
+instance with an asserted identity; flipping it to `required` is the demo
+lane's follow-up once every caller mints.
+
+**The seam WebAuthn plugs into.** `resolveApprover` is the one place an
+approver is established. A gesture is a member of `ApprovalGesture`; today
+the only member is the page token, verified by `GestureStore`. A WebAuthn
+assertion is a second member with a second verifier behind the same
+function, and `approve`, `approvePlan`, and their callers do not change.
+
+**Untrusted content in context.** A capability flagged
+`untrustedContentHint` whose output entered the agent's context this
+session is remembered by name. An approval made while any such content is
+in context records `untrusted_content_ignored`, naming the approval and the
+sources, just before `approval_approved` or `plan_approved`, so the record
+says the runtime saw the content and treated it as data rather than as
+authority. This is the audit half of the adversarial note; the approval
+itself proceeds, because the person decided. `reset` clears the set.
+
 ## A receipt says where its proof can be seen
 
 "Show me proof" is a place in the application: a page to navigate to and
@@ -1568,6 +1630,9 @@ packages/webmcp/src/staging.ts stateDigest
 packages/webmcp/src/results.ts approvalStale viewUnavailable EvidenceLink AuthoredEvidenceLink evidence source
 packages/webmcp/src/runtime.ts deriveEvidence linksThroughView settledReceipt
 packages/webmcp/src/protocol.ts link
+packages/webmcp/src/gesture.ts ApprovalGesture GestureBinding GestureStore GESTURE_TTL_MS isApprovalGesture consume
+packages/webmcp/src/runtime.ts resolveApprover issueApprovalGesture untrustedSources approvalGesture
+packages/webmcp/src/audit.ts untrusted_content_ignored gestureId
 packages/webmcp/src/capability.ts AgentView agentView
 packages/webmcp/src/runtime.ts throughView changesThroughView hiddenStrings withhold crossing agentText viewFailed runInvocation approveInner
 packages/webmcp/src/approval.ts stateVersion

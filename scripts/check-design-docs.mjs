@@ -159,6 +159,12 @@ const CLAIMS = [
   ["docs/architecture.md", /A link crosses through the agent view like every other field/, "present", "architecture says evidence is projected"],
   ["docs/architecture.md", /An\s+authored link is the value/, "present", "architecture says an authored evidence link points at the value"],
   ["docs/architecture.md", /A derived link is page-level/, "present", "architecture says a derived evidence link points at the page"],
+
+  ["docs/architecture.md", /##\s*An approval is bound to a gesture/, "present", "architecture states the approval gesture contract"],
+  ["docs/architecture.md", /single use/, "present", "architecture says a token is single use"],
+  ["docs/architecture.md", /Migration without a flag day/, "present", "architecture says how existing approve calls migrate"],
+  ["docs/architecture.md", /The seam WebAuthn plugs into/, "present", "architecture names the seam a stronger gesture uses"],
+  ["docs/architecture.md", /untrusted_content_ignored/, "present", "architecture names the audit half of the adversarial note"],
   ["docs/architecture.md", /adoptHumanActor/, "present", "architecture names the identity boundary a grant issuer crosses"],
 ];
 
