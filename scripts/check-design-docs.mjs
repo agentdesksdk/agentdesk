@@ -137,6 +137,13 @@ const CLAIMS = [
   ["docs/architecture.md", /GRANT_REFUSED/, "absent", "a grant that does not apply falls through to approval; there is no refusal code"],
   ["docs/architecture.md", /A grant that does not apply changes nothing/, "present", "architecture states the fall-through"],
   ["docs/architecture.md", /grant_not_applied/, "present", "architecture names the audit kind for a grant that did not apply"],
+
+  ["docs/architecture.md", /##\s*An approval is bound to a state digest/, "present", "architecture states the state digest contract"],
+  ["docs/architecture.md", /requiresNewPreview/, "present", "architecture names the stale approval result"],
+  ["docs/architecture.md", /What the digest covers/, "present", "architecture says what the digest covers and why not the whole store"],
+  ["docs/architecture.md", /One digest function/, "present", "architecture says single approvals and plans share one digest"],
+  ["docs/architecture.md", /digest-free by construction/, "present", "architecture says a grant-authorized execution has no digest"],
+  ["docs/architecture.md", /binds state, not output/, "present", "architecture states the edge of the digest guarantee"],
   ["docs/architecture.md", /adoptHumanActor/, "present", "architecture names the identity boundary a grant issuer crosses"],
 ];
 
