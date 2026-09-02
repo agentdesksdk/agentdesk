@@ -1,7 +1,7 @@
-import { useState } from "react";
-import type { ToolResult } from "@agentdesk/webmcp";
-import { armCommitFault } from "../capabilities/staged.ts";
-import { agentdesk, OPERATOR } from "../runtime/agentdesk.ts";
+import { useEffect, useState } from "react";
+import type { RuntimeSnapshot, ToolResult, Unreconciled } from "@agentdesk/webmcp";
+import { armCommitFault, disarmCommitFault } from "../capabilities/staged.ts";
+import { agentdesk } from "../runtime/agentdesk.ts";
 import { useAnnouncer } from "./announcer.ts";
 import { useRuntime } from "./hooks.ts";
 
@@ -9,23 +9,35 @@ import { useRuntime } from "./hooks.ts";
 export const durabilityKey = (orderId: string) => `durability-${orderId}`;
 
 /**
- * What the attempt came back with, in words a judge can read. `openBefore`
- * is the set of unreconciled record ids that existed before the call: an
- * EXECUTION_INDETERMINATE naming one of them is the guard refusing the same
- * call, not a new unknown outcome, and the two carry the same shape.
+ * What already existed when the call was sent, so a repeat is told apart
+ * from a first attempt: an EXECUTION_INDETERMINATE naming an open record is
+ * the guard refusing the same call, and an APPROVAL_REQUIRED naming a
+ * pending approval is the repeat joining it. Both carry the same shape as
+ * the first-time answer.
  */
-export function describeAttempt(result: ToolResult, openBefore: ReadonlySet<string> = new Set()): string {
+type Prior = {
+  open?: ReadonlySet<string>;
+  pending?: ReadonlySet<string>;
+};
+
+/** What the attempt came back with, in words a judge can read. */
+export function describeAttempt(result: ToolResult, prior: Prior = {}): string {
   const data = result.data ?? {};
   const reason = typeof data.reason === "string" ? data.reason : undefined;
   switch (result.code) {
     case undefined:
       return "Completed: the refund landed and reported. No fault was armed for this commit.";
-    case "APPROVAL_REQUIRED":
-      return `Approval requested (${String(data.approval_id ?? data.actionId ?? "")}). Approve it: the commit will write and then fail, and the outcome is recorded as unknown.`;
+    case "APPROVAL_REQUIRED": {
+      const actionId = String(data.approval_id ?? data.actionId ?? "");
+      if (prior.pending?.has(actionId)) {
+        return `Approval ${actionId} is still pending: the repeat joined it rather than opening a second one. Decide it on the approval card.`;
+      }
+      return `Approval requested (${actionId}). Approve it on the card: the commit will write and then throw, and the outcome is recorded as unknown.`;
+    }
     case "EXECUTION_INDETERMINATE": {
       const recordId = String(data.record_id ?? "");
-      if (openBefore.has(recordId)) {
-        return `Refused (EXECUTION_INDETERMINATE) because a previous call of this operation may already have written and record ${recordId} is still open. Nothing ran. Settle it under Unreconciled outcomes in the Inspector.`;
+      if (prior.open?.has(recordId)) {
+        return `Refused (EXECUTION_INDETERMINATE) because a previous call of this operation may already have written and record ${recordId} is still open. Nothing ran and no approval was asked. Settle it under Unreconciled outcomes in the Inspector.`;
       }
       return `Outcome unknown: ${String(data.detail ?? "")} Recorded as ${recordId}; see Unreconciled outcomes in the Inspector.`;
     }
@@ -39,67 +51,99 @@ export function describeAttempt(result: ToolResult, openBefore: ReadonlySet<stri
 }
 
 /**
- * The judge-facing interruption. One press runs a shipping refund whose
- * commit writes and then throws, under a fixed idempotency key. The person
- * approves it, the outcome is recorded as unknown, and a reload proves the
- * record, the refusal of the same call, and Reconcile all survive.
+ * What the person's decision on the approval card came to, or undefined
+ * while there is none yet. The decision reaches the runtime through that
+ * card, not this one, so it is read from what the runtime kept: a record
+ * bound to the action, a rejection of it, or the execution the approval
+ * released, which is the first terminal event for the capability after the
+ * approval in the audit. Pending alone does not answer: an action leaves it
+ * to execute before its commit has run.
+ */
+export function describeDecision(
+  actionId: string,
+  records: readonly Unreconciled[],
+  audit: RuntimeSnapshot["audit"],
+): string | undefined {
+  const record = records.find((r) => r.actionId === actionId);
+  if (record !== undefined) {
+    return `Approved (${actionId}), then the commit wrote and threw: outcome unknown. Recorded as ${record.id}; see Unreconciled outcomes in the Inspector.`;
+  }
+  if (audit.some((e) => e.kind === "approval_rejected" && e.actionId === actionId)) {
+    return `Rejected (${actionId}) on the approval card. Nothing ran.`;
+  }
+  const approvedAt = audit.findIndex((e) => e.kind === "approval_approved" && e.actionId === actionId);
+  if (approvedAt === -1) {
+    return undefined;
+  }
+  for (const event of audit.slice(approvedAt + 1)) {
+    if (event.kind === "execution_indeterminate" && event.capability === "refund_shipping") {
+      return `Approved (${actionId}), then the commit wrote and threw: outcome unknown. Recorded as ${event.recordId}; see Unreconciled outcomes in the Inspector.`;
+    }
+    if (event.kind === "execution_completed" && event.capability === "refund_shipping") {
+      return `Approved (${actionId}) and completed: the refund landed and reported, so no unknown outcome was recorded.`;
+    }
+    if (event.kind === "execution_failed" && event.capability === "refund_shipping") {
+      return `Approved (${actionId}), and the execution failed before its write: ${event.error}`;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The judge-facing interruption. One press sends a shipping refund through
+ * invoke_capability under a fixed idempotency key, with its commit armed to
+ * write and then throw. The refund asks for approval; the person approves it
+ * on the approval card, and the outcome is recorded as unknown. A reload
+ * proves the record, the refusal of the same call, and Reconcile all
+ * survive.
  */
 export function DurabilityCard({ orderId }: { orderId: string }) {
-  useRuntime();
+  const snapshot = useRuntime();
   const { announcement, announce } = useAnnouncer();
   const [outcome, setOutcome] = useState("");
+  /** The approval this card asked for and nobody has decided yet. */
+  const [asked, setAsked] = useState<string | undefined>(undefined);
   const open = agentdesk.listUnreconciled().filter((r) => r.capability === "refund_shipping");
 
-  /**
-   * The operator's mandate, issued on this click when none is live. Under
-   * a grant the call takes the path the runtime guards by operation key and
-   * by idempotency claim; through an approval it is not, and the record
-   * then names the grant that authorized the write.
-   */
-  function ensureGrant(): string | undefined {
-    const live = agentdesk
-      .getSnapshot()
-      .grants.find(
-        (g) =>
-          g.state === "live" &&
-          g.capability === "refund_shipping" &&
-          g.scope.some(
-            (r) => r.field === "order_id" && r.kind === "exact" && String(r.value) === orderId,
-          ),
-      );
-    if (live !== undefined) {
-      return undefined;
-    }
-    const issued = agentdesk.grant(
-      {
-        capability: "refund_shipping",
-        scope: { order_id: orderId },
-        uses: 2,
-        expiresAt: Date.now() + 10 * 60_000,
-      },
-      OPERATOR,
-    );
-    return issued.ok ? undefined : issued.reason;
-  }
-
-  async function interrupt() {
-    const refused = ensureGrant();
-    if (refused !== undefined) {
-      const words = `Could not issue the grant: ${refused}`;
-      setOutcome(words);
-      announce(words);
+  // The decision arrives on the approval card, so it is read off the first
+  // snapshot that carries it, and announced once.
+  useEffect(() => {
+    if (asked === undefined) {
       return;
     }
+    const words = describeDecision(asked, agentdesk.listUnreconciled(), snapshot.audit);
+    if (words === undefined) {
+      return;
+    }
+    setAsked(undefined);
+    setOutcome(words);
+    announce(words);
+  }, [asked, snapshot, announce]);
+
+  async function interrupt() {
     armCommitFault("refund_shipping");
+    const prior: Prior = {
+      open: new Set(agentdesk.listUnreconciled().map((r) => r.id)),
+      pending: new Set(agentdesk.getSnapshot().pending.map((a) => a.id)),
+    };
     // Sent the way a client sends it: by name, through invoke_capability,
     // with the idempotency key on the call rather than in the input.
-    const openBefore = new Set(agentdesk.listUnreconciled().map((r) => r.id));
     const result = await agentdesk.invoke("invoke_capability", {
       name: "refund_shipping",
       input: { order_id: orderId },
       idempotency_key: durabilityKey(orderId),
     });
-    const words = describeAttempt(result, openBefore);
+    const actionId = result.code === "APPROVAL_REQUIRED" ? result.data?.approval_id : undefined;
+    if (typeof actionId === "string") {
+      // The commit runs when the person approves, so the fault stays armed.
+      setAsked(actionId);
+    } else {
+      // Either the commit already ran and consumed the fault, or the call
+      // was refused before staging; a fault left armed would fire on
+      // whichever refund came next.
+      disarmCommitFault("refund_shipping");
+    }
+    const words = describeAttempt(result, prior);
     setOutcome(words);
     announce(words);
   }
@@ -115,13 +159,14 @@ export function DurabilityCard({ orderId }: { orderId: string }) {
       </p>
       <h2>Interrupt and recover</h2>
       <p className="page-sub" style={{ marginBottom: 10 }}>
-        One press issues a two-use grant for refund_shipping on this order, so
-        no approval card stands in the way, then runs the refund through
-        invoke_capability with the idempotency key{" "}
-        <code>{durabilityKey(orderId)}</code>, with its commit armed to write
-        and then throw. Reload the page: the unknown outcome is still listed in
-        the Inspector, pressing again is refused in words, and Reconcile
-        settles it.
+        One press sends a shipping refund through invoke_capability with the
+        idempotency key <code>{durabilityKey(orderId)}</code>, its commit
+        armed to write and then throw. The refund asks for approval; approve
+        it on the card, and the outcome is recorded as unknown. Reload the
+        page: the record is still listed in the Inspector, pressing again is
+        refused in words without asking for approval again, and Reconcile
+        settles it. Under a live grant from the authority card above, the
+        same press runs without an approval.
       </p>
       <div className="actions" style={{ justifyContent: "flex-start" }}>
         <button

@@ -130,7 +130,7 @@ export async function resetDemo(): Promise<{ settled: number; kept: string[] }> 
       kept.push(`${record.id}: ${outcome.reason}`);
     }
   }
-  await demoPersistence.clear();
+  await demoPersistence.adapter.clear();
   resetStore();
   await agentdesk.reset();
   return { settled, kept };

@@ -99,6 +99,11 @@ export function armCommitFault(operation: string, detail: string = DEFAULT_FAULT
   faults.set(operation, detail);
 }
 
+/** The fixture stood down: a refused call never reaches its commit, so an armed fault would wait for the next one. */
+export function disarmCommitFault(operation: string): void {
+  faults.delete(operation);
+}
+
 /** The write has landed; a fault armed for this operation now fires, once. */
 function landed(capability: string, state: DemoState): void {
   land(state);
