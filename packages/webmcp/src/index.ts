@@ -4,6 +4,7 @@ export {
   defineCapability,
   parseCapabilityName,
   unavailable,
+  type AgentView,
   type AppContext,
   type Availability,
   type Capability,

@@ -8,6 +8,7 @@ import {
   CapabilityUnavailableError,
   defineCapability,
   unavailable,
+  type AgentView,
   type AppContext,
   type Capability,
   type CapabilityName,
@@ -335,6 +336,14 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   staging?: StagingAdapter<S>;
   /** Who is acting. Recorded on audit events, receipts, and presentation. */
   actor?: Actor;
+  /**
+   * The projection of application state the agent may see. Applied by the
+   * runtime to everything that crosses to the agent: tool results, the
+   * routing report, approval previews, receipts on results, get_context.
+   * The human-facing snapshot and audit are not projected. A capability's
+   * own `agentView` narrows this further and never widens it.
+   */
+  agentView?: AgentView;
 }): AgentDeskRuntime {
   const audit = new AuditBus();
   const approvals = new ApprovalManager();

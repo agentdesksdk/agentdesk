@@ -13,7 +13,8 @@ export type ToolCode =
   | "PREVIEW_UNAVAILABLE"
   | "EXECUTION_CANCELLED"
   | "EXECUTION_INDETERMINATE"
-  | "APPROVAL_STALE";
+  | "APPROVAL_STALE"
+  | "VIEW_UNAVAILABLE";
 
 export type ToolResult = {
   content: Array<{ type: string; text: string }>;

@@ -30,7 +30,7 @@ export type ExecutionContext = AppContext & {
 };
 
 import type { FocusPolicy } from "./presentation.ts";
-import type { VerificationResult } from "./plan.ts";
+import type { Actor, VerificationResult } from "./plan.ts";
 import type { Repair } from "./protocol.ts";
 
 
@@ -99,6 +99,17 @@ export type NormalizedRelationships = {
 export type Policy =
   | { kind: "allow" }
   | { kind: "approval_required" };
+
+/**
+ * The projection of application state an agent is allowed to see. Given a
+ * state-shaped object and who is looking, returns what may cross to the
+ * agent. The runtime applies it on its side of the boundary to everything
+ * that crosses, so a capability cannot skip it.
+ */
+export type AgentView = (view: {
+  state: Record<string, unknown>;
+  actor?: Actor;
+}) => Record<string, unknown>;
 
 export type ToolSurfaceKind = "native" | "invoke";
 
@@ -196,6 +207,12 @@ export type Capability = {
   };
   surface: ToolSurfaceKind;
   availability: (ctx: AppContext) => Availability;
+  /**
+   * Narrows the runtime's agent view further for this capability's own
+   * results. Receives what the runtime's view already let through, so it
+   * can only remove, never restore.
+   */
+  agentView?: AgentView;
   /**
    * Input-level pre-flight, checked before the policy gate so an
    * infeasible consequential action fails fast instead of queueing an
@@ -328,6 +345,7 @@ type CapabilitySpecBase = {
   readOnlyHint?: boolean;
   untrustedContentHint?: boolean;
   surface?: ToolSurfaceKind;
+  agentView?: AgentView;
   /** Legacy boolean availability. Prefer `availability` for structured reasons. */
   available?: (ctx: AppContext) => boolean;
   availability?: (ctx: AppContext) => Availability;
@@ -539,6 +557,9 @@ export function defineCapability(spec: CapabilitySpec): Capability {
   }
   if (spec.checkInput !== undefined) {
     capability.checkInput = spec.checkInput;
+  }
+  if (spec.agentView !== undefined) {
+    capability.agentView = spec.agentView;
   }
   if (spec.presentation !== undefined) {
     capability.presentation = spec.presentation;
