@@ -8,8 +8,13 @@ import { useRuntime } from "./hooks.ts";
 /** One key for the one call, so a second press is the same call again. */
 export const durabilityKey = (orderId: string) => `durability-${orderId}`;
 
-/** What the attempt came back with, in words a judge can read. */
-export function describeAttempt(result: ToolResult): string {
+/**
+ * What the attempt came back with, in words a judge can read. `openBefore`
+ * is the set of unreconciled record ids that existed before the call: an
+ * EXECUTION_INDETERMINATE naming one of them is the guard refusing the same
+ * call, not a new unknown outcome, and the two carry the same shape.
+ */
+export function describeAttempt(result: ToolResult, openBefore: ReadonlySet<string> = new Set()): string {
   const data = result.data ?? {};
   const reason = typeof data.reason === "string" ? data.reason : undefined;
   switch (result.code) {
@@ -17,15 +22,13 @@ export function describeAttempt(result: ToolResult): string {
       return "Completed: the refund landed and reported. No fault was armed for this commit.";
     case "APPROVAL_REQUIRED":
       return `Approval requested (${String(data.approval_id ?? data.actionId ?? "")}). Approve it: the commit will write and then fail, and the outcome is recorded as unknown.`;
-    case "EXECUTION_INDETERMINATE":
-      // Two things say this: a commit that just wrote and then failed, and
-      // the guard that refuses the same call while that record is open.
-      return (
-        (data.status === "INDETERMINATE"
-          ? "Outcome unknown: "
-          : "Refused (EXECUTION_INDETERMINATE) because ") +
-        `${String(data.detail ?? "")} Record ${String(data.record_id ?? "")}; see Unreconciled outcomes in the Inspector.`
-      );
+    case "EXECUTION_INDETERMINATE": {
+      const recordId = String(data.record_id ?? "");
+      if (openBefore.has(recordId)) {
+        return `Refused (EXECUTION_INDETERMINATE) because a previous call of this operation may already have written and record ${recordId} is still open. Nothing ran. Settle it under Unreconciled outcomes in the Inspector.`;
+      }
+      return `Outcome unknown: ${String(data.detail ?? "")} Recorded as ${recordId}; see Unreconciled outcomes in the Inspector.`;
+    }
     case "IDEMPOTENCY_CONFLICT":
       return `Refused (IDEMPOTENCY_CONFLICT, cause ${String(data.cause ?? "unknown")}) because ${reason ?? "this key was already used."}`;
     default:
@@ -90,12 +93,13 @@ export function DurabilityCard({ orderId }: { orderId: string }) {
     armCommitFault("refund_shipping");
     // Sent the way a client sends it: by name, through invoke_capability,
     // with the idempotency key on the call rather than in the input.
+    const openBefore = new Set(agentdesk.listUnreconciled().map((r) => r.id));
     const result = await agentdesk.invoke("invoke_capability", {
       name: "refund_shipping",
       input: { order_id: orderId },
       idempotency_key: durabilityKey(orderId),
     });
-    const words = describeAttempt(result);
+    const words = describeAttempt(result, openBefore);
     setOutcome(words);
     announce(words);
   }

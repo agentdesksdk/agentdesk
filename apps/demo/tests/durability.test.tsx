@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { memoryPersistence, type ToolResult } from "@agentdesk/webmcp";
 import { App } from "../src/App.tsx";
 import { armCommitFault } from "../src/capabilities/staged.ts";
+import { describeAttempt } from "../src/components/DurabilityCard.tsx";
 import { getState, resetStore } from "../src/data/store.ts";
 import { agentdesk, createMeridianRuntime, demoPersistence } from "../src/runtime/agentdesk.ts";
 import { demoResolveArtifact } from "../src/runtime/persistence.ts";
@@ -125,6 +126,11 @@ describe("an unknown outcome survives a restart of Meridian Ops", () => {
     expect(String(again.data?.reason)).toMatch(/restart/);
     expect(second.getSnapshot().pending).toEqual([]);
     expect(getState().orders.find((o) => o.id === ORDER)!.shippingRefunded).toBe(false);
+    // The card's words for each: the guard's refusal has the same shape as
+    // a fresh unknown outcome and is told apart by the record already open.
+    expect(describeAttempt(guarded, new Set([id]))).toMatch(/^Refused \(EXECUTION_INDETERMINATE\)/);
+    expect(describeAttempt(guarded, new Set([id]))).toContain(id);
+    expect(describeAttempt(again)).toMatch(/^Refused \(IDEMPOTENCY_CONFLICT, cause after_restart\)/);
     await second.stop();
   });
 
