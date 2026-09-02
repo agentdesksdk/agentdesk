@@ -392,9 +392,16 @@ or an author's `previewChanges` returns reaches the digest except `field`
 and `before`. A `stateVersion` a capability or an adapter hands in on a
 change is ignored, and the result's `stateVersion` is written by the
 runtime after everything else, so the value on the preview is always the
-runtime's own. A summary-only approval has no preview to derive from and
-carries no `stateVersion`; its approval is not bound to state, because
-there is no state it showed.
+runtime's own. The digest binds state, not output, and that is the edge of
+the guarantee. A staged capability commits the reviewed artifact itself, so
+there is no gap between what was shown and what lands. A direct capability
+re-derives at execution, so the value that lands is whatever the handler
+produces then; an author's `previewChanges` must report in `before`
+everything the handler reads for the digest to mean what a person thinks it
+means, because a rule or a table the handler consults without reporting it
+is outside the digest and can move without a stale refusal. A summary-only
+approval has no preview to derive from and carries no `stateVersion`; its
+approval is not bound to state, because there is no state it showed.
 
 **Where it fires.** `approve()` checks after policy and availability and
 before the staged artifact is taken, so a stale approval releases its

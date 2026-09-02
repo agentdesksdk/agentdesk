@@ -143,6 +143,7 @@ const CLAIMS = [
   ["docs/architecture.md", /What the digest covers/, "present", "architecture says what the digest covers and why not the whole store"],
   ["docs/architecture.md", /One digest function/, "present", "architecture says single approvals and plans share one digest"],
   ["docs/architecture.md", /digest-free by construction/, "present", "architecture says a grant-authorized execution has no digest"],
+  ["docs/architecture.md", /binds state, not output/, "present", "architecture states the edge of the digest guarantee"],
   ["docs/architecture.md", /adoptHumanActor/, "present", "architecture names the identity boundary a grant issuer crosses"],
 ];
 
