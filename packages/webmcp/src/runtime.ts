@@ -57,7 +57,7 @@ import {
   type PlannedOperation,
   type VerificationResult,
 } from "./plan.ts";
-import type { Receipt } from "./results.ts";
+import type { EvidenceLink, Receipt } from "./results.ts";
 import {
   ReceiptStore,
   type ReceiptQuery,
@@ -1021,6 +1021,80 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         ? { data: withhold(result.data, hidden) as Record<string, unknown> }
         : {}),
     };
+  }
+
+  /**
+   * Where the proof of a write can be seen when the author did not say. A
+   * capability's `presentation.route` and `reveal` already name the page
+   * and the anchor the demo navigates to for the write, so they are the
+   * derivation, with the receipt's entity as the label. Nothing is guessed
+   * from the entity text or the field names: a capability with no route
+   * declared has no derived link, and its receipt says so with an empty
+   * list rather than a link that goes nowhere.
+   */
+  function deriveEvidence(
+    capability: Capability,
+    input: Record<string, unknown>,
+    entity: string,
+  ): EvidenceLink[] {
+    const spec = capability.presentation;
+    if (spec?.route === undefined) {
+      return [];
+    }
+    let route: string | undefined;
+    try {
+      route = spec.route(input, context);
+    } catch {
+      return [];
+    }
+    if (typeof route !== "string" || !route.startsWith("/")) {
+      return [];
+    }
+    return [
+      {
+        label: entity,
+        route,
+        ...(spec.reveal !== undefined ? { reveal: spec.reveal } : {}),
+      },
+    ];
+  }
+
+  /**
+   * A link crosses only if nothing it names is hidden. Its `reveal` is
+   * treated as a field name and passed through the view like a change; its
+   * route is checked segment by segment against the hidden values and then
+   * through the same two tiers as any text; its label too. A link with a
+   * hole in it navigates nowhere, so it is dropped rather than withheld.
+   */
+  function linksThroughView(
+    links: readonly EvidenceLink[],
+    capability: Capability | undefined,
+    viewer: Actor | undefined,
+  ): EvidenceLink[] {
+    if (runtimeView === undefined && capability?.agentView === undefined) {
+      return links.map((link) => ({ ...link }));
+    }
+    const hidden = hiddenStrings(capability, viewer);
+    const kept: EvidenceLink[] = [];
+    for (const link of links) {
+      if (link.reveal !== undefined) {
+        const probe = throughView({ [link.reveal]: true }, capability, viewer);
+        if (!isPlainRecord(probe) || !(link.reveal in probe)) {
+          continue;
+        }
+      }
+      if (link.route.split("/").some((segment) => hidden.includes(segment))) {
+        continue;
+      }
+      if (
+        withhold(link.route, hidden) !== link.route ||
+        withhold(link.label, hidden) !== link.label
+      ) {
+        continue;
+      }
+      kept.push({ ...link });
+    }
+    return kept;
   }
 
   /** Records a failed view and builds the refusal that stands in for the value. */
@@ -1992,12 +2066,23 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         at: now(),
       };
       let verification: VerificationResult = { status: "UNSUPPORTED" };
-      if (isReceiptEnvelope(value)) {
-        event.receipt = value.receipt;
+      // Evidence is settled once, here, before the receipt goes anywhere:
+      // the audit event, the store, and the result all carry the same list,
+      // so "show me proof" is one answer. Authored wins; otherwise derived.
+      const settledReceipt: Receipt | undefined = isReceiptEnvelope(value)
+        ? {
+            ...value.receipt,
+            evidence:
+              value.receipt.evidence ??
+              deriveEvidence(capability, input, value.receipt.entity),
+          }
+        : undefined;
+      if (settledReceipt !== undefined) {
+        event.receipt = settledReceipt;
         verification = await runVerification(
           capability,
           input,
-          value.receipt.changes,
+          settledReceipt.changes,
         );
       }
       // Verification is an application callback and can outlive the session
@@ -2029,12 +2114,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           const json = JSON.stringify(raw === undefined ? null : raw);
           recordable = json === undefined ? null : JSON.parse(json);
         }
-        if (isReceiptEnvelope(value)) {
+        if (settledReceipt !== undefined) {
           pending = structuredClone({
             capability: capability.name,
             executionId,
             input,
-            receipt: value.receipt,
+            receipt: settledReceipt,
             verification,
             at: now(),
             ...(planId !== undefined ? { planId } : {}),
@@ -2062,6 +2147,10 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       // above are the human's and stay whole.
       let toolResult: ToolResult;
       try {
+        const linksShown =
+          pending === undefined
+            ? []
+            : linksThroughView(pending.receipt.evidence ?? [], capability, actingActor);
         const receiptShown =
           pending === undefined
             ? undefined
@@ -2073,15 +2162,22 @@ export function createAgentDeskRuntime<S = unknown>(options: {
                     capability,
                     actingActor,
                   ),
+                  evidence: linksShown,
                 },
                 capability,
                 actingActor,
               ) as Receipt);
+        // The same links ride on the protocol's evidence list, so a result
+        // and a receipt answer "show me proof" identically.
+        const proof: Evidence[] = [
+          ...evidence,
+          ...linksShown.map((link) => ({ kind: "link" as const, ...link })),
+        ];
         toolResult = completed(
           throughView(recordable, capability, actingActor),
           receiptShown,
           {
-            ...settled(capability, evidence),
+            ...settled(capability, proof),
             changes: receiptShown?.changes ?? [],
           },
         );
