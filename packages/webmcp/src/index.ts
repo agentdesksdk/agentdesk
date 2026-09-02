@@ -135,6 +135,8 @@ export {
 } from "./approval.ts";
 export type { AuditEvent, AuditListener } from "./audit.ts";
 export {
+  GESTURE_TTL_MS,
+  GestureStore,
   isApprovalGesture,
   type ApprovalGesture,
   type GestureBinding,

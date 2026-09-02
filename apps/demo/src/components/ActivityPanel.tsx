@@ -334,6 +334,15 @@ function collapse(events: readonly AuditEvent[]): Rendered[] {
           }; a person decides`,
         });
         break;
+      case "untrusted_content_ignored":
+        out.push({
+          key,
+          at: event.at,
+          head: "Untrusted content ignored",
+          cap: event.capability,
+          meta: `${event.sources.join(", ")} was in context; treated as data, not authority`,
+        });
+        break;
       // A new audit kind has to get a case above; this stops it compiling
       // rather than letting it vanish from the panel.
       default: {
