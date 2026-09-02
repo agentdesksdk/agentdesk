@@ -184,6 +184,80 @@ describe("agent-view projection: nothing the projection excludes crosses to the 
   });
 });
 
+describe("agent-view projection: the hidden value backstop has two tiers", () => {
+  /** Hides `region`, `eight`, and `seven`; the values are what the tiers are about. */
+  const dropCodes: AgentView = ({ state: view }) => {
+    const { region: _r, eight: _e, seven: _s, ...rest } = view;
+    return rest;
+  };
+
+  async function bootedWith(stateShape: Record<string, unknown>, handler: () => unknown) {
+    const model = createMockModelContext();
+    const runtime = createAgentDeskRuntime({
+      registerTool: model.registerTool,
+      actor: AGENT,
+      agentView: dropCodes,
+      capabilities: [
+        defineCapability({
+          name: "echo",
+          description: "Returns what the test hands it",
+          execute: handler,
+        }),
+      ],
+    });
+    await runtime.start();
+    await runtime.setContext({ route: "/", state: stateShape });
+    return runtime;
+  }
+
+  it("withholds a short hidden value by whole-value equality and leaves words containing it alone", async () => {
+    const runtime = await bootedWith({ region: "US", orders: [] }, () => ({
+      code: "US",
+      nested: [{ code: "US" }],
+      label: "STATUS",
+      dock: "USB-C Dock",
+    }));
+
+    const result = await runtime.invoke("echo", {});
+
+    expect(result.data?.result).toEqual({
+      code: "[withheld]",
+      nested: [{ code: "[withheld]" }],
+      label: "STATUS",
+      dock: "USB-C Dock",
+    });
+    expect(result.content[0]!.text).toContain("STATUS");
+    expect(result.content[0]!.text).toContain("USB-C Dock");
+  });
+
+  it("withholds a long hidden value from the middle of a sentence", async () => {
+    const runtime = await bootedWith({ region: TOKEN, orders: [] }, () => ({
+      note: `the token ${TOKEN} was used`,
+    }));
+
+    const result = await runtime.invoke("echo", {});
+
+    expect(result.data?.result).toEqual({ note: "the token [withheld] was used" });
+    expect(serialized(result)).not.toContain(TOKEN);
+  });
+
+  it("matches inside text from eight characters and not from seven", async () => {
+    const runtime = await bootedWith({ eight: "abcdefgh", seven: "abcdefg", orders: [] }, () => ({
+      long: "see abcdefgh here",
+      short: "see abcdefg here",
+      exact: "abcdefg",
+    }));
+
+    const result = await runtime.invoke("echo", {});
+
+    expect(result.data?.result).toEqual({
+      long: "see [withheld] here",
+      short: "see abcdefg here",
+      exact: "[withheld]",
+    });
+  });
+});
+
 describe("agent-view projection: the human side is untouched", () => {
   it("leaves the snapshot's audit and the receipt store unprojected", async () => {
     const { runtime } = await booted({ agentView: dropToken });
