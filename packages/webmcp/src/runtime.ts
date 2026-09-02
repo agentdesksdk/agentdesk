@@ -4487,11 +4487,11 @@ function builtinCapabilities(): Capability[] {
             description:
               "The task or intent in plain words, e.g. 'refund shipping for an unshipped order'",
           },
-          domain: {
-            type: "string",
-            description:
-              "Optional. A domain from the domains list, or domain/subdomain, to rank within that branch only.",
-          },
+          // `domain` is accepted and not declared. The bootstrap surface's
+          // bytes are the budget every published set is measured against
+          // and the figure the task evaluation's reference records, so the
+          // narrowing input rides in every first-level answer's
+          // `instruction` and `domains` instead of in this schema.
         },
       },
       execute: unreachable(FIND_CAPABILITIES),
