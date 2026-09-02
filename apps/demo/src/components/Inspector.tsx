@@ -3,6 +3,7 @@ import { ROUTING_WEIGHTS, type RuntimeSnapshot } from "@agentdesk/webmcp";
 import { BOOTSTRAP } from "../instrumentation/sideBySide.ts";
 import { agentdesk, webmcpNative } from "../runtime/agentdesk.ts";
 import { useAnnouncer } from "./announcer.ts";
+import { authorityLine } from "./grant-text.ts";
 import { useRuntime } from "./hooks.ts";
 
 /**
@@ -99,6 +100,12 @@ export function Inspector() {
         <div className="stat-row">
           <span>Schema bytes on the wire</span>
           <span className="num">{snapshot.schemaBytes.toLocaleString()}</span>
+        </div>
+        <div className="stat-row">
+          <span>Current authority</span>
+          <span className="num authority" data-authority>
+            {authorityLine(snapshot.grants)}
+          </span>
         </div>
         <div className="stat-row">
           <span>WebMCP support</span>
