@@ -26,6 +26,11 @@ export {
 } from "./capability.ts";
 export { CapabilityCatalog } from "./catalog.ts";
 export {
+  nativeProvider,
+  type CapabilityProvider,
+  type NativeProviderOptions,
+} from "./provider.ts";
+export {
   catalogHierarchy,
   hierarchicalScorer,
   type CatalogDomain,

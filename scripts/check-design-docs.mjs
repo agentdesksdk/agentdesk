@@ -221,6 +221,11 @@ const CLAIMS = [
   ["docs/routing.md", /A client that skips the first call loses nothing/, "present", "routing says the single call is unchanged"],
   ["docs/routing.md", /##\s*[\d.]+% with a lexical domain step/, "present", "routing reports the hierarchical scorer against the reference"],
   ["docs/routing.md", /That is not a wide margin/, "present", "routing says plainly what the lexical step did not achieve"],
+  ["docs/architecture.md", /##\s*The provider seam/, "present", "architecture states the capability provider seam"],
+  ["docs/architecture.md", /One provider, bound once at construction like the staging\s+adapter/, "present", "architecture decides a provider is bound once"],
+  ["docs/architecture.md", /`provider\.ts` the only file that constructs the adapter/, "present", "architecture says the provider seam is the only adapter constructor"],
+  ["browser-extension.md", /What the seam now satisfies of this document's assumptions/, "present", "the extension design says which assumptions the seam satisfies"],
+  ["README.md", /has to be extracted/, "absent", "the design README no longer says the provider seam is still to be extracted"],
 ];
 
 /**

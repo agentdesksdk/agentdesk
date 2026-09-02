@@ -50,12 +50,16 @@ type CapabilityProvider = {
 };
 ```
 
-Auto and the extension both depend on this landing first. Until the
-runtime takes a `CapabilityProvider` instead of building one, "the core
-is already separable" is a claim about intent rather than about the code.
+Auto and the extension both depend on this landing first. It has: the
+runtime takes a `CapabilityProvider` from `packages/webmcp/src/provider.ts`
+and builds no adapter of its own, with the shape narrowed to what a
+provider supplies, `capabilities()`, `adapter`, and an optional
+`subscribe`, rather than the `start`/`stop` sketched above, since the
+surface stays the runtime's. `docs/architecture.md` states the seam.
 
 <!-- code-anchors
-packages/webmcp/src/runtime.ts createWebMcpAdapter ToolSurfaceManager
+packages/webmcp/src/provider.ts CapabilityProvider nativeProvider
+packages/webmcp/src/runtime.ts ToolSurfaceManager provider
 packages/webmcp/src/policy.ts riskBasedPolicy decidePolicy
 packages/webmcp/src/capability.ts approvalEvidence previewChanges defineCapability
 -->
