@@ -310,9 +310,16 @@ was checked against and why it did not apply, as
 `nowPossible` includes every capability holding a live grant, so the answer
 can point at a sibling the person already authorized, and there is no
 `repair`, because the fix is a person deciding rather than a capability the
-agent can call. When several grants exist the considered one is the one
-whose state a person can act on first: a live grant the call fell outside
-of, then an exhausted one, then a revoked one, then an expired one.
+agent can call. The same considered grant is recorded on the pending
+action as `PendingAction.grant`, so an approval card reads it directly
+rather than reconstructing it from the audit. When several grants exist, a
+live grant the call fell outside of is named first, because it alone could
+still apply to a different input; among the rest the one whose state most
+recently changed is named, by the timestamp of the spend, revoke, or expiry
+that put it there, with a change ticket breaking a same-millisecond tie.
+That is the grant the person most recently acted on, so someone who just
+pressed Revoke is told about that grant and not about one that ran out
+earlier.
 
 **Revoke is immediate.** `revokeGrant` moves a live grant to `revoked` with
 the human who did it, and the next use goes to a person with
@@ -1555,7 +1562,7 @@ packages/webmcp/src/runtime.ts reconcileRollback markRolledBack proveRollback ow
 packages/webmcp/src/audit.ts rollback_indeterminate rollback_reconciled rollback_performed grant_issued grant_revoked grant_applied grant_not_applied
 packages/webmcp/src/protocol.ts Repair Evidence Situation Refusal Settled ResultProtocol RefusalStatus
 packages/webmcp/src/results.ts completed capabilityUnavailable approvalRequired executionIndeterminate
-packages/webmcp/src/grants.ts Grant LiveGrant GrantRequest ScopeRule ConsideredGrant GrantOutcome GrantStore parseScope parseGrantRequest matchesScope consult spend revoke liveCapabilities
+packages/webmcp/src/grants.ts Grant LiveGrant GrantRequest ScopeRule ConsideredGrant GrantOutcome GrantStore parseScope parseGrantRequest matchesScope consult spend revoke liveCapabilities changedAt touch
 packages/webmcp/src/runtime.ts adoptHumanActor authorizing considered queueApproval revokeGrant listGrants getGrant currentDigest hasPreviewSource
 packages/webmcp/src/staging.ts stateDigest
 packages/webmcp/src/results.ts approvalStale viewUnavailable EvidenceLink AuthoredEvidenceLink evidence source
