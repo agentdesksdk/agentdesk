@@ -296,25 +296,28 @@ because the handler may already be running and a mandate counts dispatches.
 The receipt carries `grantId`, `queryReceipts({ grantId })` finds every
 write one grant authorized, and `execution_started` names the grant.
 
-**A call outside the mandate is refused, not escalated.** A grant on record
-that does not cover the call, a spent grant, a revoked one, or an expired
-one refuses with `GRANT_REFUSED`, the grant id, a `reasonCode` of
-`GRANT_OUT_OF_SCOPE`, `GRANT_EXHAUSTED`, `GRANT_REVOKED`, or
-`GRANT_EXPIRED`, and a sentence naming the field or the state. It is in the
-result protocol: `nowPossible` includes every capability holding a live
-grant, so a refusal can point at a sibling the person already authorized,
-and there is no `repair`, because the fix is a person issuing a new grant
-rather than a capability the agent can call. Nothing is queued for
-approval. The mandate is the person's answer for that capability, and a
-call outside it is not quietly turned into an approval card they already
-chose not to sit for. When several grants exist the refusal names the one
+**A grant that does not apply changes nothing.** A grant on record that
+does not cover the call, a spent grant, a revoked one, or an expired one
+means the grant does not apply, and the call takes the path it always had:
+`APPROVAL_REQUIRED`, with a person deciding. Refusing instead would let a
+mandate for one customer make another customer's refund un-approvable. The
+information is kept: the approval result carries `grant`, the grant the call
+was checked against and why it did not apply, as
+`{ id, outcome: "exhausted" | "expired" | "revoked" }` or
+`{ id, outcome: "missing_field" | "out_of_scope", field }` or
+`{ id, outcome: "over_bound", field, max }` /
+`{ id, outcome: "under_bound", field, min }`. It is in the result protocol:
+`nowPossible` includes every capability holding a live grant, so the answer
+can point at a sibling the person already authorized, and there is no
+`repair`, because the fix is a person deciding rather than a capability the
+agent can call. When several grants exist the considered one is the one
 whose state a person can act on first: a live grant the call fell outside
 of, then an exhausted one, then a revoked one, then an expired one.
 
 **Revoke is immediate.** `revokeGrant` moves a live grant to `revoked` with
-the human who did it, and the next use refuses with `GRANT_REVOKED`. An
-execution that already spent its use is untouched, because its use was
-spent before its handler ran. Only a live grant can be revoked; revoking an
+the human who did it, and the next use goes to a person with
+`outcome: "revoked"` on the result. An execution that already spent its use
+is untouched, because its use was spent before its handler ran. Only a live grant can be revoked; revoking an
 exhausted or expired one is refused with a reason rather than rewriting
 its history.
 
@@ -328,13 +331,11 @@ throws as well. Request-shape problems and an unknown capability return
 `{ ok: false, reason }`. `listGrants`, `getGrant`, and `getSnapshot().grants`
 hand out the frozen records in every state; `reset` clears them.
 
-**Audit.** Every grant refusal is audited as `capability_unavailable` with
-its `GRANT_*` reason code, the same way a retired tool and a validation
-failure are. The grant's own lifecycle, who issued it, when, who revoked it
-and when, lives on the frozen record. There are no `grant_issued` or
-`grant_revoked` audit kinds yet: the demo's activity panel is exhaustive
-over the `AuditEvent` union by design, so adding a kind is an SDK and demo
-change made together, and the demo lane follows this one.
+**Audit.** A grant that did not apply leaves the ordinary
+`approval_requested` event, and the execution a grant authorized carries
+the grant on `execution_started` and on the receipt. The grant's own
+lifecycle, who issued it, when, who revoked it and when, lives on the
+frozen record.
 
 Grants apply to a direct invocation. `approve()` executes an approval a
 person gave for that call, and a plan carries its own approval, so neither
@@ -1329,8 +1330,8 @@ packages/webmcp/src/capability.ts verifyRollback rollbackEvidence Unavailability
 packages/webmcp/src/runtime.ts reconcileRollback markRolledBack proveRollback ownActor routable visibleRepair situationFor partition desiredNative
 packages/webmcp/src/audit.ts rollback_indeterminate rollback_reconciled rollback_performed
 packages/webmcp/src/protocol.ts Repair Evidence Situation Refusal Settled ResultProtocol RefusalStatus
-packages/webmcp/src/results.ts completed capabilityUnavailable approvalRequired executionIndeterminate grantRefused
-packages/webmcp/src/grants.ts Grant LiveGrant GrantRequest ScopeRule GrantStore parseScope parseGrantRequest matchesScope consult spend revoke liveCapabilities
-packages/webmcp/src/runtime.ts adoptHumanActor authorizing revokeGrant listGrants getGrant
+packages/webmcp/src/results.ts completed capabilityUnavailable approvalRequired executionIndeterminate
+packages/webmcp/src/grants.ts Grant LiveGrant GrantRequest ScopeRule ConsideredGrant GrantOutcome GrantStore parseScope parseGrantRequest matchesScope consult spend revoke liveCapabilities
+packages/webmcp/src/runtime.ts adoptHumanActor authorizing considered queueApproval revokeGrant listGrants getGrant
 packages/webmcp/src/receipts.ts grantId
 -->

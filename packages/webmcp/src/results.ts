@@ -1,5 +1,5 @@
 import type { Change, RiskLevel, Unavailability } from "./capability.ts";
-import type { GrantRefusalCode } from "./grants.ts";
+import type { ConsideredGrant } from "./grants.ts";
 import type { Refusal, Settled } from "./protocol.ts";
 
 export type ToolCode =
@@ -12,8 +12,7 @@ export type ToolCode =
   | "IDEMPOTENCY_CAPACITY"
   | "PREVIEW_UNAVAILABLE"
   | "EXECUTION_CANCELLED"
-  | "EXECUTION_INDETERMINATE"
-  | "GRANT_REFUSED";
+  | "EXECUTION_INDETERMINATE";
 
 export type ToolResult = {
   content: Array<{ type: string; text: string }>;
@@ -116,6 +115,12 @@ export function capabilityUnavailable(
   );
 }
 
+/**
+ * `considered` is the grant the call was checked against and why it did not
+ * apply. A grant that does not apply changes nothing about the outcome,
+ * which is why this is an approval and not a refusal; it only says what
+ * the mandate stopped at, so a person deciding can see it.
+ */
 export function approvalRequired(
   capability: string,
   actionId: string,
@@ -124,6 +129,7 @@ export function approvalRequired(
   preview: Change[],
   approvalEvidence: "derived" | "diff" | "summary",
   situation: Settled,
+  considered?: ConsideredGrant,
 ): ToolResult {
   const data: Record<string, unknown> = {
     status: "APPROVAL_REQUIRED",
@@ -140,6 +146,9 @@ export function approvalRequired(
   };
   if (preview.length > 0) {
     data.will_change = preview;
+  }
+  if (considered !== undefined) {
+    data.grant = { ...considered };
   }
   return coded("APPROVAL_REQUIRED", answered(data, situation), false);
 }
@@ -355,35 +364,6 @@ export function executionCancelled(
         reason:
           "The runtime was stopped or reset while this execution was in flight.",
         next: "Re-check application state before retrying; the write may or may not have landed.",
-      },
-      situation,
-    ),
-    true,
-  );
-}
-
-/**
- * A call a grant on record does not authorize. Nothing executed and nothing
- * was queued, because a grant on a capability is the mandate for it: a call
- * outside the mandate is refused with the reason, not silently escalated
- * to an approval the person already declined to sit for.
- */
-export function grantRefused(
-  capability: string,
-  why: { grantId: string; reasonCode: GrantRefusalCode; reason: string },
-  situation: Refusal,
-): ToolResult {
-  return coded(
-    "GRANT_REFUSED",
-    answered(
-      {
-        status: "GRANT_REFUSED",
-        code: "GRANT_REFUSED",
-        capability,
-        grant_id: why.grantId,
-        reasonCode: why.reasonCode,
-        reason: why.reason,
-        next: "Ask a person to issue a grant that covers this call. Nothing was executed and no approval was queued.",
       },
       situation,
     ),

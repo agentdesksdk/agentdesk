@@ -112,7 +112,7 @@ afterEach(() => {
 });
 
 describe("scoped authority grants: spending a mandate", () => {
-  it("turns approval_required into an execution for each use, and refuses the fourth", async () => {
+  it("turns approval_required into an execution for each use, and the fourth asks a person", async () => {
     const log: Log = { refunds: [], credits: 0 };
     const { runtime } = await booted(log);
 
@@ -142,18 +142,17 @@ describe("scoped authority grants: spending a mandate", () => {
       customerId: "CUS-104",
       amount: 10,
     });
-    expect(fourth.code).toBe("GRANT_REFUSED");
-    expect(fourth.isError).toBe(true);
+    expect(fourth.code).toBe("APPROVAL_REQUIRED");
+    expect(fourth.isError).toBeUndefined();
     expect(fourth.data).toMatchObject({
-      status: "GRANT_REFUSED",
+      status: "APPROVAL_REQUIRED",
       capability: "refund_shipping",
-      grant_id: grant.id,
-      reasonCode: "GRANT_EXHAUSTED",
+      grant: { id: grant.id, outcome: "exhausted" },
     });
-    expect(typeof fourth.data?.reason).toBe("string");
     expect(fourth.data).not.toHaveProperty("changes");
+    expect(fourth.data).not.toHaveProperty("repair");
     expect(log.refunds).toHaveLength(3);
-    expect(runtime.getSnapshot().pending).toEqual([]);
+    expect(runtime.getSnapshot().pending).toHaveLength(1);
   });
 
   it("names the grant on the receipt and on execution_started", async () => {
@@ -196,7 +195,7 @@ describe("scoped authority grants: spending a mandate", () => {
 });
 
 describe("scoped authority grants: scope is per field and never a wildcard", () => {
-  it("refuses an amount over the bound without executing", async () => {
+  it("an amount over the bound asks a person instead of executing", async () => {
     const log: Log = { refunds: [], credits: 0 };
     const { runtime } = await booted(log);
     const grant = issue(runtime, { ...MANDATE, expiresAt: laterIso(AN_HOUR) });
@@ -206,48 +205,58 @@ describe("scoped authority grants: scope is per field and never a wildcard", () 
       amount: 30,
     });
 
-    expect(over.code).toBe("GRANT_REFUSED");
-    expect(over.data).toMatchObject({
-      reasonCode: "GRANT_OUT_OF_SCOPE",
-      grant_id: grant.id,
+    expect(over.code).toBe("APPROVAL_REQUIRED");
+    expect(over.data?.grant).toEqual({
+      id: grant.id,
+      outcome: "over_bound",
+      field: "amount",
+      max: 25,
     });
-    expect(String(over.data?.reason)).toContain("amount");
     expect(log.refunds).toEqual([]);
-    expect(runtime.getSnapshot().pending).toEqual([]);
+    expect(runtime.getSnapshot().pending).toHaveLength(1);
     expect(runtime.getGrant(grant.id)).toMatchObject({ state: "live", remaining: 3 });
   });
 
-  it("refuses an input that does not carry a scoped field", async () => {
+  it("an input missing a scoped field asks a person", async () => {
     const log: Log = { refunds: [], credits: 0 };
     const { runtime } = await booted(log);
     const grant = issue(runtime, { ...MANDATE, expiresAt: laterIso(AN_HOUR) });
 
     const anonymous = await runtime.invoke("refund_shipping", { amount: 10 });
 
-    expect(anonymous.code).toBe("GRANT_REFUSED");
-    expect(anonymous.data?.reasonCode).toBe("GRANT_OUT_OF_SCOPE");
-    expect(String(anonymous.data?.reason)).toContain("customerId");
+    expect(anonymous.code).toBe("APPROVAL_REQUIRED");
+    expect(anonymous.data?.grant).toEqual({
+      id: grant.id,
+      outcome: "missing_field",
+      field: "customerId",
+    });
     expect(log.refunds).toEqual([]);
+    expect(runtime.getSnapshot().pending).toHaveLength(1);
   });
 
-  it("refuses a different identity even when the amount is in bounds", async () => {
+  it("a different identity asks a person even when the amount is in bounds", async () => {
     const log: Log = { refunds: [], credits: 0 };
     const { runtime } = await booted(log);
-    issue(runtime, { ...MANDATE, expiresAt: laterIso(AN_HOUR) });
+    const grant = issue(runtime, { ...MANDATE, expiresAt: laterIso(AN_HOUR) });
 
     const other = await runtime.invoke("refund_shipping", {
       customerId: "CUS-105",
       amount: 1,
     });
 
-    expect(other.code).toBe("GRANT_REFUSED");
-    expect(other.data?.reasonCode).toBe("GRANT_OUT_OF_SCOPE");
+    expect(other.code).toBe("APPROVAL_REQUIRED");
+    expect(other.data?.grant).toEqual({
+      id: grant.id,
+      outcome: "out_of_scope",
+      field: "customerId",
+    });
     expect(log.refunds).toEqual([]);
+    expect(runtime.getSnapshot().pending).toHaveLength(1);
   });
 });
 
 describe("scoped authority grants: revocation, expiry, and concurrency", () => {
-  it("revoke refuses the next use mid-flight and leaves the committed one alone", async () => {
+  it("revoke sends the next use to a person mid-flight and leaves the committed one alone", async () => {
     const log: Log = { refunds: [], credits: 0 };
     let open: () => void = () => {};
     const release = { gate: new Promise<void>((resolve) => (open = resolve)) };
@@ -264,8 +273,9 @@ describe("scoped authority grants: revocation, expiry, and concurrency", () => {
     });
 
     const next = await runtime.invoke("refund_shipping", { customerId: "CUS-104", amount: 5 });
-    expect(next.code).toBe("GRANT_REFUSED");
-    expect(next.data?.reasonCode).toBe("GRANT_REVOKED");
+    expect(next.code).toBe("APPROVAL_REQUIRED");
+    expect(next.data?.grant).toEqual({ id: grant.id, outcome: "revoked" });
+    expect(runtime.getSnapshot().pending).toHaveLength(1);
 
     open();
     const first = await inFlight;
@@ -275,7 +285,7 @@ describe("scoped authority grants: revocation, expiry, and concurrency", () => {
     expect(started(runtime)).toHaveLength(1);
   });
 
-  it("an expired grant refuses and reports itself expired", async () => {
+  it("an expired grant asks a person and reports itself expired", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-02T12:00:00Z"));
     const log: Log = { refunds: [], credits: 0 };
@@ -285,8 +295,9 @@ describe("scoped authority grants: revocation, expiry, and concurrency", () => {
     vi.setSystemTime(new Date("2026-09-03T00:00:01Z"));
     const late = await runtime.invoke("refund_shipping", { customerId: "CUS-104", amount: 5 });
 
-    expect(late.code).toBe("GRANT_REFUSED");
-    expect(late.data?.reasonCode).toBe("GRANT_EXPIRED");
+    expect(late.code).toBe("APPROVAL_REQUIRED");
+    expect(late.data?.grant).toEqual({ id: grant.id, outcome: "expired" });
+    expect(runtime.getSnapshot().pending).toHaveLength(1);
     expect(runtime.getGrant(grant.id)).toMatchObject({ state: "expired", remaining: 3 });
     expect(log.refunds).toEqual([]);
   });
@@ -302,8 +313,11 @@ describe("scoped authority grants: revocation, expiry, and concurrency", () => {
     ]);
 
     const outcomes = [a, b].map((result) => result.data?.status).sort();
-    expect(outcomes).toEqual(["COMPLETED", "GRANT_REFUSED"]);
+    expect(outcomes).toEqual(["APPROVAL_REQUIRED", "COMPLETED"]);
+    const loser = [a, b].find((result) => result.code === "APPROVAL_REQUIRED");
+    expect(loser?.data?.grant).toEqual({ id: grant.id, outcome: "exhausted" });
     expect(started(runtime)).toHaveLength(1);
+    expect(runtime.getSnapshot().pending).toHaveLength(1);
     expect(log.refunds).toHaveLength(1);
     expect(runtime.getGrant(grant.id)).toMatchObject({ state: "exhausted", remaining: 0 });
   });
@@ -394,7 +408,7 @@ describe("scoped authority grants: who may issue one", () => {
 });
 
 describe("scoped authority grants: the result protocol", () => {
-  it("a refusal names a sibling capability holding a live grant in nowPossible", async () => {
+  it("an approval after a spent grant names a sibling holding a live grant in nowPossible", async () => {
     const log: Log = { refunds: [], credits: 0 };
     const { runtime } = await booted(log);
     issue(runtime, { ...MANDATE, uses: 1, expiresAt: laterIso(AN_HOUR) });
@@ -406,12 +420,13 @@ describe("scoped authority grants: the result protocol", () => {
     });
     await runtime.invoke("refund_shipping", { customerId: "CUS-104", amount: 5 });
 
-    const refused = await runtime.invoke("refund_shipping", { customerId: "CUS-104", amount: 5 });
+    const asked = await runtime.invoke("refund_shipping", { customerId: "CUS-104", amount: 5 });
 
-    expect(refused.code).toBe("GRANT_REFUSED");
-    expect(refused.data?.nowPossible).toContain("issue_credit");
-    expect(refused.data?.evidence).toEqual([]);
-    expect(refused.data).not.toHaveProperty("repair");
+    expect(asked.code).toBe("APPROVAL_REQUIRED");
+    expect(asked.data?.grant).toMatchObject({ outcome: "exhausted" });
+    expect(asked.data?.nowPossible).toContain("issue_credit");
+    expect(asked.data?.evidence).toEqual([{ kind: "approval", id: expect.stringMatching(/^APR-/) }]);
+    expect(asked.data).not.toHaveProperty("repair");
     expect(runtime.getSnapshot().grants.map((grant) => grant.state).sort()).toEqual([
       "exhausted",
       "live",

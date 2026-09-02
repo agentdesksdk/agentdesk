@@ -134,7 +134,8 @@ const CLAIMS = [
   ["docs/architecture.md", /##\s*Scoped authority grants/, "present", "architecture states the grant contract"],
   ["docs/architecture.md", /A grant never widens policy/, "present", "architecture states that a grant narrows approval only"],
   ["docs/architecture.md", /spent at the execution claim, before the first await/, "present", "architecture states when a use is spent"],
-  ["docs/architecture.md", /GRANT_REFUSED/, "present", "architecture names the grant refusal result"],
+  ["docs/architecture.md", /GRANT_REFUSED/, "absent", "a grant that does not apply falls through to approval; there is no refusal code"],
+  ["docs/architecture.md", /A grant that does not apply changes nothing/, "present", "architecture states the fall-through"],
   ["docs/architecture.md", /adoptHumanActor/, "present", "architecture names the identity boundary a grant issuer crosses"],
 ];
 

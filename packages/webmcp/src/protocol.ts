@@ -1,4 +1,5 @@
 import type { Change } from "./capability.ts";
+import type { ConsideredGrant } from "./grants.ts";
 
 /**
  * The result protocol. Every terminal result the runtime hands an agent
@@ -54,8 +55,7 @@ export type RefusalStatus =
   | "IDEMPOTENCY_CONFLICT"
   | "IDEMPOTENCY_CAPACITY"
   | "PREVIEW_UNAVAILABLE"
-  | "EXECUTION_CANCELLED"
-  | "GRANT_REFUSED";
+  | "EXECUTION_CANCELLED";
 
 /** The shape on the wire, discriminated by the `status` every payload carries. */
 export type ResultProtocol =
@@ -67,6 +67,8 @@ export type ResultProtocol =
     })
   | (Situation & {
       status: "APPROVAL_REQUIRED";
+      /** The grant the call was checked against and why it did not apply, when one was. */
+      grant?: ConsideredGrant;
       changes?: never;
       reason?: never;
       repair?: never;

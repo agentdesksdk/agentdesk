@@ -9,7 +9,9 @@ import type { HumanActor } from "./plan.ts";
  *
  * A grant narrows approval and never widens policy. It is consulted only
  * where policy says `require_approval`; under `deny` nothing executes, and
- * under `allow` a grant is never consulted and records nothing.
+ * under `allow` a grant is never consulted and records nothing. A grant
+ * that does not apply to a call changes nothing: the call takes the path
+ * it always had, an approval with a person deciding.
  */
 
 export type GrantId = string & { readonly __brand: "GrantId" };
@@ -84,27 +86,33 @@ export type LiveGrant = Extract<Grant, { state: "live" }>;
 
 export type GrantState = Grant["state"];
 
-export type GrantRefusalCode =
-  | "GRANT_EXHAUSTED"
-  | "GRANT_EXPIRED"
-  | "GRANT_REVOKED"
-  | "GRANT_OUT_OF_SCOPE";
+/**
+ * Why a grant did not apply to a call. The scope outcomes name the field,
+ * and the bound outcomes carry the bound, so a result can say exactly what
+ * the mandate stopped at without repeating the input.
+ */
+export type GrantOutcome =
+  | { readonly outcome: "exhausted" }
+  | { readonly outcome: "expired" }
+  | { readonly outcome: "revoked" }
+  | { readonly outcome: "missing_field"; readonly field: string }
+  | { readonly outcome: "out_of_scope"; readonly field: string }
+  | { readonly outcome: "over_bound"; readonly field: string; readonly max: number }
+  | { readonly outcome: "under_bound"; readonly field: string; readonly min: number };
+
+/** The grant a call was checked against, and why it did not apply. */
+export type ConsideredGrant = { readonly id: GrantId } & GrantOutcome;
 
 /**
  * What consulting the grants for one call says. `none` means no grant was
- * ever issued for the capability, so the ordinary approval gate applies.
- * `refused` means grants exist and none authorizes this call; the grant
- * named is the one whose state explains why.
+ * ever issued for the capability. `not_applied` means grants exist and
+ * none authorizes this call; the one named is the one whose state best
+ * explains why. Both leave the ordinary approval gate in charge.
  */
 export type GrantConsultation =
   | { kind: "none" }
   | { kind: "matched"; grant: LiveGrant }
-  | {
-      kind: "refused";
-      grant: Grant;
-      reasonCode: GrantRefusalCode;
-      reason: string;
-    };
+  | { kind: "not_applied"; grant: ConsideredGrant };
 
 /** A request with every field checked, ready for the store. */
 export type ParsedGrantRequest = {
@@ -226,42 +234,42 @@ export function parseGrantRequest(
   };
 }
 
+/** The scope outcomes, which are the only ones `matchesScope` can produce. */
+export type ScopeOutcome = Extract<GrantOutcome, { field: string }>;
+
 /**
  * Whether the call input sits inside the scope. Every rule must hold, and a
  * field the input does not carry fails its rule, so a scope can only ever
- * narrow what a call may do.
+ * narrow what a call may do. A failure names the field and what stopped it.
  */
 export function matchesScope(
   scope: readonly ScopeRule[],
   input: Record<string, unknown>,
-): { ok: true } | { ok: false; reason: string } {
+): { ok: true } | { ok: false; why: ScopeOutcome } {
   for (const rule of scope) {
     if (!(rule.field in input) || input[rule.field] === undefined) {
-      return { ok: false, reason: `the input carries no ${rule.field}` };
+      return { ok: false, why: { outcome: "missing_field", field: rule.field } };
     }
     const value = input[rule.field];
     if (rule.kind === "exact") {
       if (value !== rule.value) {
-        return {
-          ok: false,
-          reason: `${rule.field} is ${JSON.stringify(value)}, the grant covers ${JSON.stringify(rule.value)}`,
-        };
+        return { ok: false, why: { outcome: "out_of_scope", field: rule.field } };
       }
       continue;
     }
     if (typeof value !== "number" || !Number.isFinite(value)) {
-      return { ok: false, reason: `${rule.field} must be a finite number` };
+      return { ok: false, why: { outcome: "out_of_scope", field: rule.field } };
     }
     if (rule.max !== undefined && value > rule.max) {
       return {
         ok: false,
-        reason: `${rule.field} ${value} is above the granted maximum of ${rule.max}`,
+        why: { outcome: "over_bound", field: rule.field, max: rule.max },
       };
     }
     if (rule.min !== undefined && value < rule.min) {
       return {
         ok: false,
-        reason: `${rule.field} ${value} is below the granted minimum of ${rule.min}`,
+        why: { outcome: "under_bound", field: rule.field, min: rule.min },
       };
     }
   }
@@ -304,7 +312,7 @@ export class GrantStore {
     return [...this.grants.values()].map((grant) => this.settle(grant, at));
   }
 
-  /** Capabilities holding at least one live grant, for a refusal's `nowPossible`. */
+  /** Capabilities holding at least one live grant, for a result's `nowPossible`. */
   liveCapabilities(at: number): CapabilityName[] {
     const names = new Set<CapabilityName>();
     for (const grant of this.list(at)) {
@@ -317,7 +325,7 @@ export class GrantStore {
 
   /**
    * The first live grant whose scope covers the call wins. When none does,
-   * the refusal names the grant whose state best explains why, in this
+   * the considered grant is the one whose state best explains why, in this
    * order: a live grant the call falls outside of, then an exhausted one,
    * then a revoked one, then an expired one. That order puts the reason a
    * person can act on first.
@@ -331,7 +339,7 @@ export class GrantStore {
     if (candidates.length === 0) {
       return { kind: "none" };
     }
-    let outOfScope: { grant: Grant; reason: string } | undefined;
+    let outside: ConsideredGrant | undefined;
     for (const grant of candidates) {
       if (grant.state !== "live") {
         continue;
@@ -340,50 +348,27 @@ export class GrantStore {
       if (fit.ok) {
         return { kind: "matched", grant };
       }
-      outOfScope ??= { grant, reason: fit.reason };
+      outside ??= { id: grant.id, ...fit.why };
     }
-    if (outOfScope) {
-      return {
-        kind: "refused",
-        grant: outOfScope.grant,
-        reasonCode: "GRANT_OUT_OF_SCOPE",
-        reason: `grant ${outOfScope.grant.id} does not cover this call: ${outOfScope.reason}`,
-      };
+    if (outside) {
+      return { kind: "not_applied", grant: outside };
     }
-    const byState = (state: GrantState) =>
-      candidates.find((grant) => grant.state === state);
-    const exhausted = byState("exhausted");
-    if (exhausted) {
-      return {
-        kind: "refused",
-        grant: exhausted,
-        reasonCode: "GRANT_EXHAUSTED",
-        reason: `grant ${exhausted.id} has spent all ${exhausted.uses} of its uses`,
-      };
+    for (const state of ["exhausted", "revoked", "expired"] as const) {
+      const grant = candidates.find((candidate) => candidate.state === state);
+      if (grant) {
+        return { kind: "not_applied", grant: { id: grant.id, outcome: state } };
+      }
     }
-    const revoked = byState("revoked");
-    if (revoked && revoked.state === "revoked") {
-      return {
-        kind: "refused",
-        grant: revoked,
-        reasonCode: "GRANT_REVOKED",
-        reason: `grant ${revoked.id} was revoked by ${revoked.revokedBy.id}`,
-      };
-    }
-    const expired = byState("expired")!;
-    return {
-      kind: "refused",
-      grant: expired,
-      reasonCode: "GRANT_EXPIRED",
-      reason: `grant ${expired.id} expired at ${new Date(expired.expiresAt).toISOString()}`,
-    };
+    // Every candidate is live and every live one matched or was recorded
+    // above, so this line is unreachable; the type needs a return.
+    return { kind: "none" };
   }
 
   /**
    * Spends one use. Synchronous, so a caller that spends before its first
    * await holds the use before any concurrent call can read the count.
    * Returns nothing when the grant is not live, which is the caller's cue
-   * to refuse rather than execute.
+   * to take the approval path rather than execute.
    */
   spend(id: string, at: number): Grant | undefined {
     const grant = this.get(id, at);
