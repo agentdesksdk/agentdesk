@@ -1,0 +1,55 @@
+{"schemaVersion":1,"id":"order-cancel-unshipped","prompt":"Customer 4471 changed her mind about yesterday's purchase, it hasn't left the warehouse, please stop it going out","expected":"cancel_shipment"}
+{"schemaVersion":1,"id":"order-block-until-finance","prompt":"Put a block on 88120 so nothing goes out until finance has looked at it","expected":"create_order_hold"}
+{"schemaVersion":1,"id":"order-note-call","prompt":"Jot down on 10428 that the buyer rang and asked for delivery after the 15th","expected":"create_order_note"}
+{"schemaVersion":1,"id":"order-release-block","prompt":"The finance check on 88120 came back clean, let it go out again","expected":"release_order_hold"}
+{"schemaVersion":1,"id":"order-lookup-by-email","prompt":"Which of last week's purchases belong to maria@example.com","expected":"find_order"}
+{"schemaVersion":1,"id":"shipping-where-is-parcel","prompt":"Where is parcel 1Z999 right now, the recipient says nothing has arrived","expected":"get_tracking_number"}
+{"schemaVersion":1,"id":"shipping-carrier-switch","prompt":"Move the Hamburg deliveries off DHL and onto the courier we used before Christmas","expected":"assign_carrier"}
+{"schemaVersion":1,"id":"shipping-reschedule-drop","prompt":"Recipient on 77201 is away, push the drop to next Tuesday","expected":"schedule_delivery"}
+{"schemaVersion":1,"id":"shipping-label-reprint","prompt":"Print another sticker for box 3 of 88120, the first one smudged","expected":"get_shipping_label"}
+{"schemaVersion":1,"id":"shipping-rate-retire","prompt":"We're no longer offering the 2-day option to Ireland, take that tariff out of the list","expected":"delete_shipping_rate"}
+{"schemaVersion":1,"id":"billing-refund-shipping","prompt":"The customer on 10428 says we charged her for delivery she never asked for, can we give that money back","expected":"refund_shipping_fee"}
+{"schemaVersion":1,"id":"billing-credit-for-late","prompt":"Give Acme a 200 credit against their next bill for the late delivery in March","expected":"create_credit_note"}
+{"schemaVersion":1,"id":"billing-void-wrong-vat","prompt":"INV-2291 went out with the wrong VAT, kill it and we'll raise a fresh one","expected":"cancel_invoice"}
+{"schemaVersion":1,"id":"billing-month-end-lock","prompt":"Month end: lock the November period so nothing else lands on it","expected":"close_billing_cycle"}
+{"schemaVersion":1,"id":"billing-summaries-spreadsheet","prompt":"Finance wants the Q3 account summaries as a spreadsheet","expected":"export_statement"}
+{"schemaVersion":1,"id":"invoices-printable","prompt":"Send me the printable version of INV-2291","expected":"get_invoice_pdf"}
+{"schemaVersion":1,"id":"invoices-sixty-days","prompt":"Acme have asked for 60 days on everything from now on instead of 30","expected":"update_payment_terms"}
+{"schemaVersion":1,"id":"invoices-nudge-overdue","prompt":"Nudge everyone who is more than two weeks overdue","expected":"create_reminder"}
+{"schemaVersion":1,"id":"invoices-month-end-run","prompt":"Run the end-of-month invoicing for all subscription customers","expected":"create_invoice_batch"}
+{"schemaVersion":1,"id":"invoices-fold-two-bills","prompt":"Acme got two bills for the same delivery, fold them into one","expected":"merge_invoice"}
+{"schemaVersion":1,"id":"payments-bank-reversal","prompt":"The bank has reversed the 89.00 on order 55610 and wants our side of it by Friday","expected":"update_chargeback"}
+{"schemaVersion":1,"id":"payments-partial-back","prompt":"Send 15.00 back to the card on 55610 for the missing item","expected":"refund_payment"}
+{"schemaVersion":1,"id":"payments-stop-settlement","prompt":"Thursday's settlement to the vendor should not go out at all, legal has blocked the whole contract","expected":"cancel_payout"}
+{"schemaVersion":1,"id":"payments-expired-visa","prompt":"Take the expired Visa off Maria's profile","expected":"delete_payment_method"}
+{"schemaVersion":1,"id":"payments-proof-for-expenses","prompt":"Customer needs proof of the 89.00 they paid on the 3rd for their expenses","expected":"get_receipt"}
+{"schemaVersion":1,"id":"customers-same-person","prompt":"maria.k@example.com and mkowalski@example.com are the same person, tidy that up","expected":"merge_contact"}
+{"schemaVersion":1,"id":"customers-moved-offices","prompt":"Acme moved offices, their new place is 12 Harbour Street, Dublin 2","expected":"update_address"}
+{"schemaVersion":1,"id":"customers-stop-marketing","prompt":"Maria says stop emailing her marketing","expected":"update_consent"}
+{"schemaVersion":1,"id":"customers-prefers-afternoon","prompt":"Log that Acme's buyer prefers to be called after 2pm","expected":"create_customer_note"}
+{"schemaVersion":1,"id":"customers-freeze-overdue","prompt":"Freeze everything for Acme until the overdue balance is cleared","expected":"hold_customer"}
+{"schemaVersion":1,"id":"accounts-locked-out","prompt":"Jonas is locked out, reset his login credentials","expected":"update_password"}
+{"schemaVersion":1,"id":"accounts-same-permissions","prompt":"Give the new warehouse hire the same permissions as Priya","expected":"assign_role"}
+{"schemaVersion":1,"id":"accounts-rotate-token","prompt":"Rotate the integration token the Shopify connector uses, the old one leaked","expected":"create_api_key"}
+{"schemaVersion":1,"id":"accounts-offboard","prompt":"Priya left the company on Friday, make sure she can't get in anymore","expected":"accounts_close_account"}
+{"schemaVersion":1,"id":"accounts-sign-out-everywhere","prompt":"Sign Jonas out everywhere, his laptop was stolen","expected":"delete_session"}
+{"schemaVersion":1,"id":"inventory-shift-stock","prompt":"Shift 40 of SKU-778 from Dublin to the Cork depot before Monday","expected":"create_stock_transfer"}
+{"schemaVersion":1,"id":"inventory-reorder-threshold","prompt":"We keep running out of SKU-778, what is the reorder threshold set to right now","expected":"get_reorder_point"}
+{"schemaVersion":1,"id":"inventory-book-count","prompt":"Book a full count of the Cork site for the first weekend of October","expected":"schedule_stock_count"}
+{"schemaVersion":1,"id":"inventory-how-many","prompt":"How many of SKU-778 do we physically have across all sites","expected":"get_stock_level"}
+{"schemaVersion":1,"id":"catalog-price-from-december","prompt":"The blue hoodie should be 39.90 from the 1st of December","expected":"schedule_price"}
+{"schemaVersion":1,"id":"catalog-newsletter-code","prompt":"Set up a 15 percent code for the newsletter that runs the whole of Black Friday week","expected":"create_discount"}
+{"schemaVersion":1,"id":"catalog-discontinued-colour","prompt":"The red version of the hoodie is discontinued, hide it from the store","expected":"archive_variant"}
+{"schemaVersion":1,"id":"catalog-swap-photo","prompt":"Swap the main photo on the hoodie for the new one marketing sent","expected":"create_product_image"}
+{"schemaVersion":1,"id":"returns-does-not-fit","prompt":"Maria wants to send the hoodie from 10428 back, it doesn't fit","expected":"create_return"}
+{"schemaVersion":1,"id":"returns-swap-agreed","prompt":"Maria asked to swap the 10428 hoodie for a medium and the desk agreed, sign that off","expected":"approve_exchange"}
+{"schemaVersion":1,"id":"returns-stain-failed","prompt":"The returned hoodie arrived with a stain, mark the check as failed","expected":"update_inspection"}
+{"schemaVersion":1,"id":"returns-let-money-go","prompt":"Warehouse confirmed the hoodie came back in good shape, let the money go out to Maria","expected":"returns_approve_refund"}
+{"schemaVersion":1,"id":"support-beyond-me","prompt":"This one is beyond me, hand it to someone in tier two","expected":"create_escalation"}
+{"schemaVersion":1,"id":"support-three-cases","prompt":"Maria opened three cases about the same hoodie, put them together","expected":"merge_ticket"}
+{"schemaVersion":1,"id":"support-save-apology","prompt":"Save my apology-for-late-delivery text as something the team can reuse","expected":"create_macro"}
+{"schemaVersion":1,"id":"support-bring-back-up","prompt":"Maria replied to the closed conversation, bring it back up","expected":"reopen_ticket"}
+{"schemaVersion":1,"id":"reports-revenue-quarter","prompt":"How did revenue look last quarter compared with the one before","expected":"get_sales_report"}
+{"schemaVersion":1,"id":"reports-weekly-email","prompt":"Email the weekly figures to the leadership list every Monday at 8","expected":"create_report_schedule"}
+{"schemaVersion":1,"id":"reports-auditors-spreadsheet","prompt":"Pull the stock-on-hand numbers into a spreadsheet for the auditors","expected":"export_inventory_report"}
+{"schemaVersion":1,"id":"reports-ops-screen","prompt":"Build a screen for the ops team with open orders and late deliveries on it","expected":"create_dashboard"}

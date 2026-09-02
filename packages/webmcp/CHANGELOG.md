@@ -17,6 +17,32 @@ merged since it.
 
 ### Features
 
+- Await a staged commit, so a store that answers later answers first
+  ([#55](https://github.com/agentdesksdk/agentdesk/pull/55))
+- A staging adapter over IndexedDB, with optimistic concurrency
+  ([#53](https://github.com/agentdesksdk/agentdesk/pull/53))
+- A page replays a reveal through the runtime's own presentation bus
+  ([#49](https://github.com/agentdesksdk/agentdesk/pull/49))
+- The eval compares bare results against structured evidence in four cells
+  ([#51](https://github.com/agentdesksdk/agentdesk/pull/51))
+- Meridian Ops keeps an unknown outcome across a reload, and a person
+  settles it ([#50](https://github.com/agentdesksdk/agentdesk/pull/50))
+- An unknown outcome survives a restart, guards the repeat, and can still be
+  closed ([#46](https://github.com/agentdesksdk/agentdesk/pull/46))
+- An approval is bound to a gesture the runtime issued and can verify
+  ([#44](https://github.com/agentdesksdk/agentdesk/pull/44))
+- A receipt says where its proof can be seen
+  ([#41](https://github.com/agentdesksdk/agentdesk/pull/41))
+- The agent sees a role-shaped projection of state, the human sees
+  everything ([#40](https://github.com/agentdesksdk/agentdesk/pull/40))
+- A grant card and a Revoke button on the order page in Meridian Ops
+  ([#38](https://github.com/agentdesksdk/agentdesk/pull/38))
+- An approval is bound to a digest of the state it was reviewed against
+  ([#37](https://github.com/agentdesksdk/agentdesk/pull/37))
+- Scoped authority grants, spent one execution at a time
+  ([#36](https://github.com/agentdesksdk/agentdesk/pull/36))
+- One result protocol, and a denied capability is invisible on every path
+  ([#34](https://github.com/agentdesksdk/agentdesk/pull/34))
 - A visible adversarial support note on order 10428, returned as untrusted
   content ([#26](https://github.com/agentdesksdk/agentdesk/pull/26))
 - Run the same task in both modes, side by side, at task-time peak
@@ -35,6 +61,11 @@ merged since it.
 
 ### Fixes
 
+- The shell at 375, a page for the adversarial note, and two rail details
+  ([#45](https://github.com/agentdesksdk/agentdesk/pull/45))
+- A pending action carries the considered grant, and the consult names the
+  most recently changed one
+  ([#43](https://github.com/agentdesksdk/agentdesk/pull/43))
 - The eval catalog's `ALREADY_REFUNDED` guard now runs on the input it reads
   ([#29](https://github.com/agentdesksdk/agentdesk/pull/29))
 - Codepoint tie-break, one count per edge, peak surface metrics, and the
@@ -58,6 +89,14 @@ merged since it.
 
 ### Tests and CI
 
+- Land the five stacked wave 1 pull requests that were merged into their
+  own branches ([#52](https://github.com/agentdesksdk/agentdesk/pull/52))
+- Pin workflow actions to commit SHAs, package install line, repair wording
+  ([#35](https://github.com/agentdesksdk/agentdesk/pull/35))
+- Publish `@agentdesk/webmcp` on a `v*` tag with provenance
+  ([#33](https://github.com/agentdesksdk/agentdesk/pull/33))
+- Wave 0 review follow-ups in the demo and p0 apps
+  ([#32](https://github.com/agentdesksdk/agentdesk/pull/32))
 - Run AgentDesk against MCP-B's polyfill, and read both `inputSchema` arms
   ([#13](https://github.com/agentdesksdk/agentdesk/pull/13))
 - PR checks and compile-time WebMCP spec conformance
@@ -65,6 +104,9 @@ merged since it.
 
 ### Docs
 
+- Point the transcript runbook at the eval catalog page
+  ([#30](https://github.com/agentdesksdk/agentdesk/pull/30),
+  [#31](https://github.com/agentdesksdk/agentdesk/pull/31))
 - A fifteen-minute runbook for capturing an eval transcript
   ([#25](https://github.com/agentdesksdk/agentdesk/pull/25))
 - The problem, the pipeline, and the hero prompt above the README fold
