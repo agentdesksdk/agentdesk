@@ -98,6 +98,9 @@ export function openProposalCount(): number {
   return live.size;
 }
 
+/** Test and demo fixture: the next commit of `operation` writes, then throws. */
+export function armCommitFault(_operation: string, _detail?: string): void {}
+
 function stale(capability: string, detail: string): never {
   throw new CapabilityUnavailableError(
     unavailable(

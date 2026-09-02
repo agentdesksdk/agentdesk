@@ -1,5 +1,7 @@
 import {
   createAgentDeskRuntime,
+  type PersistenceAdapter,
+  type RegisterToolFn,
   type Actor,
   type AppContext,
   type Exposure,
@@ -8,6 +10,7 @@ import {
 import { capabilities } from "../capabilities/index.ts";
 import { stagingAdapter } from "../capabilities/staged.ts";
 import { getState } from "../data/store.ts";
+import { createDemoPersistence } from "./persistence.ts";
 
 type ModelContextHost = { modelContext?: { registerTool?: unknown } };
 
@@ -31,6 +34,27 @@ export const webmcpNative =
  * surface, counts, and schema bytes remain observable; the UI labels this
  * state "simulated".
  */
+/** The page's own store across reloads: IndexedDB in a browser, memory elsewhere. */
+export const demoPersistence = createDemoPersistence();
+
+/**
+ * A runtime built the way the page builds its own, so a test can start two
+ * on one persistence adapter and stand in for a reload.
+ */
+export function createMeridianRuntime(options: {
+  persistence?: PersistenceAdapter;
+  registerTool?: RegisterToolFn;
+  approvalGesture?: "optional" | "required";
+}) {
+  return createAgentDeskRuntime({
+    capabilities,
+    registerTool: options.registerTool ?? (async () => {}),
+    actor: { id: "agent", name: "Agent", kind: "agent" },
+    staging: stagingAdapter,
+    ...(options.approvalGesture !== undefined ? { approvalGesture: options.approvalGesture } : {}),
+  });
+}
+
 export const agentdesk = createAgentDeskRuntime({
   capabilities,
   ...(webmcpNative ? {} : { registerTool: async () => {} }),
