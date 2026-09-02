@@ -351,10 +351,17 @@ export function policyDenied(
   );
 }
 
+/**
+ * `cause` says why the key cannot be honoured. `different_input` is the
+ * live conflict. `after_restart` is a key claimed before a restart: the
+ * claim survived but its result did not, and the write may have landed, so
+ * the call is refused rather than repeated.
+ */
 export function idempotencyConflict(
   capability: string,
   key: string,
   situation: Refusal,
+  cause: "different_input" | "after_restart" = "different_input",
 ): ToolResult {
   return coded(
     "IDEMPOTENCY_CONFLICT",
@@ -364,9 +371,15 @@ export function idempotencyConflict(
         code: "IDEMPOTENCY_CONFLICT",
         capability,
         idempotency_key: key,
+        cause,
         reason:
-          "This idempotency key was already used for this capability with different input.",
-        next: "Use a new idempotency_key, or resend the original input to get the original result.",
+          cause === "after_restart"
+            ? "This idempotency key was already used for this capability before a restart. Its result is not available and the write may have landed, so the call is refused rather than repeated."
+            : "This idempotency key was already used for this capability with different input.",
+        next:
+          cause === "after_restart"
+            ? "Check the application for the earlier write. Use a new idempotency_key only once you know it did not land."
+            : "Use a new idempotency_key, or resend the original input to get the original result.",
       },
       situation,
     ),

@@ -1,5 +1,6 @@
 import type { Change } from "./capability.ts";
 import type { Actor } from "./plan.ts";
+import { digestOf } from "./staging.ts";
 
 /**
  * Durability. What a restart must not lose, and the seam an application
@@ -93,6 +94,39 @@ export type PersistenceAdapter = {
   resolveArtifact?: (record: PersistedRecord) => unknown;
 };
 
+/** The seal over everything but the seal itself. */
+export function sealOf(record: Omit<PersistedRecord, "seal">): string {
+  return digestOf(record);
+}
+
+/**
+ * Whether a loaded record is what was saved. The version is checked so a
+ * future shape is refused rather than misread, and the seal so a record
+ * whose evidence changed on disk is refused rather than trusted.
+ */
+export function verifyRecord(
+  value: unknown,
+): { ok: true; record: PersistedRecord } | { ok: false; reason: string } {
+  if (typeof value !== "object" || value === null) {
+    return { ok: false, reason: "a persisted record must be an object" };
+  }
+  const record = value as PersistedRecord;
+  if (record.version !== 1) {
+    return { ok: false, reason: `unsupported persisted record version ${String(record.version)}` };
+  }
+  if (typeof record.id !== "string" || typeof record.seal !== "string") {
+    return { ok: false, reason: "a persisted record needs an id and a seal" };
+  }
+  const { seal, ...rest } = record;
+  if (sealOf(rest) !== seal) {
+    return {
+      ok: false,
+      reason: "the evidence seal does not match: the record was changed after it was saved",
+    };
+  }
+  return { ok: true, record };
+}
+
 /**
  * In memory. The default when a runtime declares no persistence, so that
  * runtime behaves exactly as it did, and the double the tests use: two
@@ -135,16 +169,69 @@ export type IndexedDbPersistenceOptions = {
   resolveArtifact?: (record: PersistedRecord) => unknown;
 };
 
-/** Ships with the runtime; implemented in the fix that follows the tests. */
+const RECORDS = "records";
+const CLAIMS = "claims";
+
+/**
+ * IndexedDB, one database per application. Two object stores, records
+ * keyed by id and claims keyed by slot. Opened lazily on first use and
+ * once; every operation is one transaction, so a failed write rejects
+ * rather than half-lands.
+ */
 export function indexedDbPersistence(
   options: IndexedDbPersistenceOptions = {},
 ): PersistenceAdapter {
-  void options;
+  const name = options.name ?? "agentdesk";
+  const factory =
+    options.indexedDB ?? (globalThis as { indexedDB?: IndexedDbLike }).indexedDB;
+  let opening: Promise<IDBDatabase> | undefined;
+
+  const database = (): Promise<IDBDatabase> => {
+    opening ??= new Promise<IDBDatabase>((resolve, reject) => {
+      if (factory === undefined) {
+        reject(new Error("IndexedDB is not available in this environment"));
+        return;
+      }
+      const request = factory.open(name, 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(RECORDS)) {
+          db.createObjectStore(RECORDS, { keyPath: "id" });
+        }
+        if (!db.objectStoreNames.contains(CLAIMS)) {
+          db.createObjectStore(CLAIMS, { keyPath: "slot" });
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
+    });
+    return opening;
+  };
+
+  const run = <T,>(
+    store: string,
+    mode: IDBTransactionMode,
+    operation: (objectStore: IDBObjectStore) => IDBRequest<T>,
+  ): Promise<T> =>
+    database().then(
+      (db) =>
+        new Promise<T>((resolve, reject) => {
+          const request = operation(db.transaction(store, mode).objectStore(store));
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed"));
+        }),
+    );
+
   return {
-    saveRecord: () => {},
-    settleRecord: () => {},
-    loadOpenRecords: () => [],
-    saveIdempotencyClaim: () => {},
-    loadIdempotencyClaims: () => [],
+    saveRecord: (record) => run(RECORDS, "readwrite", (s) => s.put(record)).then(() => undefined),
+    settleRecord: (id) => run(RECORDS, "readwrite", (s) => s.delete(id)).then(() => undefined),
+    loadOpenRecords: () => run<PersistedRecord[]>(RECORDS, "readonly", (s) => s.getAll()),
+    saveIdempotencyClaim: (claim) =>
+      run(CLAIMS, "readwrite", (s) => s.put(claim)).then(() => undefined),
+    loadIdempotencyClaims: () =>
+      run<PersistedIdempotencyClaim[]>(CLAIMS, "readonly", (s) => s.getAll()),
+    ...(options.resolveArtifact !== undefined
+      ? { resolveArtifact: options.resolveArtifact }
+      : {}),
   };
 }

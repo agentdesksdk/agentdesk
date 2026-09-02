@@ -172,6 +172,16 @@ export function stateDigest(changes: readonly Change[]): string {
   return `sv-${fnv1a(facts, 0x811c9dc5)}${fnv1a(facts, 0x01000193)}`;
 }
 
+/**
+ * A digest of any plain value, stable across property order. The seal on a
+ * persisted record is one of these over its evidence fields, so a record
+ * that comes back changed is refused rather than trusted.
+ */
+export function digestOf(value: unknown): string {
+  const text = canonical(value);
+  return `dg-${fnv1a(text, 0x811c9dc5)}${fnv1a(text, 0x01000193)}`;
+}
+
 /** Stable across property insertion order; `undefined` is spelled out. */
 function canonical(value: unknown): string {
   if (value === undefined) {
@@ -533,8 +543,8 @@ export type Unreconciled = {
  * proves an incident happened and no more: `execution_indeterminate` and
  * `staged_cleanup_failed` carry the record id, the capability, the detail,
  * and the time. They do not carry `changes`, `operationKey`, `actionId`,
- * `planId`, `operationIndex`, or the artifact, and this store has no method
- * that accepts a rebuilt entry, so the record cannot be put back.
+ * `planId`, `operationIndex`, or the artifact. `hydrate` is how a
+ * persistence adapter puts a full record back.
  *
  * Both halves are lost, and they hurt differently. Without the record,
  * `listUnreconciled` is empty and `operationKey` is gone with it, so the
@@ -554,6 +564,26 @@ export class UnreconciledStore {
     artifact: unknown;
   }> = [];
   private nextId = 1;
+
+  /**
+   * Puts a record back that a persistence adapter loaded. The id is the one
+   * it was saved under, so an approval's `actionId` and a plan's key still
+   * find it, and the counter moves past it so a new record cannot collide.
+   * A record already present, as after a stop and a second start of the
+   * same runtime, is left alone.
+   */
+  hydrate(record: Unreconciled, artifact: unknown): boolean {
+    if (this.entries.some((entry) => entry.record.id === record.id)) {
+      return false;
+    }
+    const stored = deepFreeze(structuredClone(record)) as Unreconciled;
+    this.entries.push({ record: stored, artifact });
+    const suffix = Number(record.id.replace(/^UNREC-/, ""));
+    if (Number.isInteger(suffix) && suffix >= this.nextId) {
+      this.nextId = suffix + 1;
+    }
+    return true;
+  }
 
   /**
    * Never throws. Evidence is detached at the staging boundary, before
