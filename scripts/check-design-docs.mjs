@@ -215,6 +215,12 @@ const CLAIMS = [
   ["frappe-adapter.md", /thrown before any write is dispatched/, "present", "the Frappe design refuses a stale stamp before submit is called"],
   ["frappe-adapter.md", /the stamp is a\s+coarser version than a row digest, in both directions/, "present", "the Frappe design states what the modified stamp does to the digest guarantee"],
   ["frappe-adapter.md", /A response that never arrived is indeterminate/, "present", "the Frappe design treats a lost submit response as indeterminate, not failed"],
+  ["docs/routing.md", /##\s*Narrowing in two calls/, "present", "routing states the two-call domain tree"],
+  ["docs/routing.md", /absent, it defaults from its domain/, "present", "routing says how a capability declares its subdomain"],
+  ["docs/routing.md", /cached by the admitted set/, "present", "routing says how the tree is cached"],
+  ["docs/routing.md", /A client that skips the first call loses nothing/, "present", "routing says the single call is unchanged"],
+  ["docs/routing.md", /##\s*[\d.]+% with a lexical domain step/, "present", "routing reports the hierarchical scorer against the reference"],
+  ["docs/routing.md", /That is not a wide margin/, "present", "routing says plainly what the lexical step did not achieve"],
 ];
 
 /**
@@ -257,6 +263,35 @@ const REFERENCE_FIGURES = [
     },
   },
 ];
+
+/**
+ * The hierarchical cell, reported beside the reference. The deterministic
+ * cell of the same run has to agree with the reference, which is what
+ * "the single call is unchanged" means in numbers.
+ */
+REFERENCE_FIGURES.push({
+  report: "scripts/evals/runs/routing-2.2/report.json",
+  phrases: (report) => {
+    const pct = (v) => `${(v * 100).toFixed(1)}%`;
+    const det = report.cells.deterministic.metrics;
+    const cell = report.cells["custom:hierarchical"];
+    const hit = cell.metrics.terminalInRoutedSet;
+    const failing = (c) => new Set(c.failing.map((f) => f.taskId));
+    const before = failing(report.cells.deterministic);
+    const after = failing(cell);
+    const gained = [...before].filter((id) => !after.has(id)).length;
+    const lost = [...after].filter((id) => !before.has(id)).length;
+    return {
+      "docs/routing.md": [
+        [`## ${pct(hit.value)} with a lexical domain step`, "the hierarchical heading figure"],
+        [`for ${pct(hit.value)} of tasks, ${hit.numerator} of ${hit.denominator}, beside the reference's ${pct(det.terminalInRoutedSet.value)}`, "the hierarchical expected-in-routed-set sentence"],
+        [`a tie at the cut in ${pct(cell.metrics.tieAtCut.value)} of tasks against ${pct(det.tieAtCut.value)}`, "the hierarchical tie sentence"],
+        [`It gains ${gained} tasks and loses ${lost}`, "the gained-and-lost sentence"],
+        [`--scorer ${cell.scorer.path}`, "the scorer path"],
+      ],
+    };
+  },
+});
 
 /** A phrase as a pattern: literal text, with any run of whitespace allowed where the prose wraps. */
 function loose(text) {

@@ -204,6 +204,7 @@ export type RoutingDescriptor = {
   readonly title?: string;
   readonly description: string;
   readonly domain?: string;
+  readonly subdomain?: string;
   readonly risk: RiskLevel;
   readonly intents: readonly string[];
   readonly keywords: readonly string[];
@@ -563,6 +564,9 @@ function describe(capability: Capability): RoutingDescriptor {
   }
   if (capability.domain !== undefined) {
     descriptor.domain = capability.domain;
+  }
+  if (capability.subdomain !== undefined) {
+    descriptor.subdomain = capability.subdomain;
   }
   return Object.freeze(descriptor);
 }
