@@ -1,4 +1,5 @@
 import type { RiskLevel } from "./capability.ts";
+import type { GrantOutcome } from "./grants.ts";
 import type { Actor, HumanActor } from "./plan.ts";
 import type { Receipt } from "./results.ts";
 
@@ -202,6 +203,42 @@ export type AuditEvent =
       capability: string;
       receiptId: string;
       actor: HumanActor;
+      at: number;
+    }
+  | {
+      /** A person issued a bounded mandate. Only a human can, so the type says so. */
+      kind: "grant_issued";
+      grantId: string;
+      capability: string;
+      actor: HumanActor;
+      uses: number;
+      expiresAt: number;
+      at: number;
+    }
+  | {
+      kind: "grant_revoked";
+      grantId: string;
+      capability: string;
+      actor: HumanActor;
+      /** Uses left unspent at revocation. */
+      remaining: number;
+      at: number;
+    }
+  | {
+      /** A live grant stood in for an approval; the execution that follows names it. */
+      kind: "grant_applied";
+      grantId: string;
+      capability: string;
+      remaining: number;
+      at: number;
+    }
+  | {
+      /** A grant was considered and did not apply, so the call went to a person. */
+      kind: "grant_not_applied";
+      grantId: string;
+      capability: string;
+      outcome: GrantOutcome["outcome"];
+      field?: string;
       at: number;
     };
 

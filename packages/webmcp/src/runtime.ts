@@ -748,6 +748,21 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     return situationFor(subject, undefined, evidence);
   }
 
+  /** The audit record of a grant that was considered and did not apply. */
+  function notApplied(
+    capability: string,
+    considered: ConsideredGrant,
+  ): Extract<AuditEvent, { kind: "grant_not_applied" }> {
+    return {
+      kind: "grant_not_applied",
+      grantId: considered.id,
+      capability,
+      outcome: considered.outcome,
+      ...("field" in considered ? { field: considered.field } : {}),
+      at: now(),
+    };
+  }
+
   function present(
     capability: Capability,
     phase: PresentationPhase,
@@ -952,6 +967,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         authorizing = consulted.grant;
       } else if (consulted.kind === "not_applied") {
         considered = consulted.grant;
+        audit.append(notApplied(capability.name, considered));
       }
     }
     if (decision.kind === "require_approval" && authorizing === undefined) {
@@ -1030,10 +1046,18 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           consulted.kind === "not_applied"
             ? consulted.grant
             : { id: authorizing.id, outcome: "revoked" };
+        audit.append(notApplied(capability.name, late));
         return settle(
           queueApproval(capability, input, signal, invocationActor, late),
         );
       }
+      audit.append({
+        kind: "grant_applied",
+        grantId: spent.id,
+        capability: capability.name,
+        remaining: spent.remaining,
+        at: now(),
+      });
       grantId = authorizing.id;
     }
     const outcome = await executeNow(capability, input, {
@@ -2807,6 +2831,15 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         return { ok: false, reason: `unknown capability: ${request.capability}` };
       }
       const issued = grants.issue(parsed.parsed, issuer, now());
+      audit.append({
+        kind: "grant_issued",
+        grantId: issued.id,
+        capability: issued.capability,
+        actor: issuer,
+        uses: issued.uses,
+        expiresAt: issued.expiresAt,
+        at: now(),
+      });
       emit();
       return { ok: true, grant: issued };
     },
@@ -2817,6 +2850,14 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       );
       const result = grants.revoke(grantId, revoker, now());
       if (result.ok) {
+        audit.append({
+          kind: "grant_revoked",
+          grantId: result.grant.id,
+          capability: result.grant.capability,
+          actor: revoker,
+          remaining: result.grant.remaining,
+          at: now(),
+        });
         emit();
       }
       return result;

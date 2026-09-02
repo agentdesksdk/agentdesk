@@ -136,6 +136,7 @@ const CLAIMS = [
   ["docs/architecture.md", /spent at the execution claim, before the first await/, "present", "architecture states when a use is spent"],
   ["docs/architecture.md", /GRANT_REFUSED/, "absent", "a grant that does not apply falls through to approval; there is no refusal code"],
   ["docs/architecture.md", /A grant that does not apply changes nothing/, "present", "architecture states the fall-through"],
+  ["docs/architecture.md", /grant_not_applied/, "present", "architecture names the audit kind for a grant that did not apply"],
   ["docs/architecture.md", /adoptHumanActor/, "present", "architecture names the identity boundary a grant issuer crosses"],
 ];
 

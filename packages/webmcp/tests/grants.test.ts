@@ -407,6 +407,66 @@ describe("scoped authority grants: who may issue one", () => {
   });
 });
 
+describe("scoped authority grants: the audit record", () => {
+  it("records issue, application, non-application, and revocation as their own kinds", async () => {
+    const log: Log = { refunds: [], credits: 0 };
+    const { runtime } = await booted(log);
+    const grant = issue(runtime, { ...MANDATE, expiresAt: laterIso(AN_HOUR) });
+
+    await runtime.invoke("refund_shipping", { customerId: "CUS-104", amount: 5 });
+    await runtime.invoke("refund_shipping", { customerId: "CUS-104", amount: 40 });
+    runtime.revokeGrant(grant.id, OPERATOR);
+
+    const events = runtime
+      .getSnapshot()
+      .audit.filter((event) => event.kind.startsWith("grant_"));
+    expect(events).toEqual([
+      expect.objectContaining({
+        kind: "grant_issued",
+        grantId: grant.id,
+        capability: "refund_shipping",
+        actor: OPERATOR,
+        uses: 3,
+        expiresAt: grant.expiresAt,
+      }),
+      expect.objectContaining({
+        kind: "grant_applied",
+        grantId: grant.id,
+        capability: "refund_shipping",
+        remaining: 2,
+      }),
+      expect.objectContaining({
+        kind: "grant_not_applied",
+        grantId: grant.id,
+        capability: "refund_shipping",
+        outcome: "over_bound",
+        field: "amount",
+      }),
+      expect.objectContaining({
+        kind: "grant_revoked",
+        grantId: grant.id,
+        capability: "refund_shipping",
+        actor: OPERATOR,
+        remaining: 2,
+      }),
+    ]);
+    // The application precedes the execution it authorized.
+    const kinds = runtime.getSnapshot().audit.map((event) => event.kind);
+    expect(kinds.indexOf("grant_applied")).toBeLessThan(kinds.indexOf("execution_started"));
+  });
+
+  it("an allowed capability and a denied one write no grant events", async () => {
+    const log: Log = { refunds: [], credits: 0 };
+    const { runtime } = await booted(log, { policy: () => ({ kind: "allow" }) });
+    issue(runtime, { ...MANDATE, expiresAt: laterIso(AN_HOUR) });
+
+    await runtime.invoke("refund_shipping", { customerId: "CUS-104", amount: 5 });
+
+    const kinds = runtime.getSnapshot().audit.map((event) => event.kind);
+    expect(kinds.filter((kind) => kind.startsWith("grant_"))).toEqual(["grant_issued"]);
+  });
+});
+
 describe("scoped authority grants: the result protocol", () => {
   it("an approval after a spent grant names a sibling holding a live grant in nowPossible", async () => {
     const log: Log = { refunds: [], credits: 0 };

@@ -331,11 +331,17 @@ throws as well. Request-shape problems and an unknown capability return
 `{ ok: false, reason }`. `listGrants`, `getGrant`, and `getSnapshot().grants`
 hand out the frozen records in every state; `reset` clears them.
 
-**Audit.** A grant that did not apply leaves the ordinary
-`approval_requested` event, and the execution a grant authorized carries
-the grant on `execution_started` and on the receipt. The grant's own
-lifecycle, who issued it, when, who revoked it and when, lives on the
-frozen record.
+**Audit.** Four kinds carry the grant lifecycle, and `execution_started`
+and the receipt name the grant that authorized a write. `grant_issued`
+carries the human `actor`, `uses`, and `expiresAt`. `grant_applied` is
+written at the spend, before the `execution_started` it precedes, with the
+uses `remaining`. `grant_not_applied` carries the `outcome` and, for a
+scope outcome, the `field`, so the audit says what the mandate stopped at
+even though the call went on to a person. `grant_revoked` carries the human
+`actor` and the uses left unspent. The two human-only kinds type `actor` as
+`HumanActor`, like `plan_approved`. The demo's activity panel renders all
+four; its exhaustive `switch` is why the kinds and the panel cases land in
+one change.
 
 Grants apply to a direct invocation. `approve()` executes an approval a
 person gave for that call, and a plan carries its own approval, so neither
@@ -1328,7 +1334,7 @@ differs, which is what makes the `/baseline` vs `/agentdesk` comparison fair.
 packages/webmcp/src/receipts.ts RollbackState ReconciliationOutcome reconcile markIndeterminate rollbackVerification rollbackAttemptedAt rollbackFailure
 packages/webmcp/src/capability.ts verifyRollback rollbackEvidence Unavailability repair
 packages/webmcp/src/runtime.ts reconcileRollback markRolledBack proveRollback ownActor routable visibleRepair situationFor partition desiredNative
-packages/webmcp/src/audit.ts rollback_indeterminate rollback_reconciled rollback_performed
+packages/webmcp/src/audit.ts rollback_indeterminate rollback_reconciled rollback_performed grant_issued grant_revoked grant_applied grant_not_applied
 packages/webmcp/src/protocol.ts Repair Evidence Situation Refusal Settled ResultProtocol RefusalStatus
 packages/webmcp/src/results.ts completed capabilityUnavailable approvalRequired executionIndeterminate
 packages/webmcp/src/grants.ts Grant LiveGrant GrantRequest ScopeRule ConsideredGrant GrantOutcome GrantStore parseScope parseGrantRequest matchesScope consult spend revoke liveCapabilities
