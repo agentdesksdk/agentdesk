@@ -32,12 +32,20 @@ export type StagingAdapter<S> = {
    * staged head rather than against live state. Plan preparation needs this;
    * a plan whose second operation previews against live state shows the
    * human a plan that will not happen.
+   *
+   * When `run` returns a promise, the scope stays open until it settles.
+   * The runtime only hands a promise to an adapter whose forks return one,
+   * so an adapter that forks synchronously never sees one.
    */
   scope: <T>(run: () => T) => T;
   /**
    * Stages `operation` with `input` against a fork of live state. `previous`
    * is the artifact of an earlier run of the same operation, so an adapter
    * that pins a clock or a seed can reproduce it rather than drift.
+   *
+   * Returns the fork, or a promise of it for a store that has to read
+   * before it can stage. The runtime awaits it before `diff`, which stays
+   * synchronous against the fork it was given.
    */
   fork: (
     operation: string,
@@ -239,8 +247,13 @@ export type StagedProposal = {
   readonly artifact: unknown;
 };
 
-/** Internal. Produced only by `buildStageHandler`. */
-export type StageHandler = (input: Record<string, unknown>) => StagedProposal;
+/**
+ * Internal. Produced only by `buildStageHandler`. A promise when, and only
+ * when, the adapter's fork returned one.
+ */
+export type StageHandler = (
+  input: Record<string, unknown>,
+) => StagedProposal | Promise<StagedProposal>;
 
 export class StagedProposalError extends Error {
   constructor(message: string) {
@@ -309,7 +322,7 @@ export type StageHooks = {
   cleanupFailed: (failure: CleanupFailure) => void;
 };
 
-function isThenable(value: unknown): boolean {
+export function isThenable(value: unknown): boolean {
   return (
     value !== null &&
     typeof (value as PromiseLike<unknown> | null)?.then === "function"
@@ -352,9 +365,9 @@ export function buildStageHandler<S>(
     throw cause;
   };
 
-  const stageOnce = (input: Record<string, unknown>, previous?: S) => {
-    // stub: a promise from fork flows through as if it were the artifact
-    const forked = adapter.fork(operation, input, previous) as Forked<S>;
+  // A fork's result that is itself a promise means the operation escaped
+  // its fork; that is refused whether the fork arrived now or later.
+  const settled = (forked: Forked<S>): Forked<S> => {
     if (isThenable(forked?.result)) {
       (forked.result as Promise<unknown>).catch?.(() => {});
       releaseAndRethrow(
@@ -367,9 +380,24 @@ export function buildStageHandler<S>(
     return forked;
   };
 
+  const stageOnce = (
+    input: Record<string, unknown>,
+    previous?: S,
+  ): Forked<S> | Promise<Forked<S>> => {
+    const forked = adapter.fork(operation, input, previous);
+    return isThenable(forked)
+      ? (forked as Promise<Forked<S>>).then(settled)
+      : settled(forked as Forked<S>);
+  };
+
   return (input) => {
     const forked = stageOnce(input);
+    return isThenable(forked)
+      ? (forked as Promise<Forked<S>>).then((ready) => build(input, ready))
+      : build(input, forked as Forked<S>);
+  };
 
+  function build(input: Record<string, unknown>, forked: Forked<S>): StagedProposal {
     let derived: Change[] | undefined;
     try {
       derived = adapter.diff(forked.staged);
@@ -451,7 +479,7 @@ export function buildStageHandler<S>(
         tryRelease(forked.staged);
       },
     };
-  };
+  }
 }
 
 /**

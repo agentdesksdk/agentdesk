@@ -1,6 +1,6 @@
 import { CapabilityUnavailableError, unavailable, type Change } from "./capability.ts";
 import type { PersistedRecord } from "./persistence.ts";
-import { digestOf, StagedCommitRefused, type StagingAdapter } from "./staging.ts";
+import { digestOf, isThenable, StagedCommitRefused, type StagingAdapter } from "./staging.ts";
 
 /** A row a REST resource represents. */
 export type RestRow = { id: string; [field: string]: unknown };
@@ -23,7 +23,7 @@ export type RestDraft = {
 };
 
 export type RestOperation = {
-  /** The rows this operation will read or write for `input`, fetched by `prepare`. */
+  /** The rows this operation will read or write for `input`; fork fetches them first. */
   rows: (input: Record<string, unknown>) => RestRowRef[];
   run: (draft: RestDraft, input: Record<string, unknown>) => unknown;
 };
@@ -46,7 +46,7 @@ export type RestAcknowledged = { resource: string; id: string; version: string }
 /**
  * One staged run of one operation.
  *
- * `base` is every row `prepare` fetched for it, at the version the server
+ * `base` is every row the fork fetched for it, at the version the server
  * reported; `head` is every row the operation wrote. `acknowledged` fills
  * in during commit, in the order the server answered, and is what a person
  * reconciles against when the commit stopped part way.
@@ -125,12 +125,13 @@ const name = (row: RestRowRef): string => `${row.resource} ${row.id}`;
 /**
  * A staging adapter over a REST backend with optimistic concurrency.
  *
- * Fork is synchronous by contract and a REST row can only be read with a
- * round trip, so staging is two halves: `prepare(operation, input)` fetches
- * the rows the operation names and records each one's version, from the
- * `ETag` header or the field the resource declares, and `fork` then runs
- * the operation against those rows without waiting. A resource that offers
- * neither version source is refused at `prepare` rather than guessed at.
+ * Fork fetches the rows the operation names through its `rows(input)`,
+ * records each one's version from the `ETag` header or the field the
+ * resource declares, and runs the operation against them; the runtime
+ * awaits it. A resource that offers neither version source is refused at
+ * fork rather than guessed at. Inside a scope the forks run one after
+ * another, so a later one derives against the staged head of the one
+ * before it, and the scope stays open until the whole chain has settled.
  *
  * Commit sends every staged row with `If-Match` on its recorded version.
  * With a batch endpoint that is one request, and the backend's 412 is a
@@ -145,8 +146,6 @@ const name = (row: RestRowRef): string => `${row.resource} ${row.id}`;
 export function restStaging(options: RestStagingOptions): RestStagingAdapter {
   const call = options.fetch ?? (globalThis as { fetch?: typeof fetch }).fetch;
   const forks = new Map<string, RestFork>();
-  /** Rows fetched by `prepare`, waiting for the fork that consumes them. */
-  const prepared = new Map<string, RestBaseRow[]>();
   /** The newest version this adapter has seen a row acknowledged at, by fork. */
   const acknowledgedBy = new Map<string, Map<string, string>>();
   let overlay: Map<string, { row: RestRow; fork: string }> | null = null;
@@ -188,9 +187,6 @@ export function restStaging(options: RestStagingOptions): RestStagingAdapter {
   const entityTag = (source: RestVersionSource, version: string): string =>
     source === "etag" ? version : `"${version}"`;
 
-  const prepareKey = (operation: string, input: Record<string, unknown>): string =>
-    `${operation}:${digestOf(input)}`;
-
   const drop = (fork: RestFork): void => {
     fork.settled = true;
     forks.delete(fork.id);
@@ -222,33 +218,31 @@ export function restStaging(options: RestStagingOptions): RestStagingAdapter {
     return seen;
   };
 
-  const prepare = async (operation: string, input: Record<string, unknown>): Promise<void> => {
-      const declared = options.operations[operation];
-      if (declared === undefined) {
-        throw new Error(`no staged operation named ${operation}`);
+  /** The rows an operation names, each at the version the server reports now. */
+  const fetchRows = async (
+    declared: RestOperation,
+    input: Record<string, unknown>,
+  ): Promise<RestBaseRow[]> => {
+    const rows: RestBaseRow[] = [];
+    for (const ref of declared.rows(input)) {
+      const source = resource(ref.resource);
+      const response = await request(source.path(ref.id), { method: "GET" });
+      if (!response.ok) {
+        throw new Error(`${name(ref)} could not be staged: the server answered ${response.status}`);
       }
-      const rows: RestBaseRow[] = [];
-      for (const ref of declared.rows(input)) {
-        const source = resource(ref.resource);
-        const response = await request(source.path(ref.id), { method: "GET" });
-        if (!response.ok) {
-          throw new Error(
-            `${name(ref)} could not be staged: the server answered ${response.status}`,
-          );
-        }
-        const body = (await response.json()) as RestRow;
-        const version = versionIn(source.version, response, body);
-        if (version === undefined) {
-          throw new Error(
-            source.version === "etag"
-              ? `${name(ref)} cannot be staged: the server sent no ETag, so there is no version to commit under`
-              : `${name(ref)} cannot be staged: the server sent no ${source.version.field} field, so there is no version to commit under`,
-          );
-        }
-        rows.push({ resource: ref.resource, id: ref.id, version, row: body });
+      const body = (await response.json()) as RestRow;
+      const version = versionIn(source.version, response, body);
+      if (version === undefined) {
+        throw new Error(
+          source.version === "etag"
+            ? `${name(ref)} cannot be staged: the server sent no ETag, so there is no version to commit under`
+            : `${name(ref)} cannot be staged: the server sent no ${source.version.field} field, so there is no version to commit under`,
+        );
       }
-      prepared.set(prepareKey(operation, input), rows);
-    };
+      rows.push({ resource: ref.resource, id: ref.id, version, row: body });
+    }
+    return rows;
+  };
 
   const adapter: RestStagingAdapter = {
     operations: new Set(Object.keys(options.operations)),
@@ -256,13 +250,33 @@ export function restStaging(options: RestStagingOptions): RestStagingAdapter {
     scope: (run) => {
       const outermost = overlay === null;
       overlay ??= new Map();
-      try {
-        return run();
-      } finally {
+      const close = () => {
         if (outermost) {
           overlay = null;
         }
+      };
+      let outcome: ReturnType<typeof run>;
+      try {
+        outcome = run();
+      } catch (err) {
+        close();
+        throw err;
       }
+      // Forks here answer later, so the scope closes when the chain does.
+      if (isThenable(outcome)) {
+        return (outcome as unknown as Promise<unknown>).then(
+          (value) => {
+            close();
+            return value;
+          },
+          (err: unknown) => {
+            close();
+            throw err;
+          },
+        ) as unknown as ReturnType<typeof run>;
+      }
+      close();
+      return outcome;
     },
 
     // `previous` is ignored: nothing here is pinned to a clock or a seed.
@@ -271,14 +285,7 @@ export function restStaging(options: RestStagingOptions): RestStagingAdapter {
       if (declared === undefined) {
         throw new Error(`no staged operation named ${operation}`);
       }
-      const slot = prepareKey(operation, input);
-      const fetched = prepared.get(slot);
-      if (fetched === undefined) {
-        throw new Error(
-          `${operation} cannot fork until prepare(${JSON.stringify(operation)}, input) has been awaited for this input`,
-        );
-      }
-      prepared.delete(slot);
+      const fetched = await fetchRows(declared, input);
       const base = new Map<string, RestBaseRow>();
       for (const row of fetched) {
         const k = key(row.resource, row.id);
