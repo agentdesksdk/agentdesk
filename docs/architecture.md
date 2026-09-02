@@ -1108,7 +1108,9 @@ express. Its decisions:
 - *Commit* sends every write with `If-Match` on the recorded version. With
   a batch endpoint that is one request, and the backend's 412 refuses the
   whole batch with nothing written, on the backend's word that a batch is
-  all or none. Without one, writes go one per row in the order the
+  all or none: `batch` is declared `{ path, atomic: true }`, and the
+  required literal is the integrator signing that promise, since the
+  adapter cannot verify it. Without one, writes go one per row in the order the
   operation wrote them, and REST has no transaction: a 412 on the first
   write refuses `APPROVAL_STALE` with nothing written; a 412 after a row
   was acknowledged is `RestCommitPartial`, which the runtime records as
