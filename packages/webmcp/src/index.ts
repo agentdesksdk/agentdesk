@@ -160,6 +160,22 @@ export {
   type IndexedDbStagingOptions,
 } from "./indexeddb-staging.ts";
 export {
+  restStaging,
+  RestCommitPartial,
+  type RestAcknowledged,
+  type RestBaseRow,
+  type RestDraft,
+  type RestFork,
+  type RestHeadRow,
+  type RestOperation,
+  type RestResource,
+  type RestRow,
+  type RestRowRef,
+  type RestStagingAdapter,
+  type RestStagingOptions,
+  type RestVersionSource,
+} from "./rest-staging.ts";
+export {
   GESTURE_TTL_MS,
   GestureStore,
   isApprovalGesture,

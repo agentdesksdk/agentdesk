@@ -1089,6 +1089,54 @@ buffers a transaction's writes and lands them together, aborts by dropping
 them, and can lose its connection while committing, because no
 fake-indexeddb shim is in the workspace lockfile.
 
+**A third adapter, over REST.** `restStaging({ baseUrl, fetch?, headers?,
+resources, operations, batch? })` in `packages/webmcp/src/rest-staging.ts`
+holds the contract against a backend with no transaction and no local
+state, which is the implementation whose asynchrony the contract can now
+express. Its decisions:
+
+- *Staging is two halves*, because fork is synchronous and a REST row
+  needs a round trip. `prepare(operation, input)` fetches the rows the
+  operation names through its `rows(input)` and records each one's
+  version; `fork` then runs the operation against those rows without
+  waiting. A fork without a prepare is refused.
+- *A version* is the `ETag` header, or the field the resource declares.
+  A resource that offers neither is refused at prepare rather than
+  guessed at, because a write with no `If-Match` is a write the human did
+  not review. A field value is sent quoted, as the entity tag `If-Match`
+  requires.
+- *Commit* sends every write with `If-Match` on the recorded version. With
+  a batch endpoint that is one request, and the backend's 412 refuses the
+  whole batch with nothing written, on the backend's word that a batch is
+  all or none: `batch` is declared `{ path, atomic: true }`, and the
+  required literal is the integrator signing that promise, since the
+  adapter cannot verify it. Without one, writes go one per row in the order the
+  operation wrote them, and REST has no transaction: a 412 on the first
+  write refuses `APPROVAL_STALE` with nothing written; a 412 after a row
+  was acknowledged is `RestCommitPartial`, which the runtime records as
+  indeterminate, naming the rows acknowledged at the versions the server
+  answered with, the row refused, and the rows never sent. That is the
+  partial application REST makes possible, and it is recorded as the
+  indeterminate case it is rather than as a failure.
+- *A network failure on any write*, the first included, is
+  `RestCommitPartial` with that row named as unknown, because an error
+  does not prove the write did not land. *Nothing is retried*, for the
+  same reason: a second send of a write whose first send may have landed
+  is a second write.
+- *Inside a scope* a later fork records which fork it follows, and commits
+  under the version that fork was acknowledged at, or refuses with
+  `StagedCommitRefused` if it never was.
+- *Release and reconcile* drop the fork locally; the server holds nothing
+  for it. `identify` hands out the fork id, operation, and input, and
+  `resolveArtifact` hands back the fork under that id, or an empty fork
+  with the same name when this process never held it, since after a
+  reload the name and the record's `detail` are all there is.
+
+The tests drive it through an in-test fetch double that serves rows with
+an ETag or a version field, applies a PUT under `If-Match` or answers 412,
+applies a batch atomically, can be moved by another writer, and can lose
+the response to a PUT the server applied.
+
 ### The human keeps working while an approval is pending
 
 Because the agent writes to a fork, nothing is locked. The human can edit the
@@ -1863,6 +1911,7 @@ packages/webmcp/src/staging.ts hydrate identify digestOf
 packages/webmcp/src/indexeddb-staging.ts indexedDbStaging IndexedDbFork IndexedDbDraft STAGING_STORE versionOf open flush resolveArtifact
 packages/webmcp/src/staging.ts StagedCommitRefused buildStageHandler
 packages/webmcp/src/runtime.ts runInvocation
+packages/webmcp/src/rest-staging.ts restStaging RestCommitPartial RestFork RestOperation RestVersionSource prepare acknowledged follows entityTag
 packages/webmcp/src/results.ts after_restart
 packages/webmcp/src/runtime.ts present PresentationRequest REVEAL_TOKEN
 packages/webmcp/src/capability.ts AgentView agentView

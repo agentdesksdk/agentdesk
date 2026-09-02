@@ -330,12 +330,57 @@ the contract did not say.
    at its version, so a decision made on a row that later moved is refused
    even when the diff did not mention that row.
 
+### What the REST adapter needed
+
+The third implementation, `restStaging` in
+`packages/webmcp/src/rest-staging.ts`, is over a backend with no
+transaction and no local state. Same shape: each item is something it
+needed that the contract did not say.
+
+1. **Fork has no asynchronous half.** A REST row can only be read with a
+   round trip, and `fork` returns a value. The adapter needs
+   `prepare(operation, input)` awaited before the fork, and the runtime
+   never calls it: the host that invokes a staged capability has to know
+   to prepare first, and the contract says nothing about a step before
+   fork that can fail. The first leak above, narrowed to fork and diff by
+   #55, is a hard wall here rather than a mirror to load.
+
+2. **The rows an operation names are not part of the contract.** The
+   IndexedDB adapter learned them by watching the draft; REST has to know
+   them before the operation runs, because they are what `prepare`
+   fetches. So an operation here declares `rows(input)` next to `run`, and
+   a read or write of a row it did not declare is refused. The contract
+   has `operations` as a set of names, not as anything with a shape.
+
+3. **Partial application has no vocabulary.** `StagedCommitIndeterminate`
+   carries the approved changes and a reason; a REST commit that stopped
+   after the second of four writes knows exactly which rows were
+   acknowledged, at which versions, which was refused, and which were
+   never sent, and the only place to put that is the reason's message.
+   `RestCommitPartial` carries it structurally, but the record the runtime
+   keeps has a `detail` string and nothing else, and a human reconciling
+   reads prose.
+
+4. **The version an acknowledged write returns is the next fork's base.**
+   Inside a scope the second operation derives against the first's staged
+   head, and its `If-Match` has to be the version the server gave the
+   first write, which does not exist until that commit answers. The
+   adapter records which fork a base row follows and resolves it at
+   commit; the contract's `scope` says forks chain, and nothing about how
+   a chained commit learns what it must match.
+
+5. **"Nothing written" is the backend's word, not the adapter's.** With a
+   batch endpoint the adapter reports a 412 as a refusal because the
+   backend promises a batch is all or none; the contract lets an adapter
+   say `StagedCommitRefused` and has no way to say on whose authority.
+
 <!-- code-anchors
 packages/webmcp/src/receipts.ts ReceiptStore StoredReceipt
 packages/webmcp/src/capability.ts Change RiskLevel untrustedContentHint
 packages/webmcp/src/plan.ts expectedRevision
-packages/webmcp/src/staging.ts StagingAdapter StagedCommitIndeterminate StagedCommitRefused stateDigest identify buildStageHandler
+packages/webmcp/src/staging.ts StagingAdapter StagedCommitIndeterminate StagedCommitRefused stateDigest identify buildStageHandler scope
 packages/webmcp/src/runtime.ts runInvocation
+packages/webmcp/src/rest-staging.ts restStaging RestCommitPartial prepare rows follows acknowledged
 packages/webmcp/src/indexeddb-staging.ts indexedDbStaging open flush resolveArtifact STAGING_STORE
 packages/webmcp/src/runtime.ts describeArtifact
 -->
