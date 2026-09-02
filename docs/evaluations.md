@@ -452,6 +452,40 @@ The full list, with what was routed instead, is in
 These are the figures 2.2 must beat, on this catalog and this task set,
 under the same loader and the same threshold.
 
+### Reporting another scorer against this reference
+
+The runner takes its scorers as arguments, so a replacement reports its
+cells against the committed reference without touching the eval.
+
+```bash
+node scripts/evals/routing/run.mjs \
+  --strategies deterministic \
+  --scorer packages/webmcp/examples/hierarchical-scorer.mjs \
+  --run-id routing-2.2 --out scripts/evals/runs/routing-2.2
+```
+
+`--strategies` names the SDK's exported strategies to run, comma
+separated; the default is both built-ins, and an unknown name is refused
+naming them. `--scorer` is a path to a module that exports a
+`CapabilityScorer` as `default` or as `scorer`, the same function
+`routeTask` accepts under `{ kind: "custom" }`. Its cell is named
+`custom:<name>`, after the module's own `name` export or its file name,
+and its records are written under a file-safe form of that name,
+`records.custom-<name>.jsonl`. The report carries the scorer's path on
+the cell, so a reader can see which file produced a number.
+
+A custom scorer is always run with `onFailure: "refuse"`. The SDK's other
+option degrades a broken scorer to the deterministic one, which in a
+report would print a deterministic figure under the custom cell's name;
+here a scorer that throws, returns a capability it was not offered, or
+returns the same one twice stops the run, and a run that degraded for any
+other reason stops too. Every figure under a custom label came from that
+scorer or there is no report.
+
+The catalog, the tasks, the loader, and the threshold are the same in
+every cell, so a custom cell and the deterministic cell in one run are
+the comparison 2.2 is accepted on.
+
 ## Relationship to `docs/benchmark.md`
 
 No claim there changes. That document measures the demo's 78-capability

@@ -6,12 +6,18 @@ import { loadRoutingTasks } from "./load.mjs";
 import { computeRoutingMetrics, failingTasks } from "./metrics.mjs";
 import { probeRouting } from "./probe.mjs";
 import { buildRoutingReport, renderRoutingMarkdown } from "./report.mjs";
-import { STRATEGIES } from "./schema.mjs";
+import { recordsFileKey, resolveStrategies } from "./strategies.mjs";
 
 /**
  * The routing stress evaluation. Run it with
  * `node scripts/evals/routing/run.mjs`; the committed reference is
  * `--run-id routing-reference --out scripts/evals/runs/routing-reference`.
+ *
+ * `--strategies deterministic,hybrid` names the SDK strategies to run,
+ * default both. `--scorer <path>` adds a cell scored by the module at that
+ * path, which must export a CapabilityScorer as default or as `scorer`;
+ * the cell is named `custom:<name>` and its records are written under a
+ * file-safe form of that name. A custom scorer that fails stops the run.
  */
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..", "..");
@@ -33,19 +39,34 @@ async function main() {
   const tasksPath = resolve(repoRoot, argValue("--tasks", join(here, "tasks", "routing.v1.tasks.jsonl")));
   const runId = argValue("--run-id", `eval-routing-${new Date().toISOString().replace(/[:.]/g, "-")}`);
   const outDir = resolve(repoRoot, argValue("--out", join(here, "..", "runs", runId)));
+  const names = argValue("--strategies", undefined);
+  const strategies = await resolveStrategies({
+    names: names === undefined ? undefined : names.split(",").map((n) => n.trim()).filter(Boolean),
+    scorerPath: argValue("--scorer", undefined),
+    repoRoot,
+  });
 
   const { capabilities, specs, domains } = buildRoutingCatalog(sdk.defineCapability, seed);
   const tasks = loadRoutingTasks(tasksPath, specs, { repoRoot, tokenize: sdk.tokenize });
   mkdirSync(outDir, { recursive: true });
 
   const cells = {};
-  for (const strategy of STRATEGIES) {
+  for (const strategy of strategies) {
     const records = [];
     for (const task of tasks) {
       records.push(await probeRouting({ routeTask: sdk.routeTask, capabilities, task, strategy, runId }));
     }
-    writeFileSync(join(outDir, `records.${strategy}.jsonl`), records.map((r) => JSON.stringify(r)).join("\n") + "\n", "utf8");
-    cells[strategy] = { strategy, metrics: computeRoutingMetrics(records), failing: failingTasks(records) };
+    writeFileSync(
+      join(outDir, `records.${recordsFileKey(strategy.name)}.jsonl`),
+      records.map((r) => JSON.stringify(r)).join("\n") + "\n",
+      "utf8",
+    );
+    cells[strategy.name] = {
+      strategy: strategy.name,
+      ...(strategy.kind === "custom" ? { scorer: { kind: "custom", path: strategy.path } } : {}),
+      metrics: computeRoutingMetrics(records),
+      failing: failingTasks(records),
+    };
   }
 
   const report = buildRoutingReport({
@@ -63,6 +84,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err instanceof Error ? err.stack : String(err));
+  console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
 });
