@@ -296,7 +296,7 @@ describe("the IndexedDB staging adapter holds the fork, diff, commit, release co
     await adapter.flush();
     expect(db.table(DB, ORDERS).get("O-1")).toEqual(ORDER_ROWS[0]);
     // The fork is durable under its own id, which is what identify hands out.
-    expect(adapter.identify(staged)).toEqual({ fork: staged.id });
+    expect(adapter.identify(staged)).toEqual({ fork: staged.id, operation: "cancel" });
     expect([...db.table(DB, STAGING).keys()]).toEqual([staged.id]);
   });
 
@@ -304,6 +304,7 @@ describe("the IndexedDB staging adapter holds the fork, diff, commit, release co
     const { adapter, db } = makeAdapter();
     await adapter.open();
     const { staged } = adapter.fork("cancel_pair", {});
+    await adapter.flush();
     const before = db.transactions.length;
 
     adapter.commit(staged, () => adapter.fork("cancel_pair", {}));
@@ -338,7 +339,10 @@ describe("the IndexedDB staging adapter holds the fork, diff, commit, release co
     const landed = { id: "O-1", status: "cancelled", total: 40, version: 4 };
     expect(adapter.read(ORDERS, "O-1")).toEqual(landed);
     expect(db.table(DB, ORDERS).get("O-1")).toEqual(landed);
-    expect(db.transactions.slice(before).filter((tx) => tx.mode === "readwrite")).toEqual([]);
+    // The only write after the refusal is the release of the fork itself.
+    expect(
+      db.transactions.slice(before).filter((tx) => tx.mode === "readwrite" && tx.names.includes(ORDERS)),
+    ).toEqual([]);
     // The refused fork is released, not left for someone to approve later.
     expect(db.table(DB, STAGING).size).toBe(0);
   });
@@ -400,7 +404,7 @@ describe("the IndexedDB staging adapter holds the fork, diff, commit, release co
       detail: "unloaded",
       changes: [],
       at: 1,
-      artifact: { kind: "reference", reference: { fork: staged.id } },
+      artifact: { kind: "reference", reference: { fork: staged.id, operation: "cancel" } },
       seal: "unchecked",
     });
     expect(rebuilt?.id).toBe(staged.id);
@@ -443,8 +447,10 @@ describe("an interrupted commit is re-identified after reload", () => {
     expect(saved.artifact.kind).toBe("reference");
     const forkId = saved.artifact.reference?.fork;
     expect(typeof forkId).toBe("string");
-    // The write did land; only the report was lost.
+    // The write did land; only the report was lost. The commit's own
+    // transaction deleted the fork, so its absence is what says so.
     expect(db.table(DB, ORDERS).get("O-1")).toEqual({ id: "O-1", status: "cancelled", total: 40, version: 4 });
+    expect(db.table(DB, STAGING).has(forkId as string)).toBe(false);
 
     const second = makeAdapter(db, false).adapter;
     await second.open();
