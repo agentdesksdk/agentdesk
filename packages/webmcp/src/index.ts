@@ -149,6 +149,17 @@ export {
   type PersistenceAdapter,
 } from "./persistence.ts";
 export {
+  indexedDbStaging,
+  type IndexedDbBaseRow,
+  type IndexedDbDraft,
+  type IndexedDbFork,
+  type IndexedDbHeadRow,
+  type IndexedDbOperation,
+  type IndexedDbRow,
+  type IndexedDbStagingAdapter,
+  type IndexedDbStagingOptions,
+} from "./indexeddb-staging.ts";
+export {
   GESTURE_TTL_MS,
   GestureStore,
   isApprovalGesture,
