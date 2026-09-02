@@ -176,6 +176,9 @@ const CLAIMS = [
   ["docs/architecture.md", /leaves the record open/, "present", "architecture says an unrebuildable artifact keeps the record open"],
   ["docs/architecture.md", /byte for byte what it was/, "present", "architecture says a runtime without persistence is unchanged"],
   ["docs/reviews/2026-08-31-accepted-unreconciled-records-are-not-durable.md", /Status: \*\*RESOLVED\*\*/, "present", "the accepted-risk record is marked resolved"],
+  ["docs/architecture.md", /integrity check against corruption\s+and accidental change, not authentication/, "present", "architecture says what the seal is and is not"],
+  ["docs/architecture.md", /the seal proves the evidence did not change on disk/, "absent", "the seal is not described as proof against an adversary"],
+  ["docs/architecture.md", /never replayed and never re-executed/, "present", "architecture states refusal after restart as a decided limit"],
   ["docs/architecture.md", /adoptHumanActor/, "present", "architecture names the identity boundary a grant issuer crosses"],
 ];
 
