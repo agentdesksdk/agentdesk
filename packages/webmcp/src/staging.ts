@@ -59,7 +59,7 @@ export type StagingAdapter<S> = {
    * Releases a staged run that will never land. Called at most once, and
    * only a successful return establishes disposal.
    */
-  release: (staged: S) => void;
+  release: (staged: S) => void | Promise<void>;
   /**
    * Settles an artifact a human has gone and looked at.
    *
