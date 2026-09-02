@@ -509,6 +509,52 @@ is being prepared queues nothing.
 and the presentation stream carry the whole application. Only what crosses
 to the agent is projected.
 
+## A receipt says where its proof can be seen
+
+"Show me proof" is a place in the application: a page to navigate to and
+an element to highlight. A receipt carries that as `evidence`, a list of
+`EvidenceLink`s, and the same links ride on the result protocol's
+`evidence` list as `{ kind: "link", label, route, reveal }`, so the answer
+is identical whether it is read off a result or off a stored receipt.
+
+```ts
+type EvidenceLink = {
+  label: string;   // what a person will see: "Shipping line on the invoice"
+  route: string;   // a page in the application, starting with "/"
+  reveal?: string; // an opaque anchor the application registered, never a selector
+};
+```
+
+The shape is exactly what the demo's `reveal.ts` needs to navigate and
+highlight, and nothing more. `reveal` is the same registered token the
+presentation stream already carries, so the page that highlights a
+completed write highlights its proof the same way.
+
+**Authored wins; otherwise derived; otherwise empty.** A capability may
+author `evidence` on its `receipt()`, and `receipt()` refuses a malformed
+link at authoring time, because a link a page cannot follow is the author's
+mistake and the author is the one who can fix it. When nothing is authored
+the runtime derives one link from the capability's `presentation.route`
+and `reveal`, with the receipt's `entity` as the label: those hints already
+name the page and the anchor the demo navigates to for the write, so they
+are the proof's address too. Nothing is guessed from the entity text or the
+field names. A capability with no route declared has no derived link, and
+its receipt carries an empty list rather than a link that goes nowhere.
+The list is settled once, in `runExecution`, before the receipt reaches
+the audit event, the store, or the result, so all three carry the same
+links.
+
+**A link crosses through the agent view like every other field.** Its
+`reveal` is treated as a field name and passed through the view the way a
+change is; its route is checked segment by segment against the hidden
+values and then through the same two tiers as any text; its label too. A
+link that names a hidden route or a hidden field is dropped from the
+agent's copy rather than withheld with a hole in it, because a route with a
+hole navigates nowhere. The stored receipt keeps every link for the person.
+
+The demo half, a "show me proof" control on the receipt that follows the
+link, is the demo lane's item.
+
 ## Execution lifecycle
 
 Every execution gets an `executionId` that correlates its
@@ -1502,7 +1548,9 @@ packages/webmcp/src/results.ts completed capabilityUnavailable approvalRequired 
 packages/webmcp/src/grants.ts Grant LiveGrant GrantRequest ScopeRule ConsideredGrant GrantOutcome GrantStore parseScope parseGrantRequest matchesScope consult spend revoke liveCapabilities
 packages/webmcp/src/runtime.ts adoptHumanActor authorizing considered queueApproval revokeGrant listGrants getGrant currentDigest hasPreviewSource
 packages/webmcp/src/staging.ts stateDigest
-packages/webmcp/src/results.ts approvalStale viewUnavailable
+packages/webmcp/src/results.ts approvalStale viewUnavailable EvidenceLink evidence
+packages/webmcp/src/runtime.ts deriveEvidence linksThroughView settledReceipt
+packages/webmcp/src/protocol.ts link
 packages/webmcp/src/capability.ts AgentView agentView
 packages/webmcp/src/runtime.ts throughView changesThroughView hiddenStrings withhold crossing agentText viewFailed runInvocation approveInner
 packages/webmcp/src/approval.ts stateVersion

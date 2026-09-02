@@ -151,6 +151,10 @@ const CLAIMS = [
   ["docs/architecture.md", /VIEW_UNAVAILABLE/, "present", "architecture names the failed view refusal"],
   ["docs/architecture.md", /The human side is not projected/, "present", "architecture says the snapshot and audit stay whole"],
   ["docs/architecture.md", /shorter than eight characters is\s+protected structurally and by whole value/, "present", "architecture states the in-text matching limit of the backstop"],
+
+  ["docs/architecture.md", /##\s*A receipt says where its proof can be seen/, "present", "architecture states the evidence link contract"],
+  ["docs/architecture.md", /Authored wins; otherwise derived; otherwise empty/, "present", "architecture says where evidence comes from"],
+  ["docs/architecture.md", /A link crosses through the agent view like every other field/, "present", "architecture says evidence is projected"],
   ["docs/architecture.md", /adoptHumanActor/, "present", "architecture names the identity boundary a grant issuer crosses"],
 ];
 
