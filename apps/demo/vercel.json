@@ -1,9 +1,19 @@
 {
   "buildCommand": "cd ../.. && pnpm build",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- ../../apps ../../packages ../../scripts ../../pnpm-lock.yaml",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/p0/:path*", "destination": "/p0/index.html" },
-    { "source": "/rescue/:path*", "destination": "/rescue/index.html" },
-    { "source": "/:path*", "destination": "/index.html" }
+    {
+      "source": "/p0/:path*",
+      "destination": "/p0/index.html"
+    },
+    {
+      "source": "/rescue/:path*",
+      "destination": "/rescue/index.html"
+    },
+    {
+      "source": "/:path*",
+      "destination": "/index.html"
+    }
   ]
 }
