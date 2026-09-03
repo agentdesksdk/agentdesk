@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { ROUTING_WEIGHTS, type RuntimeSnapshot } from "@agentdesk/webmcp";
+import { ROUTING_WEIGHTS, type CatalogDomain, type RuntimeSnapshot } from "@agentdesk/webmcp";
 import { BOOTSTRAP } from "../instrumentation/sideBySide.ts";
 import { agentdesk, webmcpNative } from "../runtime/agentdesk.ts";
 import { useAnnouncer } from "./announcer.ts";
@@ -30,9 +30,27 @@ function availabilityText(match: RoutedMatch, report: RoutingReport): string {
     : "available";
 }
 
+/** "3 domains, 78 capabilities" */
+function treeSummary(tree: readonly CatalogDomain[]): string {
+  const total = tree.reduce((sum, domain) => sum + domain.capabilities, 0);
+  return `${tree.length} domain${tree.length === 1 ? "" : "s"}, ${total} capabilit${
+    total === 1 ? "y" : "ies"
+  }`;
+}
+
+const capabilitiesText = (count: number) => `${count} capabilit${count === 1 ? "y" : "ies"}`;
+
 export function Inspector() {
   const snapshot = useRuntime();
   const [query, setQuery] = useState("");
+  /**
+   * The catalog's domains, held from the first of two calls until the
+   * person routes directly again. `find_capabilities` answers with the
+   * tree on every first-level call, so the tree is on the report after the
+   * single call too; it is shown only when a person asked for it, so the
+   * single call reads as it always did.
+   */
+  const [tree, setTree] = useState<CatalogDomain[] | null>(null);
   const routedCount = agentVisibleTools(snapshot);
 
   const previous = useRef(routedCount);
@@ -57,12 +75,24 @@ export function Inspector() {
       return;
     }
     announced.current = report;
+    const tools = `${report.activated.length} active tool${report.activated.length === 1 ? "" : "s"}`;
     announce(
-      `Routed ${snapshot.catalogSize} candidates to ${report.activated.length} active tool${
-        report.activated.length === 1 ? "" : "s"
-      }.`,
+      report.domain !== undefined
+        ? `Routed within domain ${report.domain} to ${tools}.`
+        : `Routed ${snapshot.catalogSize} candidates to ${tools}.`,
     );
   }, [snapshot.lastRouting, snapshot.catalogSize, announce]);
+
+  /** The first of two calls: the same find_capabilities, and its tree kept for the person to choose from. */
+  async function showDomains() {
+    await agentdesk.routeTask(query.trim());
+    setTree(agentdesk.getSnapshot().lastRouting?.domains ?? []);
+  }
+
+  /** The second call: find_capabilities with the domain the person chose, the way a client sends it. */
+  async function narrowTo(domain: string) {
+    await agentdesk.invoke("find_capabilities", { query: query.trim(), domain });
+  }
 
   const appTools = snapshot.nativeTools.filter((name) => !BOOTSTRAP.has(name));
   const bootstrapTools = snapshot.nativeTools.filter((name) =>
@@ -151,6 +181,7 @@ export function Inspector() {
           onSubmit={(event) => {
             event.preventDefault();
             if (query.trim() !== "") {
+              setTree(null);
               void agentdesk.routeTask(query.trim());
             }
           }}
@@ -166,12 +197,79 @@ export function Inspector() {
           <button type="submit" className="primary">
             Route
           </button>
+          <button
+            type="button"
+            aria-label="Show domains: the catalog's tree, to choose one before ranking"
+            onClick={() => void showDomains()}
+          >
+            Show domains
+          </button>
         </form>
       </div>
+
+      {tree !== null ? (
+        <div className="rail-section domain-tree" role="region" aria-label="Domains in the catalog">
+          <h3>Domains</h3>
+          <p className="decision">
+            {treeSummary(tree)}. Choose one to rank inside it; a second call
+            then answers with that domain&apos;s capabilities only.
+          </p>
+          <ul className="domains" aria-label="Domains, with a count each">
+            {tree.map((domain) => {
+              const chosen = report?.domain === domain.name;
+              return (
+                <li key={domain.name} data-domain={domain.name} className={`domain${chosen ? " chosen" : ""}`}>
+                  <div className="head">
+                    <span className="name">{domain.name}</span>{" "}
+                    <span className="count">{capabilitiesText(domain.capabilities)}</span>
+                    {chosen ? <span className="state"> · chosen</span> : null}
+                  </div>
+                  <div className="description">{domain.description}</div>
+                  {domain.subdomains !== undefined ? (
+                    <ul className="subdomains" aria-label={`Subdomains of ${domain.name}`}>
+                      {domain.subdomains.map((sub) => {
+                        const path = `${domain.name}/${sub.name}`;
+                        return (
+                          <li key={sub.name} data-domain={path}>
+                            <span className="name">{sub.name}</span>{" "}
+                            <span className="count">{capabilitiesText(sub.capabilities)}</span>
+                            {report?.domain === path ? <span className="state"> · chosen</span> : null}{" "}
+                            <button
+                              type="button"
+                              className="undo"
+                              aria-label={`Narrow to ${path}, ${sub.capabilities} capabilities`}
+                              onClick={() => void narrowTo(path)}
+                            >
+                              Narrow to {sub.name}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="undo"
+                    aria-label={`Narrow to ${domain.name}, ${domain.capabilities} capabilities`}
+                    onClick={() => void narrowTo(domain.name)}
+                  >
+                    Narrow to {domain.name}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
 
       {report ? (
         <div className="rail-section routing-decision">
           <h3>Routing decision</h3>
+          {report.domain !== undefined ? (
+            <p className="within">
+              Within domain <strong>{report.domain}</strong>, the second of two calls.
+            </p>
+          ) : null}
           <p className="decision">
             <strong>{snapshot.catalogSize}</strong> candidates, these{" "}
             <strong>{report.activated.length}</strong>, because
