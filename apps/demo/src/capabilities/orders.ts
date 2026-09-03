@@ -223,6 +223,22 @@ export const orderCapabilities: Capability[] = [
       });
       return { order_id: order.id, note_added: true };
     },
+    verify: (input) => {
+      const orderId = str(input, "order_id")?.replace(/^#/, "");
+      const note = str(input, "note");
+      if (orderId === undefined || note === undefined) {
+        return { status: "PARTIAL", unverified: ["order.notes"] };
+      }
+      const order = getState().orders.find((candidate) => candidate.id === orderId);
+      return order?.notes.includes(note)
+        ? { status: "VERIFIED" }
+        : {
+            status: "MISMATCH",
+            field: "order.notes",
+            expected: note,
+            observed: order?.notes ?? null,
+          };
+    },
   }),
   createUpdateCapability({
     name: "tag_order",

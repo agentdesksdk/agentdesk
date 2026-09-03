@@ -3,7 +3,54 @@ import type { Branch, DemoState } from "./types.ts";
 
 type Listener = () => void;
 
-let state: DemoState = buildSeed();
+export const DEMO_STATE_STORAGE_KEY = "agentdesk-meridian-state-v1";
+
+function browserStorage(): Storage | undefined {
+  try {
+    return globalThis.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+function readPersistedState(): DemoState | undefined {
+  try {
+    const raw = browserStorage()?.getItem(DEMO_STATE_STORAGE_KEY);
+    if (raw === null || raw === undefined) {
+      return undefined;
+    }
+    const parsed = JSON.parse(raw) as { version?: unknown; state?: unknown };
+    const candidate = parsed.state as Partial<DemoState> | undefined;
+    if (
+      parsed.version !== 1 ||
+      candidate === undefined ||
+      !Array.isArray(candidate.customers) ||
+      !Array.isArray(candidate.orders) ||
+      !Array.isArray(candidate.products) ||
+      !Array.isArray(candidate.tickets) ||
+      !Array.isArray(candidate.credits) ||
+      !Array.isArray(candidate.invoices)
+    ) {
+      return undefined;
+    }
+    return structuredClone(candidate as DemoState);
+  } catch {
+    return undefined;
+  }
+}
+
+function persistCommittedState(): void {
+  try {
+    browserStorage()?.setItem(
+      DEMO_STATE_STORAGE_KEY,
+      JSON.stringify({ version: 1, state }),
+    );
+  } catch {
+    // A locked-down browser still gets a complete in-memory demo.
+  }
+}
+
+let state: DemoState = readPersistedState() ?? buildSeed();
 const listeners = new Set<Listener>();
 
 /**
@@ -56,6 +103,7 @@ export function mutate(fn: (draft: DemoState) => void): void {
     return;
   }
   state = next;
+  persistCommittedState();
   notify();
 }
 
@@ -131,6 +179,7 @@ export function stagingScope<T>(run: () => T): T {
 /** Replaces live state with an already-merged document. */
 export function land(next: DemoState): void {
   state = next;
+  persistCommittedState();
   notify();
 }
 
@@ -145,6 +194,7 @@ export function resetStore(): void {
   open = null;
   escaped = null;
   state = buildSeed();
+  persistCommittedState();
   for (const hook of resetHooks) {
     hook();
   }

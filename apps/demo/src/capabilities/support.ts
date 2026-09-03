@@ -17,6 +17,7 @@ import {
   requireStr,
   requireTicket,
   s,
+  str,
 } from "./helpers.ts";
 
 const domain = "support";
@@ -186,6 +187,25 @@ export const supportCapabilities: Capability[] = [
           });
       });
       return { ticket_id: ticket.id, note_added: true };
+    },
+    verify: (input) => {
+      const ticketId = str(input, "ticket_id");
+      const note = str(input, "note");
+      if (ticketId === undefined || note === undefined) {
+        return { status: "PARTIAL", unverified: ["ticket.messages"] };
+      }
+      const expected = `[internal] ${note}`;
+      const ticket = getState().tickets.find((candidate) => candidate.id === ticketId);
+      return ticket?.messages.some(
+        (message) => message.from === "agent" && message.text === expected,
+      )
+        ? { status: "VERIFIED" }
+        : {
+            status: "MISMATCH",
+            field: "ticket.messages",
+            expected,
+            observed: ticket?.messages ?? null,
+          };
     },
   }),
   createUpdateCapability({

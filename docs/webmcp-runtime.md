@@ -86,6 +86,12 @@ Page context materially changes results: with `orderId` in context state,
 order-scoped capabilities (`inspect_order`, `refund_shipping`) outrank
 generic search.
 
+`find_capabilities` also searches the runtime's governance operations. A
+matching operation appears in `governance_matches` with its input shape and
+`invoke_via: "invoke_capability"`. These operations stay behind the constant
+gateway rather than becoming native tools, so discovering plans, receipts,
+rollback, or reconciliation does not enlarge the registered tool set.
+
 ## Compatibility mode
 
 Clients cache tool lists. `invoke_capability` is always registered and

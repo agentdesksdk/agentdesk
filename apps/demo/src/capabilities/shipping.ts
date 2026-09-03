@@ -22,6 +22,7 @@ import {
   requireOrder,
   requireStr,
   s,
+  str,
 } from "./helpers.ts";
 import type { Invoice, Order } from "../data/types.ts";
 
@@ -469,6 +470,26 @@ export const shippingCapabilities: Capability[] = [
         }
       });
       return { order_id: order.id, carrier };
+    },
+    verify: (input, _ctx, changes) => {
+      const order = orderFromInput(input);
+      const carrier = str(input, "carrier");
+      if (order === undefined || carrier === undefined) {
+        return { status: "PARTIAL", unverified: ["order.carrier"] };
+      }
+      const field = `Order #${order.id} carrier`;
+      const expected = changes.find((change) => change.field === field)?.after;
+      if (typeof expected !== "string") {
+        return { status: "PARTIAL", unverified: [field] };
+      }
+      return order.carrier === expected
+        ? { status: "VERIFIED" }
+        : {
+            status: "MISMATCH",
+            field,
+            expected,
+            observed: order.carrier,
+          };
     },
   }),
   createStateTransitionCapability({

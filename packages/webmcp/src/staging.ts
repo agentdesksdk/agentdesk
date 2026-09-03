@@ -233,6 +233,9 @@ function fnv1a(text: string, seed: number): string {
  * it to `approvalEvidence: "derived"`.
  */
 export type StagedProposal = {
+  /** Adapter operation and owned input needed to rebuild this proposal. */
+  readonly operation: string;
+  readonly input: Readonly<Record<string, unknown>>;
   /** What the staged run did, read off the fork. */
   readonly changes: readonly Change[];
   /** Lands the staged write. The runtime calls this at most once. */
@@ -245,6 +248,14 @@ export type StagedProposal = {
    * commit or a failed disposal can still be settled later.
    */
   readonly artifact: unknown;
+};
+
+export type StagedProposalSnapshot<A = unknown> = {
+  key: string;
+  operation: string;
+  input: Record<string, unknown>;
+  changes: Change[];
+  artifact: A;
 };
 
 /**
@@ -432,6 +443,8 @@ export function buildStageHandler<S>(
     }
     let settled = false;
     return {
+      operation,
+      input: deepFreeze(structuredClone(input)),
       changes,
       artifact: forked.staged,
       commit: () => {
@@ -480,6 +493,55 @@ export function buildStageHandler<S>(
       },
     };
   }
+}
+
+/**
+ * Reconstitutes a proposal from an artifact the persistence boundary rebuilt.
+ * The adapter derives the diff again and it must be byte-for-byte equivalent
+ * to the evidence the person reviewed. A mismatch is refused; the runtime
+ * never silently stages a different change under an old approval.
+ */
+export function restoreStagedProposal<S>(
+  snapshot: StagedProposalSnapshot<S>,
+  adapter: StagingAdapter<S>,
+  hooks: StageHooks,
+): StagedProposal {
+  const expected = deepFreeze(structuredClone(snapshot.changes)) as readonly Change[];
+  const observed = adapter.diff(snapshot.artifact);
+  if (!Array.isArray(observed) || digestOf(observed) !== digestOf(expected)) {
+    throw new StagedProposalError(
+      `${snapshot.operation} could not restore the exact change that was reviewed`,
+    );
+  }
+
+  // Reuse the normal constructor so restored and freshly staged proposals
+  // have identical one-shot commit and cleanup semantics. The first fork is
+  // the restored artifact; only a commit-time restage calls the adapter.
+  let first = true;
+  const restoring: StagingAdapter<S> = {
+    ...adapter,
+    fork(operation, input, previous) {
+      if (first && previous === undefined) {
+        first = false;
+        return { staged: snapshot.artifact, result: undefined };
+      }
+      return adapter.fork(operation, input, previous);
+    },
+  };
+  const proposal = buildStageHandler(snapshot.operation, restoring, hooks)(snapshot.input);
+  if (isThenable(proposal)) {
+    throw new StagedProposalError(
+      `${snapshot.operation} restored asynchronously from a synchronous artifact`,
+    );
+  }
+  const restored = proposal as StagedProposal;
+  if (digestOf(restored.changes) !== digestOf(expected)) {
+    restored.discard();
+    throw new StagedProposalError(
+      `${snapshot.operation} changed while its persisted proposal was restored`,
+    );
+  }
+  return restored;
 }
 
 /**
@@ -543,6 +605,16 @@ export class StagedProposalStore {
 
   size(): number {
     return this.proposals.size;
+  }
+
+  snapshot<A>(describe: (artifact: unknown) => A): StagedProposalSnapshot<A>[] {
+    return [...this.proposals.entries()].map(([key, proposal]) => ({
+      key,
+      operation: proposal.operation,
+      input: structuredClone(proposal.input) as Record<string, unknown>,
+      changes: structuredClone(proposal.changes) as Change[],
+      artifact: describe(proposal.artifact),
+    }));
   }
 }
 

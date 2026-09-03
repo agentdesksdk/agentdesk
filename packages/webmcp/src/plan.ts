@@ -172,6 +172,12 @@ export type OperationPlan = {
   resolvedAt?: number;
 };
 
+export type PlanCheckpoint = {
+  version: 1;
+  nextId: number;
+  plans: OperationPlan[];
+};
+
 const RISK_ORDER: RiskLevel[] = ["READ", "WRITE", "CONSEQUENTIAL"];
 
 export function highestRisk(risks: readonly RiskLevel[]): RiskLevel {
@@ -229,6 +235,31 @@ export class PlanStore {
     if (plan) {
       Object.assign(plan, structuredClone(patch));
     }
+  }
+
+  checkpoint(): PlanCheckpoint {
+    return {
+      version: 1,
+      nextId: this.nextId,
+      plans: [...this.plans.values()].map((plan) => structuredClone(plan)),
+    };
+  }
+
+  hydrate(checkpoint: PlanCheckpoint): void {
+    if (checkpoint.version !== 1) {
+      throw new Error(`unsupported plan checkpoint version ${String(checkpoint.version)}`);
+    }
+    this.plans.clear();
+    let highest = 0;
+    for (const plan of checkpoint.plans) {
+      const stored = structuredClone(plan);
+      this.plans.set(stored.id, stored);
+      const numeric = Number(String(stored.id).replace(/^PLAN-/, ""));
+      if (Number.isFinite(numeric)) {
+        highest = Math.max(highest, numeric);
+      }
+    }
+    this.nextId = Math.max(checkpoint.nextId, highest + 1);
   }
 
   clear(): void {

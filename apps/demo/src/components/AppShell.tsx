@@ -12,6 +12,7 @@ import { ActivityPanel } from "./ActivityPanel.tsx";
 import { AgentPresence, type PresenceMode } from "./AgentPresence.tsx";
 import { ApprovalCards } from "./ApprovalCards.tsx";
 import { Inspector } from "./Inspector.tsx";
+import { PlanCards } from "./PlanCards.tsx";
 
 const PRESENCE_KEY = "agentdesk-presence-mode";
 
@@ -140,6 +141,7 @@ export function AppShell() {
         <ActivityPanel />
       </aside>
       <ApprovalCards />
+      <PlanCards />
     </div>
   );
 }

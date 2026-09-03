@@ -52,6 +52,7 @@ export {
   StagedProposalStore,
   type Forked,
   type StagedProposal,
+  type StagedProposalSnapshot,
   type StagedResolution,
   type StagingAdapter,
   type Unreconciled,
@@ -158,13 +159,16 @@ export type { AuditEvent, AuditListener } from "./audit.ts";
 export {
   indexedDbPersistence,
   memoryPersistence,
+  sealCheckpoint,
   sealOf,
+  verifyCheckpoint,
   verifyRecord,
   type IndexedDbLike,
   type IndexedDbPersistenceOptions,
   type PersistedArtifact,
   type PersistedIdempotencyClaim,
   type PersistedRecord,
+  type PersistedRuntimeCheckpoint,
   type PersistenceAdapter,
 } from "./persistence.ts";
 export {

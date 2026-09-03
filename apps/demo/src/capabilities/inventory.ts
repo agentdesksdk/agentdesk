@@ -11,7 +11,7 @@ import {
   createStateTransitionCapability,
   createUpdateCapability,
 } from "./factories.ts";
-import { n, num, obj, requireProduct, requireStr, s } from "./helpers.ts";
+import { n, num, obj, requireProduct, requireStr, s, str } from "./helpers.ts";
 
 const domain = "inventory";
 
@@ -141,6 +141,28 @@ export const inventoryCapabilities: Capability[] = [
         }
       });
       return { sku: product.sku, stock: product.stock + delta };
+    },
+    verify: (input, _ctx, changes) => {
+      const sku = str(input, "sku");
+      if (sku === undefined) {
+        return { status: "PARTIAL", unverified: ["product.stock"] };
+      }
+      const field = `Product ${sku} stock`;
+      const expected = changes.find((change) => change.field === field)?.after;
+      if (typeof expected !== "number") {
+        return { status: "PARTIAL", unverified: [field] };
+      }
+      const observed = getState().products.find(
+        (product) => product.sku === sku,
+      )?.stock;
+      return observed === expected
+        ? { status: "VERIFIED" }
+        : {
+            status: "MISMATCH",
+            field,
+            expected,
+            observed: observed ?? null,
+          };
     },
   }),
   createUpdateCapability({

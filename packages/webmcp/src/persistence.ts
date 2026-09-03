@@ -1,6 +1,9 @@
 import type { Change } from "./capability.ts";
+import type { ApprovalCheckpoint } from "./approval.ts";
 import type { Actor } from "./plan.ts";
-import { digestOf } from "./staging.ts";
+import type { PlanCheckpoint } from "./plan.ts";
+import type { ReceiptCheckpoint } from "./receipts.ts";
+import { digestOf, type StagedProposalSnapshot } from "./staging.ts";
 
 /**
  * Durability. What a restart must not lose, and the seam an application
@@ -77,6 +80,18 @@ export type PersistedIdempotencyClaim = {
    * refusal can point a person at.
    */
   receiptId?: string;
+  /** Exact settled result, when the claim reached a recordable outcome. */
+  result?: import("./results.ts").ToolResult;
+};
+
+export type PersistedRuntimeCheckpoint = {
+  version: 1;
+  updatedAt: number;
+  approvals: ApprovalCheckpoint;
+  receipts: ReceiptCheckpoint;
+  plans: PlanCheckpoint;
+  proposals: StagedProposalSnapshot<PersistedArtifact>[];
+  seal: string;
 };
 
 /**
@@ -98,12 +113,27 @@ export type PersistenceAdapter = {
     | PersistedIdempotencyClaim[]
     | Promise<PersistedIdempotencyClaim[]>;
   /**
+   * Optional checkpoint for runtime-owned state that is safe to replay after
+   * reload: pending approvals, completed receipts, plans, and the exact
+   * staged artifacts behind pending approvals and plans. Staged
+   * indeterminate records stay in their dedicated store because their
+   * reconciliation lifecycle is different.
+   */
+  saveCheckpoint?: (checkpoint: PersistedRuntimeCheckpoint) => void | Promise<void>;
+  loadCheckpoint?: () =>
+    | PersistedRuntimeCheckpoint
+    | undefined
+    | Promise<PersistedRuntimeCheckpoint | undefined>;
+  /**
    * Forgets every record and every claim. The runtime never calls it; a
    * page's Reset does, so a reset that must also forget durable state has
    * one call to make that does not name the adapter's stores by hand.
    */
   clear: () => void | Promise<void>;
   resolveArtifact?: (record: PersistedRecord) => unknown;
+  resolveProposalArtifact?: (
+    proposal: StagedProposalSnapshot<PersistedArtifact>,
+  ) => unknown;
 };
 
 /** The seal over everything but the seal itself. */
@@ -139,6 +169,38 @@ export function verifyRecord(
   return { ok: true, record };
 }
 
+export function sealCheckpoint(
+  checkpoint: Omit<PersistedRuntimeCheckpoint, "seal">,
+): string {
+  return digestOf(checkpoint);
+}
+
+export function verifyCheckpoint(
+  value: unknown,
+): { ok: true; checkpoint: PersistedRuntimeCheckpoint } | { ok: false; reason: string } {
+  if (typeof value !== "object" || value === null) {
+    return { ok: false, reason: "a persisted runtime checkpoint must be an object" };
+  }
+  const checkpoint = value as PersistedRuntimeCheckpoint;
+  if (checkpoint.version !== 1) {
+    return {
+      ok: false,
+      reason: `unsupported runtime checkpoint version ${String(checkpoint.version)}`,
+    };
+  }
+  if (typeof checkpoint.updatedAt !== "number" || typeof checkpoint.seal !== "string") {
+    return { ok: false, reason: "a persisted runtime checkpoint needs updatedAt and a seal" };
+  }
+  const { seal, ...rest } = checkpoint;
+  if (sealCheckpoint(rest) !== seal) {
+    return {
+      ok: false,
+      reason: "the checkpoint seal does not match: runtime state changed after it was saved",
+    };
+  }
+  return { ok: true, checkpoint };
+}
+
 /**
  * In memory. The default when a runtime declares no persistence, so that
  * runtime behaves exactly as it did, and the double the tests use: two
@@ -147,13 +209,19 @@ export function verifyRecord(
 export function memoryPersistence(): PersistenceAdapter & {
   records: Map<string, PersistedRecord>;
   claims: Map<string, PersistedIdempotencyClaim>;
+  checkpoint: { current?: PersistedRuntimeCheckpoint };
   resolveArtifact?: (record: PersistedRecord) => unknown;
+  resolveProposalArtifact?: (
+    proposal: StagedProposalSnapshot<PersistedArtifact>,
+  ) => unknown;
 } {
   const records = new Map<string, PersistedRecord>();
   const claims = new Map<string, PersistedIdempotencyClaim>();
+  const checkpoint: { current?: PersistedRuntimeCheckpoint } = {};
   return {
     records,
     claims,
+    checkpoint,
     saveRecord: (record) => {
       records.set(record.id, structuredClone(record));
     },
@@ -165,9 +233,15 @@ export function memoryPersistence(): PersistenceAdapter & {
       claims.set(claim.slot, structuredClone(claim));
     },
     loadIdempotencyClaims: () => [...claims.values()].map((claim) => structuredClone(claim)),
+    saveCheckpoint: (next) => {
+      checkpoint.current = structuredClone(next);
+    },
+    loadCheckpoint: () =>
+      checkpoint.current === undefined ? undefined : structuredClone(checkpoint.current),
     clear: () => {
       records.clear();
       claims.clear();
+      delete checkpoint.current;
     },
   };
 }
@@ -183,10 +257,15 @@ export type IndexedDbPersistenceOptions = {
   /** The factory to use; defaults to the global `indexedDB`. */
   indexedDB?: IndexedDbLike;
   resolveArtifact?: (record: PersistedRecord) => unknown;
+  resolveProposalArtifact?: (
+    proposal: StagedProposalSnapshot<PersistedArtifact>,
+  ) => unknown;
 };
 
 const RECORDS = "records";
 const CLAIMS = "claims";
+const CHECKPOINTS = "checkpoints";
+const CHECKPOINT_ID = "runtime";
 
 /**
  * IndexedDB, one database per application. Two object stores, records
@@ -208,7 +287,7 @@ export function indexedDbPersistence(
         reject(new Error("IndexedDB is not available in this environment"));
         return;
       }
-      const request = factory.open(name, 1);
+      const request = factory.open(name, 2);
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains(RECORDS)) {
@@ -216,6 +295,9 @@ export function indexedDbPersistence(
         }
         if (!db.objectStoreNames.contains(CLAIMS)) {
           db.createObjectStore(CLAIMS, { keyPath: "slot" });
+        }
+        if (!db.objectStoreNames.contains(CHECKPOINTS)) {
+          db.createObjectStore(CHECKPOINTS, { keyPath: "id" });
         }
       };
       request.onsuccess = () => resolve(request.result);
@@ -246,12 +328,26 @@ export function indexedDbPersistence(
       run(CLAIMS, "readwrite", (s) => s.put(claim)).then(() => undefined),
     loadIdempotencyClaims: () =>
       run<PersistedIdempotencyClaim[]>(CLAIMS, "readonly", (s) => s.getAll()),
+    saveCheckpoint: (checkpoint) =>
+      run(CHECKPOINTS, "readwrite", (s) =>
+        s.put({ id: CHECKPOINT_ID, checkpoint }),
+      ).then(() => undefined),
+    loadCheckpoint: () =>
+      run<{ id: string; checkpoint: PersistedRuntimeCheckpoint } | undefined>(
+        CHECKPOINTS,
+        "readonly",
+        (s) => s.get(CHECKPOINT_ID),
+      ).then((row) => row?.checkpoint),
     clear: () =>
       run(RECORDS, "readwrite", (s) => s.clear())
         .then(() => run(CLAIMS, "readwrite", (s) => s.clear()))
+        .then(() => run(CHECKPOINTS, "readwrite", (s) => s.clear()))
         .then(() => undefined),
     ...(options.resolveArtifact !== undefined
       ? { resolveArtifact: options.resolveArtifact }
+      : {}),
+    ...(options.resolveProposalArtifact !== undefined
+      ? { resolveProposalArtifact: options.resolveProposalArtifact }
       : {}),
   };
 }

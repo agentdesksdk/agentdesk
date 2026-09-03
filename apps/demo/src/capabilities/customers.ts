@@ -191,6 +191,27 @@ export const customerCapabilities: Capability[] = [
       });
       return { customer: customer.name, tags_now: [...customer.tags, tag] };
     },
+    verify: (input) => {
+      const customerId = str(input, "customer_id");
+      const tag = str(input, "tag");
+      if (customerId === undefined || tag === undefined) {
+        return { status: "PARTIAL", unverified: ["customer.tags"] };
+      }
+      const normalizedId = customerId.toLowerCase();
+      const customer = getState().customers.find(
+        (candidate) =>
+          candidate.id.toLowerCase() === normalizedId ||
+          candidate.name.toLowerCase() === normalizedId,
+      );
+      return customer?.tags.includes(tag)
+        ? { status: "VERIFIED" }
+        : {
+            status: "MISMATCH",
+            field: "customer.tags",
+            expected: tag,
+            observed: customer?.tags ?? null,
+          };
+    },
   }),
   createUpdateCapability({
     name: "update_customer_email",
