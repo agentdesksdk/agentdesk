@@ -311,8 +311,15 @@ naming a DOM node, `selector`, `target`, `element`, `xpath`, wherever it
 sits in the message, is refused as `dom_target`; a reveal names only a
 token matching the grammar `docs/accessibility.md` fixes, and only one the
 page registered. Every refusal is structured, with the reason and the
-detail, and every decision is audited on the bridge; traffic that never
-addressed the bridge is not its to audit.
+detail, and every refusal is the runtime's audit event: the bridge hands
+it to the provider, the provider to the `refused` hook the runtime gave
+it at `start`, and it is recorded as `provider_refused` beside every
+denied call, with the bridge's reason and a detail carrying its own
+sentence, the origin the message came from, and the kind it claimed. The
+bridge keeps no log of its own, because two logs of one refusal are two
+places for an operator to look and one of them to be stale; a refusal
+that arrives before the runtime has connected is held and recorded once
+it has. Traffic that never addressed the bridge is not audited.
 
 **What this slice leaves unsatisfied**, so no reader takes the package for
 the product:
@@ -333,16 +340,15 @@ the product:
   and the WXT entrypoints are not built. The bridge is bound to one origin
   by its manifest, which is the shape the enabled-origins gate will hand
   it, not the gate itself.
-- The bridge's audit lives on the bridge, not in the runtime's audit
-  stream, because the runtime's audit vocabulary is fixed by the SDK; a
-  later slice decides whether a refused page message is a runtime event.
 
 <!-- code-anchors
 packages/webmcp/src/provider.ts CapabilityProvider nativeProvider subscribe
 packages/webmcp/src/runtime.ts ToolSurfaceManager provider
 packages/webmcp/src/capability.ts untrustedContentHint RiskLevel
 packages/webmcp/src/webmcp-adapter.ts createWebMcpAdapter
-packages/extension/src/provider.ts extensionProvider ExtensionProvider replace
+packages/extension/src/provider.ts extensionProvider ExtensionProvider replace connect HELD_REFUSALS
+packages/extension/src/bridge.ts onRefused BridgeRefused
+packages/webmcp/src/audit.ts provider_refused
 packages/extension/src/bridge.ts attachBridge BridgeRequest BridgeRefusal REQUEST_KINDS DOM_TARGET_KEYS AUTHORIZATION_KEYS ANCHOR validate
 packages/extension/src/manifest.ts ExtensionManifest
 -->
