@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, within, type RenderResult } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App.tsx";
+import { setGuidedPace } from "../src/Presence.tsx";
 import { clearRevealed, revealedPanels } from "../src/reveal.ts";
 import { OPERATOR, rescue, resetRescue } from "../src/runtime.ts";
 import { getState, seed } from "../src/state.ts";
@@ -44,6 +45,7 @@ describe("the mission screen", () => {
   beforeEach(async () => {
     await resetRescue();
     clearRevealed();
+    setGuidedPace(5);
     Element.prototype.scrollIntoView ??= () => {};
   });
 
