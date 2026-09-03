@@ -507,6 +507,58 @@ The catalog, the tasks, the loader, and the threshold are the same in
 every cell, so a custom cell and the deterministic cell in one run are
 the comparison 2.2 is accepted on.
 
+### The second held-out set, and the rule written before the run
+
+The 36.4% above was measured once, on the catalog and the tasks the
+scorer's author could see while building it. A second measurement uses
+what that author never saw: the catalog generated from seed 7, a
+different sample of the same tables, and 55 phrasings in
+`scripts/evals/routing/tasks/routing.v2.tasks.jsonl` authored after the
+scorer shipped, from the seed-7 names and descriptions only, under the
+same loader and the same overlap threshold. The scorer runs with its
+near-tie at the default, `NEAR_TIE` 0.75 in `hierarchy.ts`, and at 1.0,
+where only a domain that ties the top one exactly is kept. The 1.0 variant
+is composed in `scripts/evals/routing/scorers/hierarchical-near-tie-1.mjs`
+from the SDK's exports, restricting the candidates to the tied domains and
+delegating to `hierarchicalScorer`, because the constant itself is not a
+parameter.
+
+**The rule, written before the run.** The lexical domain step is
+confirmed as an improvement over the shipped scorer only if, on the second
+set, it routes the expected capability into the published set at least as
+often as the deterministic scorer does, and its tie-at-the-cut rate is no
+higher. If it does both, the 1.0 run says how much of the gain the second
+domain earns; if it fails either, the 36.4% is read as fitted to seed 2026
+and its phrasings, and the step is not confirmed, whatever the 1.0 run
+shows. The verdict below is that rule applied to the numbers, and nothing
+in this section above the verdict was edited after the run.
+
+| Metric | Deterministic | Hybrid | Hierarchical, near-tie 0.75 | Hierarchical, near-tie 1.0 | Provenance |
+| --- | --- | --- | --- | --- | --- |
+| Expected capability in the routed set | 29.1% (16 of 55) | 27.3% (15 of 55) | 36.4% (20 of 55) | 36.4% (20 of 55) | measured |
+| Tie at the cut | 61.8% | 54.5% | 54.5% | 52.7% | measured |
+| Rank of the expected capability, when routed (mean) | 1.88 | 2.40 | 1.85 | 1.90 | measured |
+
+The committed runs are `scripts/evals/runs/routing-holdout-2/`, holding
+the deterministic and hybrid cells and the SDK's scorer at its default,
+and `scripts/evals/runs/routing-holdout-2-near-tie-1/`, holding the
+deterministic cell again beside the 1.0 variant. The two deterministic
+cells are identical, which is what makes the two reports one comparison,
+and `pnpm check:docs` holds every figure in this table, the gains and
+losses below, and the verdict itself to those reports.
+
+**Verdict: confirmed.** On a catalog and phrasings the scorer's author
+never saw, the domain step routes the expected capability for 36.4% of
+tasks against the deterministic scorer's 29.1%, and ties at the cut in
+54.5% of tasks against 61.8%; both halves of the rule hold. Against the
+deterministic scorer it gains 5 tasks and loses 1. The second domain
+earns nothing net on this set: at 1.0, where only an exact tie keeps a
+second domain, the step routes 20 of 55 as well, gaining 6 and losing 2
+against the deterministic scorer; it fixes one task the default lost and
+loses one the default had. That both seeds land on 36.4% is two counts of
+20 of 55 on different tasks, not a repeat. What the second measurement
+adds is that the gain did not come from the first seed's vocabulary.
+
 ## Relationship to `docs/benchmark.md`
 
 No claim there changes. That document measures the demo's 78-capability

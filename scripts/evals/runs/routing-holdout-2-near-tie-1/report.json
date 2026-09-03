@@ -1,0 +1,991 @@
+{
+  "schemaVersion": 1,
+  "runId": "routing-holdout-2-near-tie-1",
+  "at": "2026-09-03T01:42:15.638Z",
+  "taskSet": {
+    "path": "scripts/evals/routing/tasks/routing.v2.tasks.jsonl",
+    "taskCount": 55
+  },
+  "catalog": {
+    "seed": 7,
+    "size": 408,
+    "domains": [
+      "orders",
+      "shipping",
+      "billing",
+      "invoices",
+      "payments",
+      "customers",
+      "accounts",
+      "inventory",
+      "catalog",
+      "returns",
+      "support",
+      "reports"
+    ]
+  },
+  "cells": {
+    "deterministic": {
+      "strategy": "deterministic",
+      "metrics": {
+        "terminalInRoutedSet": {
+          "name": "terminalInRoutedSet",
+          "value": 0.2909090909090909,
+          "numerator": 16,
+          "denominator": 55,
+          "provenance": "measured"
+        },
+        "terminalRank": {
+          "name": "terminalRank",
+          "value": 1.875,
+          "mean": 1.875,
+          "max": 5,
+          "min": 1,
+          "denominator": 16,
+          "provenance": "measured"
+        },
+        "routedSetSize": {
+          "name": "routedSetSize",
+          "value": 3.9272727272727272,
+          "mean": 3.9272727272727272,
+          "max": 5,
+          "min": 0,
+          "denominator": 55,
+          "provenance": "measured"
+        },
+        "schemaBytes": {
+          "name": "schemaBytes",
+          "value": 1152.4545454545455,
+          "mean": 1152.4545454545455,
+          "max": 1630,
+          "min": 0,
+          "denominator": 55,
+          "provenance": "measured"
+        },
+        "tieAtCut": {
+          "name": "tieAtCut",
+          "value": 0.6181818181818182,
+          "numerator": 34,
+          "denominator": 55,
+          "provenance": "measured"
+        },
+        "metadataOverlap": {
+          "name": "metadataOverlap",
+          "value": 0.1010396169487079,
+          "mean": 0.1010396169487079,
+          "max": 0.3333333333333333,
+          "min": 0,
+          "denominator": 55,
+          "provenance": "measured"
+        }
+      },
+      "failing": [
+        {
+          "taskId": "o2-stop-order",
+          "prompt": "Ravi rang, he ordered the wrong size on 31877, kill the whole thing before it gets picked",
+          "expected": "cancel_order",
+          "rank": null,
+          "routed": [
+            "get_variant",
+            "accounts_get_account",
+            "archive_variant",
+            "create_variant",
+            "delete_variant"
+          ]
+        },
+        {
+          "taskId": "o2-merge-double",
+          "prompt": "Same customer placed 31877 and 31878 within a minute for the same address, make them one",
+          "expected": "merge_order",
+          "rank": null,
+          "routed": [
+            "archive_customer",
+            "create_address",
+            "create_customer",
+            "create_customer_tag",
+            "delete_address"
+          ]
+        },
+        {
+          "taskId": "o2-backorder-release",
+          "prompt": "The restock for the blue hoodie landed, let the people waiting on it have theirs now",
+          "expected": "release_backorder",
+          "rank": null,
+          "routed": [
+            "approve_restock",
+            "cancel_restock",
+            "create_restock"
+          ]
+        },
+        {
+          "taskId": "o2-note-gift",
+          "prompt": "Add to 31877 that it's a birthday gift and shouldn't show the price on the slip",
+          "expected": "create_order_note",
+          "rank": null,
+          "routed": [
+            "list_price",
+            "approve_price",
+            "create_account",
+            "create_address",
+            "create_api_key"
+          ]
+        },
+        {
+          "taskId": "s2-hold-parcel",
+          "prompt": "Don't let the Berlin parcel for 31877 leave until the customer confirms she's home Thursday",
+          "expected": "shipping_hold_shipment",
+          "rank": null,
+          "routed": [
+            "archive_customer",
+            "create_customer",
+            "create_customer_tag",
+            "delete_customer",
+            "delete_customer_note"
+          ]
+        },
+        {
+          "taskId": "s2-rate-change",
+          "prompt": "The 48 hour option for Ireland goes up to 9.90 from Monday",
+          "expected": "update_shipping_rate",
+          "rank": null,
+          "routed": [
+            "archive_variant",
+            "create_variant",
+            "delete_variant",
+            "find_account",
+            "find_address"
+          ]
+        },
+        {
+          "taskId": "s2-tracking-lookup",
+          "prompt": "The customer pasted 1Z7F2 into the chat, which order is that",
+          "expected": "find_tracking_number",
+          "rank": null,
+          "routed": [
+            "archive_customer",
+            "archive_order",
+            "assign_order",
+            "cancel_order",
+            "create_customer"
+          ]
+        },
+        {
+          "taskId": "s2-delivery-slot",
+          "prompt": "Ravi can only take the delivery after six, push the slot back",
+          "expected": "update_delivery",
+          "rank": null,
+          "routed": [
+            "assign_bin",
+            "cancel_delivery",
+            "get_bin",
+            "get_delivery",
+            "hold_delivery"
+          ]
+        },
+        {
+          "taskId": "b2-hold-invoice",
+          "prompt": "Park INV-4410 until legal has looked at the wording",
+          "expected": "hold_invoice",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "b2-cycle-move",
+          "prompt": "Move Acme from monthly to quarterly invoicing starting January",
+          "expected": "update_billing_cycle",
+          "rank": null,
+          "routed": [
+            "approve_stock_transfer",
+            "create_stock_transfer",
+            "get_stock_transfer",
+            "hold_stock_transfer",
+            "list_stock_transfer"
+          ]
+        },
+        {
+          "taskId": "i2-remove-line",
+          "prompt": "Take the second row off INV-4410, the sample was free",
+          "expected": "delete_invoice_line",
+          "rank": null,
+          "routed": [
+            "approve_chargeback",
+            "approve_credit_note",
+            "approve_exchange",
+            "approve_inspection",
+            "approve_invoice"
+          ]
+        },
+        {
+          "taskId": "i2-reopen",
+          "prompt": "INV-4410 was closed by mistake, open it back up so I can fix the PO number",
+          "expected": "reopen_invoice",
+          "rank": null,
+          "routed": [
+            "find_order",
+            "find_tracking_number",
+            "get_tracking_number",
+            "accounts_get_account",
+            "archive_order"
+          ]
+        },
+        {
+          "taskId": "p2-partial-back",
+          "prompt": "Give Ravi 12.50 of the 89.00 back, one item was missing from the box",
+          "expected": "refund_payment",
+          "rank": null,
+          "routed": [
+            "archive_product",
+            "create_product",
+            "delete_order_line",
+            "export_product",
+            "get_order_line"
+          ]
+        },
+        {
+          "taskId": "p2-payout-schedule",
+          "prompt": "Pay the vendor for October on the 15th instead of the 30th",
+          "expected": "schedule_payout",
+          "rank": null,
+          "routed": [
+            "refund_charge",
+            "refund_payment",
+            "refund_shipping_fee"
+          ]
+        },
+        {
+          "taskId": "p2-hold-payment",
+          "prompt": "Don't settle Ravi's 89.00 yet, fraud wants a look first",
+          "expected": "hold_payment",
+          "rank": null,
+          "routed": [
+            "find_account",
+            "find_address",
+            "find_charge",
+            "find_customer",
+            "find_invoice"
+          ]
+        },
+        {
+          "taskId": "c2-merge-dupes",
+          "prompt": "Acme Ltd and ACME Limited are the same company, fold them into one record",
+          "expected": "merge_customer",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "c2-tag",
+          "prompt": "Mark everyone who bought the hoodie as a VIP",
+          "expected": "create_customer_tag",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "c2-release",
+          "prompt": "Acme paid what they owed, lift the freeze on their account",
+          "expected": "release_customer",
+          "rank": null,
+          "routed": [
+            "accounts_hold_account",
+            "hold_account",
+            "accounts_get_account",
+            "accounts_release_account",
+            "accounts_update_account"
+          ]
+        },
+        {
+          "taskId": "c2-address-find",
+          "prompt": "Which of our customers are at 12 Harbour Street",
+          "expected": "find_address",
+          "rank": null,
+          "routed": [
+            "archive_customer",
+            "create_customer",
+            "create_customer_tag",
+            "delete_customer",
+            "delete_customer_note"
+          ]
+        },
+        {
+          "taskId": "a2-new-user",
+          "prompt": "Get Priya's replacement set up with a login before Monday",
+          "expected": "create_user",
+          "rank": null,
+          "routed": [
+            "accounts_get_account",
+            "find_account",
+            "accounts_hold_account",
+            "accounts_release_account",
+            "accounts_update_account"
+          ]
+        },
+        {
+          "taskId": "a2-sessions",
+          "prompt": "Where is Jonas logged in right now",
+          "expected": "list_session",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "v2-transfer-approve",
+          "prompt": "The 40 units heading to Cork can go, I've checked the paperwork",
+          "expected": "approve_stock_transfer",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "v2-reorder-new",
+          "prompt": "Start auto-reordering the hoodie at 30 units",
+          "expected": "create_reorder_point",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "v2-warehouse-find",
+          "prompt": "Which site holds the overflow stock for Ireland",
+          "expected": "find_warehouse",
+          "rank": null,
+          "routed": [
+            "hold_stock_level",
+            "hold_stock_transfer",
+            "accounts_hold_account",
+            "approve_stock_count",
+            "approve_stock_transfer"
+          ]
+        },
+        {
+          "taskId": "k2-price-approve",
+          "prompt": "The 39.90 for the hoodie is agreed, make it live",
+          "expected": "approve_price",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "k2-discount-schedule",
+          "prompt": "Turn the newsletter code on for Black Friday week only",
+          "expected": "schedule_discount",
+          "rank": null,
+          "routed": [
+            "find_sku",
+            "get_sku"
+          ]
+        },
+        {
+          "taskId": "k2-product-hold",
+          "prompt": "Pull the hoodie from the shop until the recall is sorted",
+          "expected": "hold_product",
+          "rank": null,
+          "routed": [
+            "export_account",
+            "export_chargeback",
+            "export_credit_note",
+            "export_customer",
+            "export_inventory_report"
+          ]
+        },
+        {
+          "taskId": "k2-variant-new",
+          "prompt": "We're adding an XXL in the blue hoodie",
+          "expected": "create_variant",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "r2-exchange-new",
+          "prompt": "Ravi wants a medium instead of the large he got",
+          "expected": "create_exchange",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "r2-label",
+          "prompt": "Send Ravi something to stick on the box so he can post it back free",
+          "expected": "create_return_label",
+          "rank": null,
+          "routed": [
+            "refund_charge",
+            "refund_payment",
+            "refund_shipping_fee"
+          ]
+        },
+        {
+          "taskId": "r2-refund-approve",
+          "prompt": "The hoodie came back clean, release Ravi's money",
+          "expected": "returns_approve_refund",
+          "rank": null,
+          "routed": [
+            "accounts_release_account",
+            "refund_charge",
+            "refund_payment",
+            "refund_shipping_fee",
+            "release_account"
+          ]
+        },
+        {
+          "taskId": "r2-restock-cancel",
+          "prompt": "Don't put the returned hoodie back on the shelf, it's damaged",
+          "expected": "cancel_restock",
+          "rank": null,
+          "routed": [
+            "assign_bin",
+            "get_bin",
+            "list_bin",
+            "refund_charge",
+            "refund_payment"
+          ]
+        },
+        {
+          "taskId": "t2-escalate-assign",
+          "prompt": "Give the Acme escalation to Priya, she knows their account",
+          "expected": "assign_escalation",
+          "rank": null,
+          "routed": [
+            "accounts_get_account",
+            "accounts_hold_account",
+            "accounts_release_account",
+            "accounts_update_account",
+            "close_account"
+          ]
+        },
+        {
+          "taskId": "t2-macro-archive",
+          "prompt": "Retire the old shipping-delay reply, we don't use it anymore",
+          "expected": "archive_macro",
+          "rank": null,
+          "routed": [
+            "archive_shipping_rate",
+            "archive_carrier",
+            "create_shipping_label",
+            "delete_shipping_label",
+            "delete_shipping_rate"
+          ]
+        },
+        {
+          "taskId": "t2-survey",
+          "prompt": "How did Ravi rate the last conversation",
+          "expected": "get_satisfaction_survey",
+          "rank": null,
+          "routed": [
+            "archive_shipping_rate",
+            "archive_ticket",
+            "assign_ticket",
+            "close_ticket",
+            "create_ticket"
+          ]
+        },
+        {
+          "taskId": "t2-reply-edit",
+          "prompt": "I made a typo in my last reply to Ravi, fix the amount to 12.50",
+          "expected": "update_reply",
+          "rank": null,
+          "routed": [
+            "approve_price",
+            "delete_reply",
+            "get_price",
+            "get_reply",
+            "list_price"
+          ]
+        },
+        {
+          "taskId": "p2-inventory-schedule",
+          "prompt": "Every Monday morning I want the stock figures in my inbox",
+          "expected": "schedule_inventory_report",
+          "rank": null,
+          "routed": [
+            "approve_report",
+            "approve_stock_count",
+            "approve_stock_transfer",
+            "archive_report",
+            "cancel_stock_count"
+          ]
+        },
+        {
+          "taskId": "p2-report-hold",
+          "prompt": "Don't publish the Q3 numbers yet, the CFO hasn't signed them off",
+          "expected": "hold_report",
+          "rank": null,
+          "routed": [
+            "approve_chargeback",
+            "approve_credit_note",
+            "approve_exchange",
+            "approve_inspection",
+            "approve_invoice"
+          ]
+        },
+        {
+          "taskId": "p2-sales-list",
+          "prompt": "Which revenue breakdowns did we run this quarter",
+          "expected": "list_sales_report",
+          "rank": null,
+          "routed": [
+            "approve_invoice_batch",
+            "cancel_invoice_batch",
+            "create_invoice_batch",
+            "create_sales_report",
+            "export_invoice_batch"
+          ]
+        }
+      ]
+    },
+    "custom:hierarchical-near-tie-1.0": {
+      "strategy": "custom:hierarchical-near-tie-1.0",
+      "scorer": {
+        "kind": "custom",
+        "path": "scripts/evals/routing/scorers/hierarchical-near-tie-1.mjs"
+      },
+      "metrics": {
+        "terminalInRoutedSet": {
+          "name": "terminalInRoutedSet",
+          "value": 0.36363636363636365,
+          "numerator": 20,
+          "denominator": 55,
+          "provenance": "measured"
+        },
+        "terminalRank": {
+          "name": "terminalRank",
+          "value": 1.9,
+          "mean": 1.9,
+          "max": 5,
+          "min": 1,
+          "denominator": 20,
+          "provenance": "measured"
+        },
+        "routedSetSize": {
+          "name": "routedSetSize",
+          "value": 4.090909090909091,
+          "mean": 4.090909090909091,
+          "max": 5,
+          "min": 0,
+          "denominator": 55,
+          "provenance": "measured"
+        },
+        "schemaBytes": {
+          "name": "schemaBytes",
+          "value": 1208.4545454545455,
+          "mean": 1208.4545454545455,
+          "max": 1623,
+          "min": 0,
+          "denominator": 55,
+          "provenance": "measured"
+        },
+        "tieAtCut": {
+          "name": "tieAtCut",
+          "value": 0.5272727272727272,
+          "numerator": 29,
+          "denominator": 55,
+          "provenance": "measured"
+        },
+        "metadataOverlap": {
+          "name": "metadataOverlap",
+          "value": 0.1010396169487079,
+          "mean": 0.1010396169487079,
+          "max": 0.3333333333333333,
+          "min": 0,
+          "denominator": 55,
+          "provenance": "measured"
+        }
+      },
+      "failing": [
+        {
+          "taskId": "o2-stop-order",
+          "prompt": "Ravi rang, he ordered the wrong size on 31877, kill the whole thing before it gets picked",
+          "expected": "cancel_order",
+          "rank": null,
+          "routed": [
+            "get_variant",
+            "get_category",
+            "get_discount",
+            "get_price",
+            "get_product"
+          ]
+        },
+        {
+          "taskId": "o2-merge-double",
+          "prompt": "Same customer placed 31877 and 31878 within a minute for the same address, make them one",
+          "expected": "merge_order",
+          "rank": null,
+          "routed": [
+            "get_address",
+            "create_address",
+            "delete_address",
+            "find_address",
+            "get_customer_note"
+          ]
+        },
+        {
+          "taskId": "o2-backorder-release",
+          "prompt": "The restock for the blue hoodie landed, let the people waiting on it have theirs now",
+          "expected": "release_backorder",
+          "rank": null,
+          "routed": [
+            "approve_restock",
+            "cancel_restock",
+            "create_restock",
+            "release_return"
+          ]
+        },
+        {
+          "taskId": "o2-note-gift",
+          "prompt": "Add to 31877 that it's a birthday gift and shouldn't show the price on the slip",
+          "expected": "create_order_note",
+          "rank": null,
+          "routed": [
+            "list_price",
+            "approve_price",
+            "get_price",
+            "update_price",
+            "create_discount"
+          ]
+        },
+        {
+          "taskId": "s2-hold-parcel",
+          "prompt": "Don't let the Berlin parcel for 31877 leave until the customer confirms she's home Thursday",
+          "expected": "shipping_hold_shipment",
+          "rank": null,
+          "routed": [
+            "release_shipment",
+            "shipping_release_shipment",
+            "assign_shipment",
+            "cancel_shipment",
+            "create_shipment"
+          ]
+        },
+        {
+          "taskId": "s2-rate-change",
+          "prompt": "The 48 hour option for Ireland goes up to 9.90 from Monday",
+          "expected": "update_shipping_rate",
+          "rank": null,
+          "routed": [
+            "archive_variant",
+            "create_variant",
+            "delete_variant",
+            "find_sku",
+            "get_variant"
+          ]
+        },
+        {
+          "taskId": "s2-tracking-lookup",
+          "prompt": "The customer pasted 1Z7F2 into the chat, which order is that",
+          "expected": "find_tracking_number",
+          "rank": null,
+          "routed": [
+            "get_customer",
+            "support_create_order_note",
+            "support_find_customer",
+            "support_list_customer",
+            "support_list_order_note"
+          ]
+        },
+        {
+          "taskId": "s2-delivery-slot",
+          "prompt": "Ravi can only take the delivery after six, push the slot back",
+          "expected": "update_delivery",
+          "rank": null,
+          "routed": [
+            "refund_charge",
+            "refund_payment",
+            "refund_shipping_fee",
+            "approve_chargeback",
+            "approve_credit_note"
+          ]
+        },
+        {
+          "taskId": "b2-hold-invoice",
+          "prompt": "Park INV-4410 until legal has looked at the wording",
+          "expected": "hold_invoice",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "b2-cycle-move",
+          "prompt": "Move Acme from monthly to quarterly invoicing starting January",
+          "expected": "update_billing_cycle",
+          "rank": null,
+          "routed": [
+            "hold_stock_transfer",
+            "approve_stock_transfer",
+            "create_stock_transfer",
+            "get_stock_transfer",
+            "list_stock_transfer"
+          ]
+        },
+        {
+          "taskId": "i2-remove-line",
+          "prompt": "Take the second row off INV-4410, the sample was free",
+          "expected": "delete_invoice_line",
+          "rank": null,
+          "routed": [
+            "approve_invoice_batch",
+            "approve_payment_terms",
+            "invoices_approve_invoice",
+            "cancel_invoice_batch",
+            "cancel_reminder"
+          ]
+        },
+        {
+          "taskId": "i2-reopen",
+          "prompt": "INV-4410 was closed by mistake, open it back up so I can fix the PO number",
+          "expected": "reopen_invoice",
+          "rank": null,
+          "routed": [
+            "find_charge",
+            "find_invoice",
+            "find_payment",
+            "get_charge",
+            "get_chargeback"
+          ]
+        },
+        {
+          "taskId": "p2-payout-schedule",
+          "prompt": "Pay the vendor for October on the 15th instead of the 30th",
+          "expected": "schedule_payout",
+          "rank": null,
+          "routed": [
+            "refund_charge",
+            "refund_payment",
+            "refund_shipping_fee"
+          ]
+        },
+        {
+          "taskId": "p2-hold-payment",
+          "prompt": "Don't settle Ravi's 89.00 yet, fraud wants a look first",
+          "expected": "hold_payment",
+          "rank": null,
+          "routed": [
+            "find_account",
+            "find_invoice",
+            "find_session",
+            "find_user",
+            "list_api_key"
+          ]
+        },
+        {
+          "taskId": "c2-merge-dupes",
+          "prompt": "Acme Ltd and ACME Limited are the same company, fold them into one record",
+          "expected": "merge_customer",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "c2-tag",
+          "prompt": "Mark everyone who bought the hoodie as a VIP",
+          "expected": "create_customer_tag",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "c2-release",
+          "prompt": "Acme paid what they owed, lift the freeze on their account",
+          "expected": "release_customer",
+          "rank": null,
+          "routed": [
+            "accounts_hold_account",
+            "hold_account",
+            "accounts_get_account",
+            "accounts_release_account",
+            "accounts_update_account"
+          ]
+        },
+        {
+          "taskId": "c2-address-find",
+          "prompt": "Which of our customers are at 12 Harbour Street",
+          "expected": "find_address",
+          "rank": null,
+          "routed": [
+            "archive_customer",
+            "create_customer",
+            "create_customer_tag",
+            "delete_customer",
+            "delete_customer_note"
+          ]
+        },
+        {
+          "taskId": "a2-new-user",
+          "prompt": "Get Priya's replacement set up with a login before Monday",
+          "expected": "create_user",
+          "rank": null,
+          "routed": [
+            "get_return_label",
+            "returns_get_order",
+            "returns_get_refund",
+            "approve_exchange",
+            "cancel_exchange"
+          ]
+        },
+        {
+          "taskId": "a2-sessions",
+          "prompt": "Where is Jonas logged in right now",
+          "expected": "list_session",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "v2-transfer-approve",
+          "prompt": "The 40 units heading to Cork can go, I've checked the paperwork",
+          "expected": "approve_stock_transfer",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "v2-warehouse-find",
+          "prompt": "Which site holds the overflow stock for Ireland",
+          "expected": "find_warehouse",
+          "rank": null,
+          "routed": [
+            "hold_stock_level",
+            "hold_stock_transfer",
+            "release_stock_level",
+            "release_stock_transfer",
+            "approve_stock_count"
+          ]
+        },
+        {
+          "taskId": "k2-price-approve",
+          "prompt": "The 39.90 for the hoodie is agreed, make it live",
+          "expected": "approve_price",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "k2-discount-schedule",
+          "prompt": "Turn the newsletter code on for Black Friday week only",
+          "expected": "schedule_discount",
+          "rank": null,
+          "routed": [
+            "find_sku",
+            "get_sku"
+          ]
+        },
+        {
+          "taskId": "k2-product-hold",
+          "prompt": "Pull the hoodie from the shop until the recall is sorted",
+          "expected": "hold_product",
+          "rank": null,
+          "routed": [
+            "export_account",
+            "export_credit_note",
+            "export_invoice",
+            "export_statement"
+          ]
+        },
+        {
+          "taskId": "k2-variant-new",
+          "prompt": "We're adding an XXL in the blue hoodie",
+          "expected": "create_variant",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "k2-category-merge",
+          "prompt": "Outerwear and Jackets are the same shelf online, combine them",
+          "expected": "merge_category",
+          "rank": null,
+          "routed": [
+            "assign_bin",
+            "get_bin",
+            "list_bin",
+            "update_bin"
+          ]
+        },
+        {
+          "taskId": "r2-exchange-new",
+          "prompt": "Ravi wants a medium instead of the large he got",
+          "expected": "create_exchange",
+          "rank": null,
+          "routed": []
+        },
+        {
+          "taskId": "r2-label",
+          "prompt": "Send Ravi something to stick on the box so he can post it back free",
+          "expected": "create_return_label",
+          "rank": null,
+          "routed": [
+            "refund_charge",
+            "refund_payment",
+            "refund_shipping_fee",
+            "approve_chargeback",
+            "approve_credit_note"
+          ]
+        },
+        {
+          "taskId": "r2-refund-approve",
+          "prompt": "The hoodie came back clean, release Ravi's money",
+          "expected": "returns_approve_refund",
+          "rank": null,
+          "routed": [
+            "release_invoice",
+            "release_payment",
+            "refund_charge",
+            "refund_payment",
+            "refund_shipping_fee"
+          ]
+        },
+        {
+          "taskId": "r2-restock-cancel",
+          "prompt": "Don't put the returned hoodie back on the shelf, it's damaged",
+          "expected": "cancel_restock",
+          "rank": null,
+          "routed": [
+            "refund_charge",
+            "refund_payment",
+            "refund_shipping_fee",
+            "hold_invoice",
+            "hold_payment"
+          ]
+        },
+        {
+          "taskId": "r2-hold-return",
+          "prompt": "Hold Ravi's return until the courier confirms they collected it",
+          "expected": "hold_return",
+          "rank": null,
+          "routed": [
+            "hold_delivery",
+            "shipping_hold_shipment",
+            "archive_carrier",
+            "assign_carrier",
+            "create_carrier"
+          ]
+        },
+        {
+          "taskId": "t2-survey",
+          "prompt": "How did Ravi rate the last conversation",
+          "expected": "get_satisfaction_survey",
+          "rank": null,
+          "routed": [
+            "archive_shipping_rate",
+            "delete_shipping_rate",
+            "get_shipping_rate",
+            "list_shipping_rate",
+            "update_shipping_rate"
+          ]
+        },
+        {
+          "taskId": "p2-inventory-schedule",
+          "prompt": "Every Monday morning I want the stock figures in my inbox",
+          "expected": "schedule_inventory_report",
+          "rank": null,
+          "routed": [
+            "get_report",
+            "approve_report",
+            "archive_report",
+            "create_inventory_report",
+            "create_report"
+          ]
+        },
+        {
+          "taskId": "p2-report-hold",
+          "prompt": "Don't publish the Q3 numbers yet, the CFO hasn't signed them off",
+          "expected": "hold_report",
+          "rank": null,
+          "routed": [
+            "create_tracking_number",
+            "find_tracking_number",
+            "get_tracking_number",
+            "cancel_delivery",
+            "shipping_cancel_shipment"
+          ]
+        }
+      ]
+    }
+  },
+  "unavailable": []
+}
