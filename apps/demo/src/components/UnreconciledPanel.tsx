@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { StagedResolution, Unreconciled } from "@agentdesk/webmcp";
+import type { StagedResolution, Unreconciled } from "@agentdesksdk/webmcp";
 import { agentdesk, demoPersistence, OPERATOR } from "../runtime/agentdesk.ts";
 import { useAnnouncer } from "./announcer.ts";
 import { render } from "./ApprovalCards.tsx";

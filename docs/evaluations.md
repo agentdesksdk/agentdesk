@@ -149,7 +149,7 @@ number.
 ## Reference run
 
 Recorded on the committed reference run, six tasks, four cells. Reproduce
-with `pnpm --filter @agentdesk/webmcp build && pnpm eval`.
+with `pnpm --filter @agentdesksdk/webmcp build && pnpm eval`.
 
 | Metric | Baseline, bare | Baseline, structured | AgentDesk, bare | AgentDesk, structured | Provenance |
 | --- | --- | --- | --- | --- | --- |

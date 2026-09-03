@@ -10,7 +10,7 @@ import {
   type Actor,
   type Capability,
   type Exposure,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 import { capabilities } from "../src/capabilities/index.ts";
 import { stagingAdapter } from "../src/capabilities/staged.ts";
 import { getState, resetStore } from "../src/data/store.ts";

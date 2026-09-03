@@ -3,7 +3,7 @@ import {
   CapabilityUnavailableError,
   unavailable,
   type Capability,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 import { getState, mutate, nowIso } from "../data/store.ts";
 import {
   createReadCapability,

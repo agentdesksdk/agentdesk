@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import type { Grant } from "@agentdesk/webmcp";
+import type { Grant } from "@agentdesksdk/webmcp";
 import { agentdesk, OPERATOR } from "../runtime/agentdesk.ts";
 import { useAnnouncer } from "./announcer.ts";
 import {

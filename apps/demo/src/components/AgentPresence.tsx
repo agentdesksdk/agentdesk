@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import type { PresentationEvent } from "@agentdesk/webmcp";
+import type { PresentationEvent } from "@agentdesksdk/webmcp";
 import { agentdesk } from "../runtime/agentdesk.ts";
 import { useAnnouncer } from "./announcer.ts";
 import { revealTarget, shouldHandOffFocus } from "./reveal.ts";

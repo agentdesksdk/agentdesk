@@ -4,7 +4,7 @@ import {
   type Change,
   type Forked,
   type StagingAdapter,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 import {
   deriveChanges,
   deriveEntries,

@@ -4,7 +4,7 @@ import {
   receipt,
   unavailable,
   type Capability,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 import { getState, mutate, nowIso } from "../data/store.ts";
 import { orderTotal } from "../data/types.ts";
 import {

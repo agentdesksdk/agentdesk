@@ -1,5 +1,5 @@
 {
-  "name": "@agentdesk/demo",
+  "name": "@agentdesksdk/demo",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@agentdesk/webmcp": "workspace:*",
+    "@agentdesksdk/webmcp": "workspace:*",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-router-dom": "^7.8.2"

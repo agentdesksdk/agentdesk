@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createAgentDeskRuntime, type ToolResult } from "@agentdesk/webmcp";
+import { createAgentDeskRuntime, type ToolResult } from "@agentdesksdk/webmcp";
 import { p0Capabilities } from "../capabilities.ts";
 
 /**

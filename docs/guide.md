@@ -40,7 +40,7 @@ estimator both modes). See [benchmark.md](benchmark.md).
 ## Repository layout
 
 ```text
-packages/webmcp     @agentdesk/webmcp — the SDK. No React, no DOM deps
+packages/webmcp     @agentdesksdk/webmcp — the SDK. No React, no DOM deps
                     beyond document.modelContext behind one adapter.
 apps/demo           Meridian Ops (Vite + React 19). React observes only.
 apps/p0             Bare HTML/TS browser-compatibility harness (/p0/).
@@ -55,11 +55,11 @@ calls return immediately with an `approval_id`.
 
 ## Installing the SDK
 
-The runtime is published as [`@agentdesk/webmcp`](https://www.npmjs.com/package/@agentdesk/webmcp).
+The runtime is published as [`@agentdesksdk/webmcp`](https://www.npmjs.com/package/@agentdesksdk/webmcp).
 It has no runtime dependencies and needs Node 18 or newer:
 
 ```bash
-npm install @agentdesk/webmcp
+npm install @agentdesksdk/webmcp
 ```
 
 The package README shows the first capability; [webmcp-runtime.md](webmcp-runtime.md)

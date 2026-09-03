@@ -1,5 +1,5 @@
 {
-  "name": "@agentdesk/webmcp",
+  "name": "@agentdesksdk/webmcp",
   "version": "0.2.0",
   "description": "Capability-virtualization runtime for WebMCP: publish the right tools at the right time, explain capability state, and keep consequential actions under human control.",
   "type": "module",

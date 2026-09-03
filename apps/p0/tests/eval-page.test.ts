@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defineCapability, receipt, unavailable } from "@agentdesk/webmcp";
+import { defineCapability, receipt, unavailable } from "@agentdesksdk/webmcp";
 import { ARMS } from "../../../scripts/evals/arms.mjs";
 import { buildCatalog } from "../../../scripts/evals/catalog.mjs";
 import { armFromSearch, createEvalRuntime, EVAL_TASKS } from "../eval-page.ts";

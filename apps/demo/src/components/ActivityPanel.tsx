@@ -6,7 +6,7 @@ import type {
   AuditEvent,
   Receipt,
   VerificationResult,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 import { useAnnouncer } from "./announcer.ts";
 import { receiptAuthorityText } from "./grant-text.ts";
 import { render } from "./ApprovalCards.tsx";

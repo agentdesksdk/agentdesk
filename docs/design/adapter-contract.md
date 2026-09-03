@@ -67,7 +67,7 @@ the tier useful.
 ## Compilation
 
 Compilation is not the adapter's. `compileManifestEntry(entry, adapter,
-policy)` in `@agentdesk/auto` turns an entry into a `Capability`, and it
+policy)` in `@agentdesksdk/auto` turns an entry into a `Capability`, and it
 is the only place that constructs one.
 
 The split matters because compilation is where the safety defaults from

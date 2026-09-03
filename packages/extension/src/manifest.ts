@@ -1,4 +1,4 @@
-import type { DirectCapabilitySpec } from "@agentdesk/webmcp";
+import type { DirectCapabilitySpec } from "@agentdesksdk/webmcp";
 
 /**
  * What the extension holds for one site. The capabilities are the

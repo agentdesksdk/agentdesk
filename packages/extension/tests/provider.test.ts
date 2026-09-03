@@ -6,7 +6,7 @@ import {
   type DirectCapabilitySpec,
   type NativeToolDefinition,
   type RegisterToolFn,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 import { extensionProvider, type ExtensionManifest } from "../src/index.ts";
 
 const ORIGIN = "https://shop.example";

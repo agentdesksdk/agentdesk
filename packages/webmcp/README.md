@@ -1,4 +1,4 @@
-# @agentdesk/webmcp
+# @agentdesksdk/webmcp
 
 Capability-virtualization runtime for WebMCP pages. Register a large
 capability catalog once; publish only the relevant few as typed native
@@ -8,13 +8,13 @@ consequential actions, and an audit trail.
 ## Installing
 
 ```bash
-npm install @agentdesk/webmcp
+npm install @agentdesksdk/webmcp
 ```
 
 No runtime dependencies; Node 18 or newer.
 
 ```ts
-import { createAgentDeskRuntime, defineCapability } from "@agentdesk/webmcp";
+import { createAgentDeskRuntime, defineCapability } from "@agentdesksdk/webmcp";
 
 const runtime = createAgentDeskRuntime({
   capabilities: [
@@ -70,7 +70,7 @@ createAgentDeskRuntime({
 Consuming other pages' tools is a separate, optional role:
 
 ```ts
-import { createWebMcpClient } from "@agentdesk/webmcp";
+import { createWebMcpClient } from "@agentdesksdk/webmcp";
 const client = createWebMcpClient();
 if (client.features.getTools) {
   const listed = await client.listTools({ fromOrigins: ["https://shop.example"] });

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { createAgentDeskRuntime } from "@agentdesk/webmcp";
+import { createAgentDeskRuntime } from "@agentdesksdk/webmcp";
 import { capabilities } from "../src/capabilities/index.ts";
 import { stagingAdapter } from "../src/capabilities/staged.ts";
 import { getState, resetStore } from "../src/data/store.ts";

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { createAgentDeskRuntime } from "@agentdesk/webmcp";
+import { createAgentDeskRuntime } from "@agentdesksdk/webmcp";
 import { capabilities } from "../capabilities/index.ts";
 import { stagingAdapter } from "../capabilities/staged.ts";
 import { StatCard } from "../components/bits.tsx";

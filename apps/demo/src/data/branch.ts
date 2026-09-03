@@ -1,4 +1,4 @@
-import type { Change } from "@agentdesk/webmcp";
+import type { Change } from "@agentdesksdk/webmcp";
 import type { Branch, DemoState } from "./types.ts";
 
 type Row = Record<string, unknown>;

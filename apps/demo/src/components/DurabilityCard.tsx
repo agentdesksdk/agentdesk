@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { RuntimeSnapshot, ToolResult, Unreconciled } from "@agentdesk/webmcp";
+import type { RuntimeSnapshot, ToolResult, Unreconciled } from "@agentdesksdk/webmcp";
 import { armCommitFault, disarmCommitFault } from "../capabilities/staged.ts";
 import { agentdesk } from "../runtime/agentdesk.ts";
 import { useAnnouncer } from "./announcer.ts";

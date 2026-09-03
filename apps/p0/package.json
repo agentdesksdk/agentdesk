@@ -1,5 +1,5 @@
 {
-  "name": "@agentdesk/p0",
+  "name": "@agentdesksdk/p0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,7 @@
     "preview": "vite preview --host 127.0.0.1 --port 4173"
   },
   "dependencies": {
-    "@agentdesk/webmcp": "workspace:*"
+    "@agentdesksdk/webmcp": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.9.2",

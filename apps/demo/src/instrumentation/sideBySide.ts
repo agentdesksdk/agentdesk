@@ -3,7 +3,7 @@ import type {
   AgentDeskRuntime,
   Exposure,
   RuntimeSnapshot,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 
 /**
  * The runtime's own tools. They are registered in both modes, so the

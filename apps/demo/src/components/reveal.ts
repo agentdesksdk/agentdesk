@@ -1,4 +1,4 @@
-import type { PresentationEvent } from "@agentdesk/webmcp";
+import type { PresentationEvent } from "@agentdesksdk/webmcp";
 
 const REVEAL_MS = 2400;
 

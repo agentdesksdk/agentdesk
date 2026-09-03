@@ -1,4 +1,4 @@
-import type { Capability } from "@agentdesk/webmcp";
+import type { Capability } from "@agentdesksdk/webmcp";
 import { getState } from "../data/store.ts";
 import { orderTotal, round2 } from "../data/types.ts";
 import { createReportCapability } from "./factories.ts";

@@ -6,7 +6,7 @@ Goal. A team with an existing application runs two commands and gets a
 governed WebMCP surface, without rewriting business logic as capabilities.
 
 ```bash
-npm install @agentdesk/auto
+npm install @agentdesksdk/auto
 npx agentdesk init
 ```
 
@@ -29,7 +29,7 @@ untouched.
 
 ## What does not already hold
 
-The `@agentdesk/core` extraction is real refactoring. The adapter is
+The `@agentdesksdk/core` extraction is real refactoring. The adapter is
 referenced in only four files under `packages/webmcp/src`, which is what
 an earlier draft read as a rename with an entry point attached. The count
 is right and the conclusion was wrong. `createAgentDeskRuntime`
@@ -300,12 +300,12 @@ maintenance surface that will rot faster than it ships.
 
 Start with exactly one discovery adapter, OpenAPI, because it is the
 highest-quality source, requires no framework coupling, and proves the
-manifest contract end to end. Add `@agentdesk/next` second only if the
+manifest contract end to end. Add `@agentdesksdk/next` second only if the
 manifest survived contact with a real spec. Every further adapter is the
 same shape, so the second one is evidence the abstraction is right and the
 eleventh is evidence nobody is maintaining it.
 
-`@agentdesk/react`, `vue`, `svelte`, `angular` should not exist until
+`@agentdesksdk/react`, `vue`, `svelte`, `angular` should not exist until
 someone asks. The runtime is already framework-free and the demo proves a
 React app needs no adapter to consume it.
 

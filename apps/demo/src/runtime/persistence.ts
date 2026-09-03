@@ -3,7 +3,7 @@ import {
   memoryPersistence,
   type PersistedRecord,
   type PersistenceAdapter,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 import { rebuildBranch } from "../capabilities/staged.ts";
 
 /** One database per application, so two apps on an origin do not share records. */
