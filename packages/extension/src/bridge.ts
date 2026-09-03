@@ -205,6 +205,15 @@ export function attachBridge(options: BridgeOptions): Bridge {
     }
     const decision = validate(message);
     if (!decision.ok) {
+      const claimed = (data as { kind?: unknown }).kind;
+      options.onRefused?.({
+        reason: decision.reason,
+        detail: {
+          detail: decision.detail,
+          origin: message.origin,
+          ...(typeof claimed === "string" ? { kind: claimed } : {}),
+        },
+      });
       return;
     }
     if (decision.request.kind === "anchors") {

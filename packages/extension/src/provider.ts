@@ -3,9 +3,14 @@ import {
   defineCapability,
   type Capability,
   type CapabilityProvider,
+  type ProviderHooks,
+  type ProviderRefusal,
   type RegisterToolFn,
 } from "@agentdesk/webmcp";
 import { attachBridge, type Bridge } from "./bridge.ts";
+
+/** Refusals held before the runtime has connected; older ones are dropped past this. */
+const HELD_REFUSALS = 64;
 import type { ExtensionManifest } from "./manifest.ts";
 
 export type ExtensionProviderOptions = {
@@ -49,11 +54,27 @@ export function extensionProvider(options: ExtensionProviderOptions): ExtensionP
     }
   };
 
+  // One audit: the runtime's. A refusal that arrives before the runtime has
+  // connected is held and recorded once it has, so a forgery in the first
+  // instant of a page is not the one that goes unrecorded.
+  let hooks: ProviderHooks | undefined;
+  const held: ProviderRefusal[] = [];
+  const refused = (refusal: ProviderRefusal): void => {
+    if (hooks !== undefined) {
+      hooks.refused(refusal);
+      return;
+    }
+    held.push(refusal);
+    if (held.length > HELD_REFUSALS) {
+      held.splice(0, held.length - HELD_REFUSALS);
+    }
+  };
+
   const bridge = attachBridge({
     window: options.window,
     origin: manifest.origin,
     ...(manifest.anchors !== undefined ? { anchors: manifest.anchors } : {}),
-    ...(options.now !== undefined ? { now: options.now } : {}),
+    onRefused: (refusal) => refused({ reason: refusal.reason, detail: refusal.detail }),
     onRequest: (request) => {
       if (request.kind === "changed") {
         announce();
@@ -77,6 +98,17 @@ export function extensionProvider(options: ExtensionProviderOptions): ExtensionP
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
+      };
+    },
+    connect: (given) => {
+      hooks = given;
+      for (const refusal of held.splice(0)) {
+        given.refused(refusal);
+      }
+      return () => {
+        if (hooks === given) {
+          hooks = undefined;
+        }
       };
     },
     bridge,

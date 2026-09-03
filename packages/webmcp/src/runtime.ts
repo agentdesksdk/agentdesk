@@ -788,6 +788,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     ...appCapabilities,
   ]);
   let unsubscribeProvider: (() => void) | undefined;
+  let disconnectProvider: (() => void) | undefined;
 
   let context: AppContext = { route: "/", state: {} };
   let exposure: Exposure = options.exposure ?? "routed";
@@ -3503,6 +3504,30 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       unsubscribeProvider = provider.subscribe?.(() => {
         void catalogChanged();
       });
+      // What every provider is handed: a way into the operator's audit for
+      // something it refused. The runtime records the provider's kind, the
+      // reason as stated, and a detail it does not interpret; a detail that
+      // cannot be cloned is recorded as unrecordable rather than lost.
+      disconnectProvider?.();
+      const connected = provider.connect?.({
+        refused: (refusal) => {
+          let detail: Record<string, unknown>;
+          try {
+            detail = structuredClone(refusal.detail ?? {});
+          } catch {
+            detail = { unrecordable: "the provider's detail could not be cloned into the audit" };
+          }
+          audit.append({
+            kind: "provider_refused",
+            provider: provider.kind,
+            reason: refusal.reason,
+            detail,
+            at: now(),
+          });
+          emit();
+        },
+      });
+      disconnectProvider = typeof connected === "function" ? connected : undefined;
       await surface.reconcile(desiredNative());
       started = true;
       emit();
@@ -3511,6 +3536,8 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       started = false;
       unsubscribeProvider?.();
       unsubscribeProvider = undefined;
+      disconnectProvider?.();
+      disconnectProvider = undefined;
       endEpoch();
       proposals.discardAll();
       approvals.clear();
