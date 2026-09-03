@@ -75,8 +75,14 @@ const FUNCTION_WORDS = new Set([
 const OVERLAP_WEIGHT = 0.05;
 const OVERLAP_CAP = 8;
 
-/** A second domain is kept when it scores at least this share of the first. */
-const NEAR_TIE = 0.75;
+/**
+ * A second domain is kept when it scores at least this share of the first.
+ * At 1 only an exact tie keeps one: the shipped step is single-domain, as
+ * the two-call flow is, where a client chooses one domain. The first
+ * measurement kept a near tie at 0.75 and it traded three tasks for one;
+ * the second held-out set showed it earning nothing net.
+ */
+export const NEAR_TIE = 1;
 
 type Node<M extends HierarchyMember> = {
   member: M;
@@ -399,27 +405,36 @@ export function rankWithin<M extends HierarchyMember>(
  * and the deterministic scorer runs inside. No domain implied means the
  * deterministic ranking over everything, exactly as the single call gives.
  */
-export const hierarchicalScorer: CapabilityScorer = (candidates, request) => {
-  const hierarchy = catalogHierarchy(candidates);
-  const all = () => true;
-  const view = viewOfSnapshot(request);
-  const domains = hierarchy.rankDomains(request.query, all, request.domain);
-  const top = domains[0];
-  if (top === undefined) {
-    return candidates
-      .map((member) => ({ name: member.name, score: baseScore(member, view), reasons: ["deterministic"] }))
-      .filter((entry) => entry.score > 0);
+export function hierarchicalScorerWith(options: { nearTie?: number } = {}): CapabilityScorer {
+  const nearTie = options.nearTie ?? NEAR_TIE;
+  if (!(typeof nearTie === "number" && nearTie > 0 && nearTie <= 1)) {
+    throw new RangeError(`nearTie is a share of the top domain's score in (0, 1], not ${String(nearTie)}`);
   }
-  const chosen = domains
-    .filter((entry, index) => index === 0 || (index === 1 && entry.score >= NEAR_TIE * top.score))
-    .map((entry) => entry.domain);
-  const members = candidates.filter((member) => chosen.includes(member.domain ?? UNCATEGORIZED));
-  const folded = hierarchy.fold(request.query, all);
-  return rankWithin(members, view, folded).map(
-    ({ member, score }): ScoredDescriptor => ({
-      name: member.name,
-      score,
-      reasons: [`domain ${member.domain ?? UNCATEGORIZED}`, "deterministic within domain"],
-    }),
-  );
-};
+  return (candidates, request) => {
+    const hierarchy = catalogHierarchy(candidates);
+    const all = () => true;
+    const view = viewOfSnapshot(request);
+    const domains = hierarchy.rankDomains(request.query, all, request.domain);
+    const top = domains[0];
+    if (top === undefined) {
+      return candidates
+        .map((member) => ({ name: member.name, score: baseScore(member, view), reasons: ["deterministic"] }))
+        .filter((entry) => entry.score > 0);
+    }
+    const chosen = domains
+      .filter((entry, index) => index === 0 || (index === 1 && entry.score >= nearTie * top.score))
+      .map((entry) => entry.domain);
+    const members = candidates.filter((member) => chosen.includes(member.domain ?? UNCATEGORIZED));
+    const folded = hierarchy.fold(request.query, all);
+    return rankWithin(members, view, folded).map(
+      ({ member, score }): ScoredDescriptor => ({
+        name: member.name,
+        score,
+        reasons: [`domain ${member.domain ?? UNCATEGORIZED}`, "deterministic within domain"],
+      }),
+    );
+  };
+}
+
+/** The shipped domain step: `hierarchicalScorerWith` at `NEAR_TIE`. */
+export const hierarchicalScorer: CapabilityScorer = hierarchicalScorerWith();

@@ -285,23 +285,41 @@ const REFERENCE_FIGURES = [
  * "the single call is unchanged" means in numbers.
  */
 REFERENCE_FIGURES.push({
-  report: "scripts/evals/runs/routing-2.2/report.json",
+  report: "scripts/evals/runs/routing-2.2-single/report.json",
   phrases: (report) => {
     const pct = (v) => `${(v * 100).toFixed(1)}%`;
     const det = report.cells.deterministic.metrics;
     const cell = report.cells["custom:hierarchical"];
     const hit = cell.metrics.terminalInRoutedSet;
     const failing = (c) => new Set(c.failing.map((f) => f.taskId));
-    const before = failing(report.cells.deterministic);
-    const after = failing(cell);
-    const gained = [...before].filter((id) => !after.has(id)).length;
-    const lost = [...after].filter((id) => !before.has(id)).length;
+    const gainedLost = (r, c) => {
+      const before = failing(r.cells.deterministic);
+      const after = failing(c);
+      return {
+        gained: [...before].filter((id) => !after.has(id)).length,
+        lost: [...after].filter((id) => !before.has(id)).length,
+      };
+    };
+    const first = gainedLost(report, cell);
+    // The shipped step on the second held-out set, in the same sentence
+    // family, so the section quotes both seeds from their own runs.
+    const holdout = JSON.parse(readFileSync(join(root, "scripts/evals/runs/routing-holdout-2-single/report.json"), "utf8"));
+    const second = holdout.cells["custom:hierarchical"];
+    const secondDet = holdout.cells.deterministic.metrics;
+    const secondHit = second.metrics.terminalInRoutedSet;
+    const later = gainedLost(holdout, second);
+    // The first measurement's near tie, kept as the ablation it was.
+    const earlier = JSON.parse(readFileSync(join(root, "scripts/evals/runs/routing-2.2/report.json"), "utf8"));
+    const earlierCell = earlier.cells["custom:hierarchical"];
     return {
       "docs/routing.md": [
         [`## ${pct(hit.value)} with a lexical domain step`, "the hierarchical heading figure"],
         [`for ${pct(hit.value)} of tasks, ${hit.numerator} of ${hit.denominator}, beside the reference's ${pct(det.terminalInRoutedSet.value)}`, "the hierarchical expected-in-routed-set sentence"],
         [`a tie at the cut in ${pct(cell.metrics.tieAtCut.value)} of tasks against ${pct(det.tieAtCut.value)}`, "the hierarchical tie sentence"],
-        [`It gains ${gained} tasks and loses ${lost}`, "the gained-and-lost sentence"],
+        [`It gains ${first.gained} tasks and loses ${first.lost}`, "the gained-and-lost sentence"],
+        [`it routes ${pct(secondHit.value)} of tasks, ${secondHit.numerator} of ${secondHit.denominator}, against the deterministic scorer's ${pct(secondDet.terminalInRoutedSet.value)}, with a tie at the cut in ${pct(second.metrics.tieAtCut.value)} of tasks against ${pct(secondDet.tieAtCut.value)}, gaining ${later.gained} and losing ${later.lost}`, "the second-seed sentence"],
+        [`scored ${pct(earlierCell.metrics.terminalInRoutedSet.value)} on the first set`, "the first measurement's near-tie figure"],
+        [`at a tie rate of ${pct(earlierCell.metrics.tieAtCut.value)}`, "the first measurement's tie rate"],
         [`--scorer ${cell.scorer.path}`, "the scorer path"],
       ],
     };
@@ -349,6 +367,60 @@ REFERENCE_FIGURES.push({
   },
 });
 
+/**
+ * The README's first screen. A judge reading only that screen sees the
+ * thesis; the "Measured, not claimed" block under the pipeline is where
+ * the committed runs' figures reach it, and every sentence there is held
+ * to the report it quotes: the surface per arm and the result-shape cost
+ * from the four-cell reference, the routing figures from the stress
+ * reference, the 2.2 run, and the second held-out set, and the sentence
+ * about model-dependent metrics, which must go once a transcript exists.
+ */
+REFERENCE_FIGURES.push({
+  report: "scripts/evals/runs/reference/report.json",
+  phrases: (report) => {
+    const read = (path) => JSON.parse(readFileSync(join(root, path), "utf8"));
+    const routing = read("scripts/evals/runs/routing-reference/report.json");
+    // The shipped step's own runs, single-domain on both seeds; the 0.75
+    // runs stay committed as the ablation docs/evaluations.md describes.
+    const step = read("scripts/evals/runs/routing-2.2-single/report.json");
+    const holdout = read("scripts/evals/runs/routing-holdout-2-single/report.json");
+    const pct = (v) => `${(v * 100).toFixed(1)}%`;
+    const num = (v) => Math.round(v).toLocaleString("en-US");
+    const cell = (key) => report.cells[key].metrics;
+    const flat = cell("baseline.structured");
+    const routed = cell("agentdesk.structured");
+    const bare = cell("agentdesk.bare");
+    for (const [a, b, what] of [
+      ["baseline.bare", "baseline.structured", "the flat arm's surface"],
+      ["agentdesk.bare", "agentdesk.structured", "the routed arm's surface"],
+    ]) {
+      if (cell(a).visibleToolCount.value !== cell(b).visibleToolCount.value || cell(a).registeredSchemaBytes.value !== cell(b).registeredSchemaBytes.value) {
+        throw new Error(`${what} differs between shapes, so the README cannot quote it per arm`);
+      }
+    }
+    if (cell("baseline.bare").resultBytes.value !== bare.resultBytes.value || cell("baseline.structured").resultBytes.value !== routed.resultBytes.value) {
+      throw new Error("result bytes differ between arms, so the README cannot quote them per shape");
+    }
+    const shipped = routing.cells.deterministic.metrics.terminalInRoutedSet;
+    const domainStep = step.cells["custom:hierarchical"].metrics.terminalInRoutedSet;
+    const second = holdout.cells["custom:hierarchical"].metrics;
+    const secondDet = holdout.cells.deterministic.metrics;
+    const confirmed = second.terminalInRoutedSet.value >= secondDet.terminalInRoutedSet.value && second.tieAtCut.value <= secondDet.tieAtCut.value;
+    const modelDependent = ["toolSelectionAccuracy", "argumentAccuracy", "taskCompletion"];
+    const noTranscript = Object.values(report.cells).every((c) => modelDependent.every((m) => c.metrics[m].provenance === "unavailable"));
+    return {
+      "./README.md": [
+        ["## Measured, not claimed", "the block's heading"],
+        [`the routed arm hands the agent ${num(routed.visibleToolCount.value)} visible tools and ${num(routed.registeredSchemaBytes.value)} schema bytes against ${num(flat.visibleToolCount.value)} and ${num(flat.registeredSchemaBytes.value)} flat`, "the surface sentence"],
+        [`a structured result costs ${num(routed.resultBytes.value)} bytes against ${num(bare.resultBytes.value)} bare, and carries an evidence link on ${pct(routed.evidenceCoverage.value)} of consequential completions against ${pct(bare.evidenceCoverage.value)}`, "the result-shape sentence"],
+        [`the shipped scorer routes the expected capability for ${pct(shipped.value)} of held-out tasks; the domain step, ${pct(domainStep.value)}, ${confirmed ? `confirmed at ${pct(second.terminalInRoutedSet.value)} on a second seed` : "not confirmed on a second seed"}`, "the routing sentence and its verdict"],
+        ["are `unavailable` until someone records a transcript", "the transcript sentence", noTranscript ? "present" : "absent"],
+      ],
+    };
+  },
+});
+
 /** A phrase as a pattern: literal text, with any run of whitespace allowed where the prose wraps. */
 function loose(text) {
   const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -370,9 +442,13 @@ function checkReferenceFigures() {
         found.push(`${doc} is missing (quotes ${report})`);
         continue;
       }
-      for (const [phrase, what] of list) {
-        if (!loose(phrase).test(body)) {
+      for (const [phrase, what, mode = "present"] of list) {
+        const stated = loose(phrase).test(body);
+        if (mode === "present" && !stated) {
           found.push(`${doc} does not state "${phrase}", ${what} computed from ${report}; the prose is stale against the run`);
+        }
+        if (mode === "absent" && stated) {
+          found.push(`${doc} still states "${phrase}", ${what}; ${report} no longer supports it`);
         }
       }
     }
