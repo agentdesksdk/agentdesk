@@ -87,7 +87,11 @@ Coverage and the manual browser checklist are in [testing.md](testing.md).
 ## Deployment
 
 Static. `pnpm build` produces `apps/demo/dist` with the P0 harness copied to
-`/p0/`. `netlify.toml` and `vercel.json` are included with SPA fallbacks:
+`/p0/`. `netlify.toml` and `vercel.json` are included with SPA fallbacks.
+On Vercel the project's Root Directory may be the repository root, where the
+root `vercel.json` applies, or `apps/demo`, where `apps/demo/vercel.json`
+runs the same root build and serves `dist`; both carry the two rewrites the
+deep links and the eval page need:
 
 ```bash
 netlify deploy --prod    # or: vercel deploy --prod
