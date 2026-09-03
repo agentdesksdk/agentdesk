@@ -194,16 +194,20 @@ Gate: the frozen-evidence guarantees survive the round trip byte for byte.
 
 ## Wave 2, adoption
 
-**Status, 2026-09-03.** 2.1: the release workflow #33 with its pins #35 and
-the 0.2.0 changelog #56 are merged; nothing is tagged yet, so nothing is
-published. 2.2: in progress on the SDK lane; the measurement it has to beat
-is merged as #59, 29.1% expected-in-routed-set on the 408-capability
-catalog, with #61 letting a replacement scorer report against that
-reference. 2.3: the IndexedDB adapter #53 and the REST adapter #57 are
-merged, with #55 and #60 for the asynchronous commit and fork they needed,
-and their contract findings are folded into `adapter-contract.md` under
-"What the staging contract did not say"; Frappe is not started. 2.4:
-merged as #51 with the four-cell reference. 2.5: not started.
+**Status, 2026-09-03, evening.** 2.1: published. `@agentdesksdk/webmcp@0.2.0`
+is on npm with provenance from the `v0.2.0` tag, after the scope moved to
+the organization that exists (#75) and the changelog caught up (#56, #76).
+2.2: shipped as #65 with the single-domain default #74, measured against
+#59's 29.1% and confirmed on a second held-out set #71 through the scorer
+flag #61; the figures sit on the README's first screen (#73) and in
+`docs/routing.md`, held to their runs. 2.3: the IndexedDB adapter #53 and
+the REST adapter #57 are merged, with #55 and #60 for the asynchronous
+commit and fork they needed, and their contract findings are folded into
+`adapter-contract.md`; Frappe is designed (#64) and not implemented. 2.4:
+merged as #51 with the four-cell reference. 2.5: the provider seam #68 and
+the extension's first slice #70 with its audit event #72 are merged; the
+extension itself, a real build and a demo site without AgentDesk source,
+is not started and is held until after submission, as is Frappe.
 
 **2.1 Publish to npm.** Release lane, small, can run any time after wave 0.
 `packages/webmcp/package.json` is at 0.2.0 with `publishConfig` set and the
