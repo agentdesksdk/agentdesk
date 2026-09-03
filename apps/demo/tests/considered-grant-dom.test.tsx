@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, render } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PendingAction, RuntimeSnapshot } from "@agentdesk/webmcp";
 import { ApprovalCards } from "../src/components/ApprovalCards.tsx";
 import { resetStore } from "../src/data/store.ts";
@@ -17,9 +17,19 @@ import { agentdesk } from "../src/runtime/agentdesk.ts";
  */
 let snapshot: RuntimeSnapshot;
 
+/**
+ * The mock replaces `useRuntime` only; every other export is the real one,
+ * spread from the module itself. It is undone when this file ends: a mock
+ * left registered has reached another file's module graph in a full run,
+ * where every `useRuntime` came back as not a function.
+ */
 vi.mock("../src/components/hooks.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/components/hooks.ts")>();
   return { ...actual, useRuntime: () => snapshot };
+});
+
+afterAll(() => {
+  vi.doUnmock("../src/components/hooks.ts");
 });
 
 const ORDER = "10428";
