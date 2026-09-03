@@ -17,6 +17,22 @@ merged since it.
 
 ### Features
 
+- The domain step ships single-domain, with the near-tie a parameter,
+  measured on both seeds ([#74](https://github.com/agentdesksdk/agentdesk/pull/74))
+- A provider's refusal is one audit event, `provider_refused`, and the
+  bridge keeps no log ([#72](https://github.com/agentdesksdk/agentdesk/pull/72))
+- The extension's first slice, a `CapabilityProvider` over a validated
+  bridge; the package is private and does not publish
+  ([#70](https://github.com/agentdesksdk/agentdesk/pull/70))
+- The Inspector shows the catalog's domains after a first-level call, and a
+  press narrows the second call to one
+  ([#69](https://github.com/agentdesksdk/agentdesk/pull/69))
+- `createAgentDeskRuntime` takes a `CapabilityProvider` and constructs no
+  WebMCP-specific object ([#68](https://github.com/agentdesksdk/agentdesk/pull/68))
+- The eval page serves the result shape the runner measures
+  ([#66](https://github.com/agentdesksdk/agentdesk/pull/66))
+- `find_capabilities` narrows through a domain tree, with no model on the
+  page ([#65](https://github.com/agentdesksdk/agentdesk/pull/65))
 - Await a staged commit, so a store that answers later answers first
   ([#55](https://github.com/agentdesksdk/agentdesk/pull/55))
 - A staging adapter over IndexedDB, with optimistic concurrency
@@ -61,6 +77,13 @@ merged since it.
 
 ### Fixes
 
+- The npm scope is `@agentdesksdk`, the name the organization holds
+  ([#75](https://github.com/agentdesksdk/agentdesk/pull/75))
+- Three findings from the main pass: the durability card clears on reset, a
+  spent grant reads unused, the benchmark says who approves
+  ([#67](https://github.com/agentdesksdk/agentdesk/pull/67))
+- The approval card reads the considered grant off the pending action, and
+  the audit walk is gone ([#63](https://github.com/agentdesksdk/agentdesk/pull/63))
 - The shell at 375, a page for the adversarial note, and two rail details
   ([#45](https://github.com/agentdesksdk/agentdesk/pull/45))
 - A pending action carries the considered grant, and the consult names the
@@ -89,6 +112,13 @@ merged since it.
 
 ### Tests and CI
 
+- The domain step confirmed on a second held-out set, under a rule written
+  before the run ([#71](https://github.com/agentdesksdk/agentdesk/pull/71))
+- The routing eval runs a scorer by name, and a custom one from a path
+  ([#61](https://github.com/agentdesksdk/agentdesk/pull/61))
+- A routing stress evaluation: 408 generated capabilities, 55 held-out
+  phrasings, and the shipped scorer's 29.1%
+  ([#59](https://github.com/agentdesksdk/agentdesk/pull/59))
 - Land the five stacked wave 1 pull requests that were merged into their
   own branches ([#52](https://github.com/agentdesksdk/agentdesk/pull/52))
 - Pin workflow actions to commit SHAs, package install line, repair wording
@@ -104,6 +134,12 @@ merged since it.
 
 ### Docs
 
+- The README's first screen carries the measured figures, held to the runs
+  ([#73](https://github.com/agentdesksdk/agentdesk/pull/73))
+- The Frappe staging adapter, designed against the contract
+  ([#64](https://github.com/agentdesksdk/agentdesk/pull/64))
+- Status after wave 1 in the roadmap and the review tracker
+  ([#62](https://github.com/agentdesksdk/agentdesk/pull/62))
 - Point the transcript runbook at the eval catalog page
   ([#30](https://github.com/agentdesksdk/agentdesk/pull/30),
   [#31](https://github.com/agentdesksdk/agentdesk/pull/31))
