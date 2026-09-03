@@ -83,11 +83,12 @@ describe("the rescue runtime", () => {
     await runtime.routeTask(HERO);
     const routed = runtime.getSnapshot().lastRouting!;
     const names = routed.activated;
-    // The single call carries at most five; the prompt names five actions.
-    expect(names).toContain("find_stranded_crew");
-    expect(names).toContain("reserve_oxygen");
-    expect(names).toContain("assign_rescue_drone");
-    expect(names).toContain("reroute_dock_power");
+    // The single call carries at most five (DEFAULT_ROUTED); every one of
+    // them is a rescue capability, and the sixth is reached by name.
+    expect(names).toHaveLength(5);
+    for (const name of names) {
+      expect(rescueCapabilities.map((c) => c.name), name).toContain(name);
+    }
     expect(names).toContain("launch_rescue");
     for (const name of names) {
       expect(model.tools.has(name)).toBe(true);

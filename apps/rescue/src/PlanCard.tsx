@@ -31,33 +31,25 @@ export function stateWords(plan: OperationPlan): string {
   }
 }
 
-const OPERATION_WORDS: Record<string, string> = {
+/** The operations in a person's words; the capability name sits beside each. */
+export const OPERATION_WORDS: Record<string, string> = {
   reserve_oxygen: "Reserve two oxygen packs",
   assign_rescue_drone: "Assign rescue drone NIA-7",
   reroute_dock_power: "Reroute power to Dock 3",
   launch_rescue: "Launch the rescue",
 };
 
-/**
- * The one approval. Approve mints a gesture token inside the click and
- * hands it to approvePlan; the token is minted nowhere else. Reject is a
- * plain call. While the plan executes the card blocks input and says so.
- */
-export function PlanCard({ plan }: { plan: OperationPlan }) {
-  const busy = plan.status === "APPROVED" || plan.status === "COMMITTING";
-  const open = plan.status === "DRAFT";
+const SETTLED = new Set(["COMMITTED", "REJECTED", "PARTIAL", "INTERRUPTED"]);
+
+export function isSettled(plan: OperationPlan): boolean {
+  return SETTLED.has(plan.status);
+}
+
+/** The plan's body: its operations with their outcomes once known, and its changes. */
+function PlanBody({ plan }: { plan: OperationPlan }) {
+  const done = plan.status === "COMMITTED";
   return (
-    <section
-      className={`plan-card status-${plan.status}`}
-      role={open ? "alertdialog" : "region"}
-      aria-label={`Plan ${plan.id}: ${stateWords(plan)}`}
-      data-plan={plan.id}
-      data-status={plan.status}
-    >
-      <header>
-        <span className="title">Rescue plan {plan.id}</span>
-        <span className={`risk ${plan.risk}`}>{plan.risk}</span>
-      </header>
+    <>
       <p className="summary">{plan.summary}</p>
       <p className="state" data-plan-state>
         {stateWords(plan)}
@@ -82,9 +74,13 @@ export function PlanCard({ plan }: { plan: OperationPlan }) {
         })}
       </ol>
       <div className="will-change">
-        <h4>What will change</h4>
-        <p className="evidence">Derived from a staged run of all four operations, not from a description of them.</p>
-        <ul aria-label="Consolidated changes">
+        <h4>{done ? "What changed" : "What will change"}</h4>
+        <p className="evidence">
+          {done
+            ? "Each line landed and was read back from the console."
+            : "Derived from a staged run of all four operations, not from a description of them."}
+        </p>
+        <ul aria-label={done ? "Changes that landed" : "Consolidated changes"}>
           {consolidated(plan).map((change) => (
             <li key={change.field} className="change-row" data-change={change.field}>
               <span className="field">{change.field}</span>
@@ -97,26 +93,64 @@ export function PlanCard({ plan }: { plan: OperationPlan }) {
           ))}
         </ul>
       </div>
-      {open || busy ? (
-        <div className="actions">
-          <button type="button" disabled={busy} onClick={() => rescue.rejectPlan(plan.id)}>
-            Reject
-          </button>
-          <button
-            type="button"
-            className="primary"
-            disabled={busy}
-            aria-label={busy ? `Executing plan ${plan.id}` : `Approve plan ${plan.id}`}
-            onClick={() => {
-              // The click is the gesture. The token is minted here, in the
-              // handler, and consumed by approvePlan; nothing else can mint one.
-              rescue.approvePlan(plan.id, rescue.issueApprovalGesture({ planId: plan.id }, OPERATOR));
-            }}
-          >
-            {busy ? "Executing…" : "Approve plan"}
-          </button>
-        </div>
-      ) : null}
+    </>
+  );
+}
+
+/**
+ * The one approval. Approve mints a gesture token inside the click and
+ * hands it to approvePlan, which moves the plan to APPROVED and nothing
+ * else: the agent commits on its next turn. Reject is a plain call. While
+ * the plan executes the card blocks input and says so.
+ */
+export function PlanCard({ plan }: { plan: OperationPlan }) {
+  const busy = plan.status === "APPROVED" || plan.status === "COMMITTING";
+  const open = plan.status === "DRAFT";
+  return (
+    <section
+      className={`plan-card status-${plan.status}`}
+      role={open ? "alertdialog" : "region"}
+      aria-label={`Plan ${plan.id}: ${stateWords(plan)}`}
+      data-plan={plan.id}
+      data-status={plan.status}
+    >
+      <header>
+        <span className="title">Rescue plan {plan.id}</span>
+        <span className={`risk ${plan.risk}`}>{plan.risk}</span>
+      </header>
+      <PlanBody plan={plan} />
+      <div className="actions">
+        <button type="button" disabled={busy} onClick={() => rescue.rejectPlan(plan.id)}>
+          Reject
+        </button>
+        <button
+          type="button"
+          className="primary"
+          disabled={busy}
+          aria-label={busy ? `Plan ${plan.id} approved, waiting for the agent` : `Approve plan ${plan.id}`}
+          onClick={() => {
+            // The click is the gesture. The token is minted here, in the
+            // handler, and consumed by approvePlan; nothing else can mint one.
+            rescue.approvePlan(plan.id, rescue.issueApprovalGesture({ planId: plan.id }, OPERATOR));
+          }}
+        >
+          {busy ? "Approved, waiting for the agent" : "Approve plan"}
+        </button>
+      </div>
     </section>
+  );
+}
+
+/** A plan that is finished, folded so it does not repeat the receipt. */
+export function PlanSettled({ plan }: { plan: OperationPlan }) {
+  return (
+    <details className={`plan-card settled status-${plan.status}`} data-plan={plan.id} data-status={plan.status}>
+      <summary>
+        <span className="title">Rescue plan {plan.id}</span>
+        <span className="state">{stateWords(plan)}</span>
+        <span className={`risk ${plan.risk}`}>{plan.risk}</span>
+      </summary>
+      <PlanBody plan={plan} />
+    </details>
   );
 }

@@ -42,7 +42,9 @@ export function payload(result: ToolResult): Record<string, unknown> {
  */
 export async function firstTurn(runtime: AgentDeskRuntime, prompt = HERO_PROMPT) {
   const routed = await runtime.invoke("find_capabilities", { query: prompt });
-  const crew = await runtime.invoke("find_stranded_crew", {});
+  // The reads go through invoke_capability by name, the way a client calls
+  // a capability whether or not the routed surface carries it.
+  const crew = await runtime.invoke("invoke_capability", { name: "find_stranded_crew" });
   const conditions = await runtime.invoke("invoke_capability", { name: "inspect_rescue_conditions" });
   const prepared = await runtime.invoke("invoke_capability", {
     name: "prepare_plan",

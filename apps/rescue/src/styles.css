@@ -547,3 +547,191 @@ textarea:focus-visible {
     border-color: var(--accent);
   }
 }
+
+/* The mission head: the id, its status, and where the workflow stands. */
+.mission-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 18px;
+  margin-bottom: 16px;
+}
+
+.mission-head h1 {
+  margin: 0;
+}
+
+.agent-status {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--ink-soft);
+}
+
+/* Crew beside readiness: one deliberate layout, not a grid of equal cards. */
+.mission-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(0, 2fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.readiness h2 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.readiness .row {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "mark label value"
+    "mark detail value";
+  gap: 2px 12px;
+  align-items: center;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+}
+
+.readiness .row .mark {
+  grid-area: mark;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 3px 0;
+  text-align: center;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+}
+
+.readiness .row .mark.met {
+  color: var(--good);
+  border-color: var(--good);
+}
+
+.readiness .row .label {
+  grid-area: label;
+  font-size: 13.5px;
+}
+
+.readiness .row .value {
+  grid-area: value;
+  font-size: 22px;
+  text-align: right;
+}
+
+.readiness .row .detail {
+  grid-area: detail;
+  margin: 0;
+}
+
+/* The prompt a person gives their client. Text, a copy button, nothing else. */
+.try-this {
+  background: var(--panel);
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+}
+
+.try-this h2 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.try-this blockquote {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.try-this .actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* The Inspector folds; its counts and scores are there when wanted. */
+details.inspector > summary {
+  cursor: pointer;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  list-style: none;
+}
+
+details.inspector > summary::before {
+  content: "▸ ";
+}
+
+details.inspector[open] > summary::before {
+  content: "▾ ";
+}
+
+details.inspector h3 {
+  margin-top: 12px;
+}
+
+/* A settled plan folds under the receipt. */
+.plan-card.settled > summary {
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  list-style: none;
+}
+
+.plan-card.settled > summary .state {
+  margin: 0;
+  color: var(--ink-soft);
+  flex: 1;
+  font-size: 12.5px;
+}
+
+.plan-card.settled[open] > summary {
+  margin-bottom: 8px;
+}
+
+/* The scripted walkthrough, only behind ?walkthrough=1, and labelled. */
+.walkthrough {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 40;
+  max-width: 360px;
+  background: var(--warn-soft);
+  border: 1px solid var(--warn);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 12.5px;
+}
+
+.walkthrough h2 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--warn);
+}
+
+.walkthrough p {
+  margin: 0 0 8px;
+}
+
+@media (max-width: 900px) {
+  .mission-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

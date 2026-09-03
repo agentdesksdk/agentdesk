@@ -98,8 +98,10 @@ export const inspectRescueConditions: Capability = defineCapability({
   description: "Reads what a rescue needs: oxygen packs on hand, the drone's assignment, the dock's power, and the mission's status.",
   domain: DOMAIN,
   risk: "READ",
-  intents: ["inspect rescue conditions", "check conditions", "what does the rescue need"],
-  keywords: ["conditions", "inspect", "oxygen", "drone", "dock", "power", "mission"],
+  // The words the hero prompt carries, so a deterministic router reaches
+  // this read from the prompt itself and not from a name in page code.
+  intents: ["prepare a rescue plan", "rescue plan", "inspect rescue conditions", "what does the rescue need"],
+  keywords: ["rescue", "plan", "prepare", "conditions", "oxygen", "drone", "dock", "power"],
   entities: [],
   inputSchema: { type: "object", properties: {} },
   presentation: {
@@ -236,6 +238,9 @@ export const launchRescue: Capability = staged({
   intents: ["launch rescue", "launch the rescue", "launch mission"],
   keywords: ["launch", "rescue", "mission", "go"],
   entities: [],
+  // A launch is decided against the readiness read; naming it here lets
+  // routing pull the read in beside the launch for any prompt that asks to launch.
+  relationships: { requires: ["inspect_rescue_conditions"] },
   inputSchema: {
     type: "object",
     properties: { mission: { type: "string", description: `Mission id; ${MISSION} when absent` } },
