@@ -18,6 +18,26 @@ the human authorizes            approves the diff read off that fork, not a desc
 AgentDesk enforces and proves   commits that same fork, re-checked, into an audit timeline
 ```
 
+## Measured, not claimed
+
+- Surface: on the eval catalog the routed arm hands the agent 7 visible
+  tools and 2,486 schema bytes against 51 and 10,455 flat
+  ([reference run](docs/evaluations.md#reference-run)).
+- Result shape: a structured result costs 464 bytes against 67 bare, and
+  carries an evidence link on 100.0% of consequential completions against
+  0.0% ([the two axes](docs/evaluations.md#the-two-axes)).
+- Routing on a real-sized catalog: the shipped scorer routes the expected
+  capability for 29.1% of held-out tasks; the domain step, 36.4%, confirmed
+  at 36.4% on a second seed
+  ([routing stress evaluation](docs/evaluations.md#routing-stress-evaluation)).
+- Tool selection, argument accuracy, and task completion are model
+  decisions and are `unavailable` until someone records a transcript;
+  the runbook is [Capturing a transcript](docs/evaluations.md#capturing-a-transcript).
+
+Every figure above is read from a committed `report.json` under
+`scripts/evals/runs` by `pnpm check:docs`, which fails if a sentence here
+stops agreeing with its run.
+
 **Live demo:** `https://<LIVE_URL_PLACEHOLDER>` (fill in at deploy time; see
 [docs/guide.md](docs/guide.md#deployment))
 
