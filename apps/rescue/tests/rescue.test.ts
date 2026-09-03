@@ -36,7 +36,8 @@ const AFTER = {
 
 async function booted() {
   const model = mockModelContext();
-  const runtime = createRescueRuntime({ registerTool: model.registerTool });
+  // The page requires a gesture; these tests approve as the runtime API, so the gesture is optional here.
+  const runtime = createRescueRuntime({ registerTool: model.registerTool, approvalGesture: "optional" });
   await runtime.start();
   return { runtime, model };
 }
