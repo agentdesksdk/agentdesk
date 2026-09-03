@@ -74,7 +74,9 @@ describe("the agent's proposal is the sequence of tool calls a client makes", ()
     expect(audit.some((event) => event.kind === "plan_prepared")).toBe(true);
     expect(audit.filter((event) => event.kind === "plan_approved")).toHaveLength(1);
     const writes = ["reserve_oxygen", "assign_rescue_drone", "reroute_dock_power", "launch_rescue"];
-    expect(audit.filter((event) => event.kind === "execution_completed" && writes.includes(event.capability)).map((event) => event.capability)).toEqual(writes);
+    expect(
+      audit.flatMap((event) => (event.kind === "execution_completed" && writes.includes(event.capability) ? [event.capability] : [])),
+    ).toEqual(writes);
     // The five routed tools reached the surface; the sixth is still reachable by name.
     for (const name of ["find_stranded_crew", "reserve_oxygen", "assign_rescue_drone", "reroute_dock_power", "launch_rescue"]) {
       expect(model.tools.has(name), name).toBe(true);
