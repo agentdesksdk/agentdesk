@@ -462,7 +462,7 @@ function namedOutright(capability: Capability, tokens: ReadonlySet<string>): boo
  * budget is a maximum, and every value that is not a usable maximum resolves
  * to one that is.
  */
-function clampBudget(limit: number | undefined): number {
+export function clampBudget(limit: number | undefined): number {
   if (limit === undefined || !Number.isFinite(limit)) {
     return Math.min(DEFAULT_ROUTED, MAX_ROUTED);
   }
