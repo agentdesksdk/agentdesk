@@ -3,15 +3,25 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const p0Dist = join(root, "apps", "p0", "dist");
 const demoDist = join(root, "apps", "demo", "dist");
-const target = join(demoDist, "p0");
 
-if (!existsSync(p0Dist) || !existsSync(demoDist)) {
-  console.error("run the workspace build first: both dist folders are required");
+/** Apps served under the demo's host, each at its own base path. */
+const embedded = [
+  { name: "P0 harness", dist: join(root, "apps", "p0", "dist"), target: join(demoDist, "p0") },
+  { name: "Asteria Rescue Control", dist: join(root, "apps", "rescue", "dist"), target: join(demoDist, "rescue") },
+];
+
+if (!existsSync(demoDist)) {
+  console.error("run the workspace build first: apps/demo/dist is required");
   process.exit(1);
 }
 
-rmSync(target, { recursive: true, force: true });
-cpSync(p0Dist, target, { recursive: true });
-console.log(`copied P0 harness into ${target}`);
+for (const app of embedded) {
+  if (!existsSync(app.dist)) {
+    console.error(`run the workspace build first: ${app.dist} is required`);
+    process.exit(1);
+  }
+  rmSync(app.target, { recursive: true, force: true });
+  cpSync(app.dist, app.target, { recursive: true });
+  console.log(`copied ${app.name} into ${app.target}`);
+}

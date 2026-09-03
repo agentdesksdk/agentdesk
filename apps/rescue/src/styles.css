@@ -1,0 +1,549 @@
+:root {
+  --bg: #0b1017;
+  --panel: #121a24;
+  --panel-raised: #172230;
+  --ink: #e6edf5;
+  --ink-soft: #9aa8b8;
+  --line: #24303f;
+  --accent: #5aa9ff;
+  --accent-soft: #10263d;
+  --good: #4fd18b;
+  --good-soft: #0f2b1e;
+  --warn: #f2b84b;
+  --warn-soft: #33260c;
+  --danger: #ff7a70;
+  --danger-soft: #3a1512;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  font-size: 15px;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-rows: 56px minmax(0, 1fr);
+  grid-template-areas:
+    "topbar topbar"
+    "main rail";
+  min-height: 100vh;
+}
+
+.topbar {
+  grid-area: topbar;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.brand .name {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.brand .sub {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.controls {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.presence {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  min-width: 0;
+}
+
+.presence .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line);
+  flex: none;
+}
+
+.presence .dot.live {
+  background: var(--accent);
+}
+
+.presence .label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mission {
+  grid-area: main;
+  padding: 20px 22px 40px;
+  min-width: 0;
+}
+
+.mission h1 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 22px;
+  margin: 0 0 16px;
+}
+
+.pill {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+}
+
+.pill.mission-launched {
+  color: var(--good);
+  border-color: var(--good);
+}
+
+.panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  min-width: 0;
+}
+
+.panel h2 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.panel .value {
+  font-size: 26px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.detail {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  margin: 6px 0 0;
+}
+
+/* The agent's attention on a panel: the border, and the text beside it. */
+.agent-reveal {
+  animation: reveal-flash 2.4s ease;
+}
+
+@keyframes reveal-flash {
+  0% {
+    box-shadow: 0 0 0 0 rgba(90, 169, 255, 0.9);
+    border-color: var(--accent);
+  }
+  60% {
+    box-shadow: 0 0 0 6px rgba(90, 169, 255, 0.15);
+    border-color: var(--accent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(90, 169, 255, 0);
+  }
+}
+
+[data-reveal]:focus-visible,
+.receipt:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.risk {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 5px;
+  padding: 2px 6px;
+}
+
+.risk.READ {
+  background: var(--good-soft);
+  color: var(--good);
+}
+
+.risk.WRITE {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.risk.CONSEQUENTIAL {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+button {
+  font: inherit;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-raised);
+  color: var(--ink);
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #06111d;
+  font-weight: 600;
+}
+
+button:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The plan card: every state as words, the border echoing the risk. */
+.plan-card {
+  background: var(--panel);
+  border: 1px solid var(--danger);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 18px;
+}
+
+.plan-card.status-COMMITTED {
+  border-color: var(--good);
+}
+
+.plan-card.status-REJECTED {
+  border-color: var(--line);
+  opacity: 0.8;
+}
+
+.plan-card.status-PARTIAL,
+.plan-card.status-INTERRUPTED {
+  border-color: var(--warn);
+}
+
+.plan-card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.plan-card .title {
+  font-weight: 700;
+}
+
+.plan-card .summary {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+.plan-card .state {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  color: var(--warn);
+}
+
+.plan-card.status-COMMITTED .state {
+  color: var(--good);
+}
+
+.plan-card .operations {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.plan-card .operations li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 6px 10px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13.5px;
+}
+
+.plan-card .operations .step {
+  font-family: var(--mono);
+  color: var(--ink-soft);
+}
+
+.plan-card .operations .cap,
+.plan-card .operations .outcome {
+  grid-column: 2;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.plan-card .will-change h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.plan-card .evidence {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.plan-card ul,
+.receipt ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.change-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 5px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.change-row .before {
+  color: var(--ink-soft);
+  text-decoration: line-through;
+  font-family: var(--mono);
+}
+
+.change-row .after {
+  color: var(--good);
+  font-family: var(--mono);
+  font-weight: 600;
+}
+
+.change-row .arrow {
+  color: var(--ink-soft);
+}
+
+.change-row .verify {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--good);
+}
+
+.plan-card .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.receipt {
+  background: var(--panel);
+  border: 1px solid var(--good);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 18px;
+}
+
+.receipt h2 {
+  margin: 0 0 4px;
+  font-family: var(--mono);
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  color: var(--good);
+}
+
+.rail {
+  grid-area: rail;
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.rail-section {
+  border-bottom: 1px solid var(--line);
+  padding: 14px 16px;
+}
+
+.rail-section h3 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  padding: 3px 0;
+}
+
+.stat-row .num {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.rail textarea {
+  width: 100%;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  margin: 8px 0;
+  resize: vertical;
+}
+
+.calls,
+.matches,
+.activity {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  font-size: 12.5px;
+}
+
+.calls li,
+.matches li,
+.activity li {
+  padding: 6px 0;
+  border-top: 1px dashed var(--line);
+  overflow-wrap: anywhere;
+}
+
+.calls li .status {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.calls li.refused .status,
+.calls li.error .status {
+  color: var(--danger);
+}
+
+.calls code,
+.matches code {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.matches .score {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.matches .policy {
+  color: var(--danger);
+  font-size: 11.5px;
+}
+
+.event {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.event time {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "topbar"
+      "main"
+      "rail";
+  }
+
+  .rail {
+    border-left: none;
+    border-top: 1px solid var(--line);
+  }
+
+  .topbar {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+  }
+
+  .controls {
+    margin-left: 0;
+  }
+
+  .presence {
+    max-width: 100%;
+  }
+
+  .mission {
+    padding: 16px 14px 32px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-reveal {
+    animation: none;
+    border-color: var(--accent);
+  }
+}
