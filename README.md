@@ -27,7 +27,7 @@ AgentDesk enforces and proves   commits that same fork, re-checked, into an audi
   carries an evidence link on 100.0% of consequential completions against
   0.0% ([the two axes](docs/evaluations.md#the-two-axes)).
 - Routing on a real-sized catalog: the shipped scorer routes the expected
-  capability for 29.1% of held-out tasks; the domain step, 36.4%, confirmed
+  capability for 29.1% of held-out tasks; the domain step, 34.5%, confirmed
   at 36.4% on a second seed
   ([routing stress evaluation](docs/evaluations.md#routing-stress-evaluation)).
 - Tool selection, argument accuracy, and task completion are model

@@ -4,6 +4,8 @@ import {
   createAgentDeskRuntime,
   defineCapability,
   hierarchicalScorer,
+  hierarchicalScorerWith,
+  NEAR_TIE,
   rankCapabilities,
   routeTask,
   type Capability,
@@ -360,5 +362,48 @@ describe("the hierarchical scorer narrows by domain before it ranks", () => {
     }
     expect(result.matches.map((m) => m.capability.name)).toEqual(["merge_ticket", "archive_ticket"]);
     expect(result.matches[0]!.score).toBeGreaterThan(result.matches[1]!.score);
+  });
+});
+
+describe("the domain step keeps one domain unless a second ties it exactly", () => {
+  const context = { route: "/", state: {} };
+  /**
+   * Twelve capabilities so the weights land where the fixture needs them:
+   * "alpha" is borne by one capability in alpha, "beta" by two in beta,
+   * "gamma" by one in gamma, and the rest carry nothing the queries say.
+   * With inverse capability frequency, "alpha beta" scores alpha at
+   * log(13) and beta at log(7), a ratio just over 0.75 and under 1.0;
+   * "alpha gamma" scores alpha and gamma equal.
+   */
+  const nearTied = (): Capability[] => [
+    cap("alpha", "get", "alpha thing", ["alpha"]),
+    cap("beta", "get", "beta thing", ["beta"]),
+    cap("beta", "list", "beta thing", ["beta"]),
+    cap("gamma", "get", "gamma thing", ["gamma"]),
+    ...Array.from({ length: 8 }, (_, i) => cap("delta", "get", `delta thing ${i}`, ["delta"], { name: `get_delta_${i}` })),
+  ];
+  const names = async (scorer: typeof hierarchicalScorer, query: string) => {
+    const result = await routeTask(nearTied(), { query, context, limit: 6 }, { kind: "custom", scorer, onFailure: "refuse" });
+    if (!result.ok) {
+      throw new Error(result.reason);
+    }
+    return result.matches.map((m) => m.capability.name).sort();
+  };
+
+  it("ships with the near-tie at 1.0, so only an exact tie keeps a second domain", async () => {
+    expect(NEAR_TIE).toBe(1);
+    expect(await names(hierarchicalScorer, "alpha beta")).toEqual(["get_alpha_thing"]);
+    expect(await names(hierarchicalScorer, "alpha gamma")).toEqual(["get_alpha_thing", "get_gamma_thing"]);
+  });
+
+  it("keeps a nearly tied second domain when asked to, as the first measurement did", async () => {
+    const lenient = hierarchicalScorerWith({ nearTie: 0.75 });
+    expect(await names(lenient, "alpha beta")).toEqual(["get_alpha_thing", "get_beta_thing", "list_beta_thing"]);
+    expect(await names(hierarchicalScorerWith({ nearTie: 1 }), "alpha beta")).toEqual(["get_alpha_thing"]);
+  });
+
+  it("refuses a near-tie outside (0, 1]", () => {
+    expect(() => hierarchicalScorerWith({ nearTie: 0 })).toThrow(/nearTie/);
+    expect(() => hierarchicalScorerWith({ nearTie: 1.5 })).toThrow(/nearTie/);
   });
 });

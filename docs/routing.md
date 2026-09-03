@@ -47,32 +47,48 @@ committed run is `scripts/evals/runs/routing-reference/`, and
 These are the numbers roadmap item 2.2 has to beat; the section below
 reports its lexical step against them.
 
-## 36.4% with a lexical domain step
+## 34.5% with a lexical domain step
 
 `hierarchicalScorer` is the domain step of "Narrowing in two calls" run
 with no client to choose the domain: the query's content tokens, folded to
 forms the catalog's vocabulary contains, choose a domain by inverse
-capability frequency, a second is kept when it nearly ties, and the
-deterministic scorer runs inside with ties at the cut reduced by
-description overlap. Run through the same evaluation as a custom scorer,
+capability frequency, and the deterministic scorer runs inside with ties
+at the cut reduced by description overlap. It ships single-domain:
+`NEAR_TIE` is 1, so a second domain is kept only when it ties the top one
+exactly, and `hierarchicalScorerWith({ nearTie })` builds the step at any
+other share. Run through the same evaluation as a custom scorer,
 `--scorer packages/webmcp/examples/hierarchical-scorer.mjs`, it routes the
-expected capability into the published set for 36.4% of tasks, 20 of 55,
+expected capability into the published set for 34.5% of tasks, 19 of 55,
 beside the reference's 29.1% for the deterministic cell of the same run,
-with a tie at the cut in 61.8% of tasks against 74.5%. It gains 7 tasks
-and loses 3. The committed run is `scripts/evals/runs/routing-2.2/`, held
-here by `pnpm check:docs` the way the reference is.
+with a tie at the cut in 52.7% of tasks against 74.5%. It gains 7 tasks
+and loses 4. On the second held-out set, seed 7 and phrasings authored
+after the step shipped, it routes 36.4% of tasks, 20 of 55, against the
+deterministic scorer's 29.1%, with a tie at the cut in 52.7% of tasks
+against 61.8%, gaining 6 and losing 2. The committed runs are
+`scripts/evals/runs/routing-2.2-single/` and
+`scripts/evals/runs/routing-holdout-2-single/`, held here by
+`pnpm check:docs` the way the reference is.
 
-That is not a wide margin, and it was measured once: the tasks are held
-out and the scorer was not tuned against them. What moved is what a
+The first measurement kept a second domain at a near tie of 0.75 and
+scored 36.4% on the first set, one task more, at a tie rate of 61.8%;
+the second held-out set showed the near tie earning nothing net, and
+`docs/evaluations.md` holds that ablation with its runs. Single-domain is
+what ships because it is what the two-call flow is, where a client
+chooses one domain, and because a near tie that trades a task for nine
+points of ties at the cut on one set and nothing on the other is not a
+rule, it is a coincidence of one seed's vocabulary.
+
+That is not a wide margin, and each set was measured once: the tasks are
+held out and the scorer was not tuned against them. What moved is what a
 domain step can move. The refund phrased around the customer lands
 `refund_shipping_fee` under billing instead of five customer tools; proof
 of a payment lands `get_receipt`; the month-end invoicing run lands
 `create_invoice_batch`; the carrier switch lands `assign_carrier`. What
 did not move cannot move lexically: "Send me the printable version of
 INV-2291" shares no token with any domain and scores nothing anywhere,
-and "put them together" is a merge only to a reader. The three losses are
-near-ties between domains where the second domain's members spent the
-budget. The lexical step is the floor for the two-call flow, in which the
+and "put them together" is a merge only to a reader. The losses are
+tasks the flat scorer found by a keyword the chosen domain does not
+carry. The lexical step is the floor for the two-call flow, in which the
 client reads the tree's descriptions and chooses the domain the way a
 person would; that choice is what roadmap item 2.4 measures with
 transcripts.
@@ -346,6 +362,6 @@ Every match carries `reasons`, in the order the contributions applied, so
 packages/webmcp/src/router.ts routeTask rankCapabilities RoutingStrategy CapabilityScorer RoutingResult RELATION_WEIGHTS ROUTING_WEIGHTS MAX_ROUTED DEFAULT_ROUTED scoredExternally degradedFrom
 packages/webmcp/src/capability.ts CapabilityRelationships relationships
 packages/webmcp/src/runtime.ts routable partition visibleRepair findCapabilities
-packages/webmcp/src/hierarchy.ts catalogHierarchy hierarchicalScorer rankWithin baseScore CatalogTree CatalogDomain UNCATEGORIZED NEAR_TIE OVERLAP_WEIGHT OVERLAP_CAP DESCRIPTION_TERMS
+packages/webmcp/src/hierarchy.ts catalogHierarchy hierarchicalScorer hierarchicalScorerWith rankWithin baseScore CatalogTree CatalogDomain UNCATEGORIZED NEAR_TIE OVERLAP_WEIGHT OVERLAP_CAP DESCRIPTION_TERMS
 packages/webmcp/src/capability.ts subdomain
 -->
