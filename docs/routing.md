@@ -209,6 +209,12 @@ published almost the whole catalog.
 Nothing widens the surface. A graph edge can change which capabilities are
 visible; it cannot change how many.
 
+An application chooses its budget with `routing: { limit }` on
+`createAgentDeskRuntime`, clamped through the same `clampBudget` so it can
+never exceed `MAX_ROUTED`, routes nothing at zero or below, and is
+`DEFAULT_ROUTED` when absent; `find_capabilities` cuts at it on every
+path and says so in its `limit` and its instruction.
+
 ## Automatic narrowing with an explicit override
 
 A catalog of four hundred capabilities does not fit in one ranked answer,
@@ -368,7 +374,8 @@ Every match carries `reasons`, in the order the contributions applied, so
 "why is this here" is answerable without re-running the scorer.
 
 <!-- code-anchors
-packages/webmcp/src/router.ts routeTask rankCapabilities RoutingStrategy CapabilityScorer RoutingResult RELATION_WEIGHTS ROUTING_WEIGHTS MAX_ROUTED DEFAULT_ROUTED scoredExternally degradedFrom
+packages/webmcp/src/router.ts routeTask rankCapabilities RoutingStrategy CapabilityScorer RoutingResult RELATION_WEIGHTS ROUTING_WEIGHTS MAX_ROUTED DEFAULT_ROUTED scoredExternally degradedFrom clampBudget
+packages/webmcp/src/runtime.ts routingBudget
 packages/webmcp/src/capability.ts CapabilityRelationships relationships
 packages/webmcp/src/runtime.ts routable partition visibleRepair findCapabilities
 packages/webmcp/src/hierarchy.ts catalogHierarchy hierarchicalScorer hierarchicalScorerWith rankWithin baseScore CatalogTree CatalogDomain UNCATEGORIZED NEAR_TIE OVERLAP_WEIGHT OVERLAP_CAP DESCRIPTION_TERMS

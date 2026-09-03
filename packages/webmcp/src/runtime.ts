@@ -98,8 +98,8 @@ import {
   type StoredReceipt,
 } from "./receipts.ts";
 import {
+  clampBudget,
   compareNames,
-  DEFAULT_ROUTED,
   isRouteError,
   routeCapability,
   tokenize,
@@ -521,6 +521,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   validate?: Validator;
   /** Origins allowed to see registered tools (spec: `exposedTo`). */
   exposedTo?: string[];
+  /**
+   * How many capabilities `find_capabilities` publishes and `routeTask`
+   * returns. Clamped like every other limit: never above `MAX_ROUTED`, and
+   * zero or below routes nothing. Absent, `DEFAULT_ROUTED`.
+   */
+  routing?: { limit?: number };
   /**
    * Current application revision. Captured when a plan is prepared and
    * compared again at commit, so a human cannot approve a plan built
@@ -989,6 +995,10 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   let started = false;
   let routedNames = new Set<string>();
   let lastRouting: RoutingReport | null = null;
+  // How many `find_capabilities` publishes: the option, clamped the way
+  // every limit is, so it can never exceed MAX_ROUTED and zero or below
+  // routes nothing. Absent, DEFAULT_ROUTED, and every path is what it was.
+  const routingBudget = clampBudget(options.routing?.limit);
   // The catalog is fixed until the provider announces otherwise, so its
   // tree is tokenized once per catalog; each call pays only the routable
   // filter and a count.
@@ -3666,7 +3676,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       // The deterministic scorer, inside the branch the client chose, with
       // ties at the cut reduced by what the query shares with a description.
       ranked = rankWithin(narrowed, viewOf(query, context), tree().fold(query, routable))
-        .slice(0, DEFAULT_ROUTED)
+        .slice(0, routingBudget)
         .map(({ member, score }) => ({ capability: member, score }));
     } else if (unknownDomain) {
       ranked = [];
@@ -3678,7 +3688,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         viewOf(query, context),
         routable,
       )
-        .slice(0, DEFAULT_ROUTED)
+        .slice(0, routingBudget)
         .map(({ member, score }) => ({ capability: member, score }));
     }
     let fallback = false;
@@ -3687,7 +3697,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       ranked = (narrowed ?? appCaps)
         .filter((capability) => evaluateAvailability(capability, context).available)
         .sort((a, b) => compareNames(a.name, b.name))
-        .slice(0, 5)
+        .slice(0, routingBudget)
         .map((capability) => ({ capability, score: 0 }));
     }
     const domains = domain === undefined || unknownDomain ? tree().view(routable).domains : undefined;
@@ -3769,7 +3779,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         : " Call invoke_capability with the governance operation as name and its arguments as input; governance operations stay behind the stable gateway and do not expand the native tool set.";
     const instruction = unknownDomain
       ? `${domain} is not a domain in this catalog; choose one from domains and call again with it.`
-      : `Up to 5 of the most relevant capabilities are active WebMCP tools; refine the query to surface others. Prefer the native typed tools. If your client has not refreshed its tool list, call invoke_capability with the capability name.${
+      : `Up to ${routingBudget} of the most relevant capabilities are active WebMCP tools; refine the query to surface others. Prefer the native typed tools. If your client has not refreshed its tool list, call invoke_capability with the capability name.${
           domain === undefined
             ? " The domains list is the catalog's tree; call again with domain, or domain/subdomain, to rank within one branch."
             : ""
@@ -3805,7 +3815,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         ? { governance_matches: governanceMatches }
         : {}),
       activated_tools: activated,
-      limit: 5,
+      limit: routingBudget,
       instruction,
     };
   }
