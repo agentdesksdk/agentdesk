@@ -39,6 +39,8 @@ export function createRescueRuntime(
     // mints one inside the click; nothing that only asserts an identity is
     // accepted by this instance.
     approvalGesture: options.approvalGesture ?? "required",
+    // Every rescue capability routes in one call: six, the SDK's MAX_ROUTED.
+    routing: { limit: 6 },
     // A plan approved against one state refuses to commit against another.
     revision: () => JSON.stringify(rows(getState())),
   });

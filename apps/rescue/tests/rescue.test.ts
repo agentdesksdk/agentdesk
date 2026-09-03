@@ -83,13 +83,9 @@ describe("the rescue runtime", () => {
     await runtime.routeTask(HERO);
     const routed = runtime.getSnapshot().lastRouting!;
     const names = routed.activated;
-    // The single call carries at most five (DEFAULT_ROUTED); every one of
-    // them is a rescue capability, and the sixth is reached by name.
-    expect(names).toHaveLength(5);
-    for (const name of names) {
-      expect(rescueCapabilities.map((c) => c.name), name).toContain(name);
-    }
-    expect(names).toContain("launch_rescue");
+    // The runtime routes with a budget of six, so the one call carries
+    // every rescue capability.
+    expect([...names].sort()).toEqual(rescueCapabilities.map((c) => c.name).sort());
     for (const name of names) {
       expect(model.tools.has(name)).toBe(true);
     }

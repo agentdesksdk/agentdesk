@@ -33,35 +33,19 @@ describe("an external client performs the rescue through the tools; the applicat
     expect(launch.relationships.requires).toContain("inspect_rescue_conditions");
   });
 
-  it("find_capabilities on the hero prompt routes five rescue capabilities, every one of them from the six, with the readiness read pulled in by the launch", async () => {
-    const { runtime } = await booted();
+  it("find_capabilities on the hero prompt routes all six rescue capabilities by name, the readiness read pulled in by the launch, with no page code naming one", async () => {
+    const { runtime, model } = await booted();
     const { routed } = await firstTurn(runtime, HERO_PROMPT);
     const matches = (routed.matches as Array<{ name: string }>).map((m) => m.name);
-    // The runtime cuts the ranked list at DEFAULT_ROUTED (5); which of the
-    // six is left out is decided by score, and the client reaches it by
-    // name through invoke_capability. The `it.fails` case below records
-    // the acceptance the cut blocks.
-    expect(matches).toHaveLength(5);
-    for (const name of matches) {
-      expect(SIX, name).toContain(name);
+    const activated = routed.activated_tools as string[];
+    for (const name of SIX) {
+      expect(matches, name).toContain(name);
+      expect(activated, name).toContain(name);
+      expect(model.tools.has(name), name).toBe(true);
     }
-    expect(matches).toContain("inspect_rescue_conditions");
-    expect(matches).toContain("launch_rescue");
-    const report = runtime.getSnapshot().lastRouting!;
-    expect(report.activated).toHaveLength(5);
+    expect(matches).toHaveLength(6);
+    expect(runtime.getSnapshot().lastRouting!.activated).toHaveLength(6);
   });
-
-  it.fails(
-    "all six land in one call: blocked by the runtime slicing ranked matches at DEFAULT_ROUTED (packages/webmcp/src/runtime.ts:3669 and :3681, 5 of MAX_ROUTED 6) with no limit input",
-    async () => {
-      const { runtime } = await booted();
-      const { routed } = await firstTurn(runtime, HERO_PROMPT);
-      const activated = routed.activated_tools as string[];
-      for (const name of SIX) {
-        expect(activated, name).toContain(name);
-      }
-    },
-  );
 
   it("the first turn stages one plan through prepare_plan and changes no live state; a person approves; the next turn commits and reads four verified receipts", async () => {
     const { runtime, model } = await booted();
