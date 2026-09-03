@@ -34,6 +34,24 @@ export type CapabilityProvider = {
    * omits it.
    */
   subscribe?: (listener: () => void) => () => void;
+  /**
+   * Receives what the runtime hands every provider at start: a way to put
+   * a refusal into the operator's audit. Returns the disconnect, called at
+   * stop. A provider that refuses nothing omits it.
+   */
+  connect?: (hooks: ProviderHooks) => void | (() => void);
+};
+
+/** What a provider refused, in its own words; the runtime interprets none of it. */
+export type ProviderRefusal = {
+  readonly reason: string;
+  readonly detail?: Record<string, unknown>;
+};
+
+/** What the runtime hands a provider at start. */
+export type ProviderHooks = {
+  /** Records a `provider_refused` audit event under this provider's kind. */
+  refused: (refusal: ProviderRefusal) => void;
 };
 
 export type NativeProviderOptions = {

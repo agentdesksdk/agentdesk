@@ -264,6 +264,20 @@ export type AuditEvent =
       outcome: GrantOutcome["outcome"];
       field?: string;
       at: number;
+    }
+  | {
+      /**
+       * A provider refused something addressed to it, in its own words. The
+       * runtime records the provider's kind, the reason as the provider
+       * states it, and a detail object it does not interpret, so an
+       * operator's audit carries a forged page message the way it carries
+       * a denied call, and the SDK learns nothing about what a provider is.
+       */
+      kind: "provider_refused";
+      provider: string;
+      reason: string;
+      detail: Record<string, unknown>;
+      at: number;
     };
 
 const MAX_EVENTS = 1000;

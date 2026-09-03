@@ -2,10 +2,10 @@ export {
   attachBridge,
   type Bridge,
   type BridgeAcceptance,
-  type BridgeAuditEntry,
   type BridgeOptions,
   type BridgeRefusal,
   type BridgeRefusalReason,
+  type BridgeRefused,
   type BridgeRequest,
 } from "./bridge.ts";
 export type { ExtensionManifest } from "./manifest.ts";
