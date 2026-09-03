@@ -76,7 +76,13 @@ const OVERLAP_WEIGHT = 0.05;
 const OVERLAP_CAP = 8;
 
 /** A second domain is kept when it scores at least this share of the first. */
-const NEAR_TIE = 0.75;
+export const NEAR_TIE = 0.75;
+
+/** The domain step with its near-tie chosen; the shipped `hierarchicalScorer` is this at `NEAR_TIE`. */
+export function hierarchicalScorerWith(options: { nearTie?: number } = {}): CapabilityScorer {
+  void options;
+  return hierarchicalScorer;
+}
 
 type Node<M extends HierarchyMember> = {
   member: M;

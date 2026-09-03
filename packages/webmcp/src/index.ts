@@ -33,6 +33,8 @@ export {
 export {
   catalogHierarchy,
   hierarchicalScorer,
+  hierarchicalScorerWith,
+  NEAR_TIE,
   type CatalogDomain,
   type CatalogHierarchy,
   type CatalogSubdomain,
