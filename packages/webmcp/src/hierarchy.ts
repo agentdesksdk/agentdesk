@@ -367,6 +367,77 @@ export function baseScore(member: HierarchyMember, view: RoutingView): number {
 export type RankedMember<M extends HierarchyMember> = { member: M; score: number };
 
 /**
+ * Keep the domain choices of distinct task clauses separate. A multi-step
+ * request such as "find the order. refund its shipping" needs both branches;
+ * scoring the whole paragraph as one bag of words lets the repeated shipping
+ * terms erase the first step. `then` is the only word boundary here because
+ * splitting ordinary "and" phrases would turn one object name into two tasks.
+ */
+function taskClauses(query: string): string[] {
+  const clauses = query
+    .split(/[!?;]+|\.(?=\s|$)|\bthen\b/iu)
+    .map((clause) => clause.trim())
+    .filter((clause) => clause !== "");
+  return clauses.length === 0 ? [query] : clauses;
+}
+
+function inferredDomains<M extends HierarchyMember>(
+  hierarchy: CatalogHierarchy<M>,
+  query: string,
+  routable: (member: M) => boolean,
+  contextDomain?: string,
+  nearTie = NEAR_TIE,
+): string[] {
+  const chosen = new Set<string>();
+  for (const clause of taskClauses(query)) {
+    const ranked = hierarchy.rankDomains(clause, routable, contextDomain);
+    const top = ranked[0];
+    if (top === undefined) {
+      continue;
+    }
+    for (const [index, entry] of ranked.entries()) {
+      if (index === 0 || (index === 1 && entry.score >= nearTie * top.score)) {
+        chosen.add(entry.domain);
+      }
+    }
+  }
+  return [...chosen];
+}
+
+/**
+ * Chooses the domains each task clause implies, then ranks inside their
+ * union. A single-clause request retains the original one-domain behavior.
+ *
+ * The caller supplies the hierarchy so a long-lived runtime can reuse its
+ * cached vocabulary. When no domain is implied, this is exactly the flat
+ * deterministic score over the admitted members. The function does not
+ * apply a tool budget; the surface that publishes the result owns that.
+ */
+export function rankHierarchically<M extends HierarchyMember>(
+  members: readonly M[],
+  hierarchy: CatalogHierarchy<M>,
+  query: string,
+  view: RoutingView,
+  routable: (member: M) => boolean,
+  options: { nearTie?: number } = {},
+): RankedMember<M>[] {
+  const nearTie = options.nearTie ?? NEAR_TIE;
+  if (!(typeof nearTie === "number" && nearTie > 0 && nearTie <= 1)) {
+    throw new RangeError(`nearTie is a share of the top domain's score in (0, 1], not ${String(nearTie)}`);
+  }
+  const domains = inferredDomains(hierarchy, query, routable, view.domain, nearTie);
+  if (domains.length === 0) {
+    return members
+      .filter(routable)
+      .map((member) => ({ member, score: baseScore(member, view) }))
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score || compareNames(a.member.name, b.member.name));
+  }
+  const narrowed = domains.flatMap((domain) => hierarchy.within(domain, routable) ?? []);
+  return rankWithin(narrowed, view, hierarchy.fold(query, routable));
+}
+
+/**
  * Ranks members inside a chosen domain: the deterministic score, then a
  * small bump for every content word the query shares with the member's
  * title, name, or description. The bump is capped below one keyword hit,
@@ -414,23 +485,15 @@ export function hierarchicalScorerWith(options: { nearTie?: number } = {}): Capa
     const hierarchy = catalogHierarchy(candidates);
     const all = () => true;
     const view = viewOfSnapshot(request);
-    const domains = hierarchy.rankDomains(request.query, all, request.domain);
-    const top = domains[0];
-    if (top === undefined) {
-      return candidates
-        .map((member) => ({ name: member.name, score: baseScore(member, view), reasons: ["deterministic"] }))
-        .filter((entry) => entry.score > 0);
-    }
-    const chosen = domains
-      .filter((entry, index) => index === 0 || (index === 1 && entry.score >= nearTie * top.score))
-      .map((entry) => entry.domain);
-    const members = candidates.filter((member) => chosen.includes(member.domain ?? UNCATEGORIZED));
-    const folded = hierarchy.fold(request.query, all);
-    return rankWithin(members, view, folded).map(
+    const domains = inferredDomains(hierarchy, request.query, all, request.domain, nearTie);
+    return rankHierarchically(candidates, hierarchy, request.query, view, all, { nearTie }).map(
       ({ member, score }): ScoredDescriptor => ({
         name: member.name,
         score,
-        reasons: [`domain ${member.domain ?? UNCATEGORIZED}`, "deterministic within domain"],
+        reasons:
+          domains.length === 0
+            ? ["deterministic"]
+            : [`domain ${member.domain ?? UNCATEGORIZED}`, "deterministic within domain"],
       }),
     );
   };

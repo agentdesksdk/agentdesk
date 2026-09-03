@@ -7,11 +7,12 @@ deliberately does not do, and how to replace its scoring.
 `docs/architecture.md` covers the surrounding pipeline. This is only the
 scoring step.
 
-## The default has not changed
+## The deterministic primitive has not changed
 
 `rankCapabilities(capabilities, ctx, query, limit)` is the scorer that
-shipped, and it is still what runs when nobody asks for anything else. Its
-weights, its tie-breaking, and its budget are unchanged.
+shipped. Its weights, its tie-breaking, and its budget are unchanged. The
+standalone `routeTask` API still defaults to this scorer, which keeps the
+deterministic evaluation arm and existing direct callers stable.
 
 | Signal | Weight | Matches when |
 | --- | --- | --- |
@@ -93,10 +94,19 @@ client reads the tree's descriptions and chooses the domain the way a
 person would; that choice is what roadmap item 2.4 measures with
 transcripts.
 
+The runtime's no-domain `find_capabilities` path now uses that lexical
+domain step automatically, once per task clause. A client no longer has to
+make a second call merely to get the hierarchy's better ranking. Supplying
+`domain` or `domain/subdomain` remains supported and overrides inference.
+Policy and availability filtering happen before either path, and both
+publish at most the same five capabilities.
+
 ## Three strategies
 
 `routeTask(candidates, request, strategy, eligible)` is the V2 entry point.
-It is async, and it defaults to the deterministic scorer above.
+It is async, and as a standalone ranking primitive it defaults to the
+deterministic scorer above. The AgentDesk runtime deliberately chooses the
+hierarchical scorer for its autonomous `find_capabilities` path.
 
 **`deterministic`** is `rankCapabilities` in a structured envelope. Same
 order, same scores.
@@ -199,23 +209,22 @@ published almost the whole catalog.
 Nothing widens the surface. A graph edge can change which capabilities are
 visible; it cannot change how many.
 
-## Narrowing in two calls
+## Automatic narrowing with an explicit override
 
 A catalog of four hundred capabilities does not fit in one ranked answer,
-and no model runs on the page to pick the right five. So `find_capabilities`
-answers at two levels. Called with a `query` and no `domain`, it is the
-single call it always was, ranked by the deterministic scorer over the
-routable catalog, and it carries `domains` beside the matches: the
-catalog's tree, each domain with a description drawn from its members'
-vocabulary, a count, and its subdomains when it has more than one. Called
-with `domain`, or `domain/subdomain`, it ranks inside that branch under
-the same budget and the same `routable` predicate, so a denied capability
-is absent from every level: not counted, not in a description, not ranked
-when the query names it. An unknown domain routes nothing and answers with
-the tree. A client that skips the first call loses nothing; a client that
-reads the tree chooses the domain the way a person would, and that choice
-is what removes the cross-domain collision the reference lists, the refund
-phrased around the customer that routed five customer tools.
+and no model runs on the page to pick the right five. `find_capabilities`
+therefore uses the catalog tree at two levels. Called with a `query` and no
+`domain`, it infers the strongest domain from the query and ranks inside
+that branch. It also carries `domains` beside the matches: the catalog's
+tree, each domain with a description drawn from its members' vocabulary, a
+count, and its subdomains when it has more than one. Called with `domain`,
+or `domain/subdomain`, it treats that branch as an explicit override and
+ranks inside it under the same budget and the same `routable` predicate.
+A denied capability is absent from every level: not counted, not in a
+description, and not ranked when the query names it. An unknown explicit
+domain routes nothing and answers with the tree. A client may use one call
+for autonomous routing or read the tree and override the branch when human
+or model knowledge is stronger than the lexical inference.
 
 - **How a capability declares its subdomain.** `subdomain` beside
   `domain`; absent, it defaults from its domain. A domain lists

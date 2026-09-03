@@ -11,11 +11,14 @@ const HERO =
   "Find Alice Johnson's unshipped order. If she paid shipping, refund the shipping fee. Do not perform the refund without my approval.";
 
 /**
- * The routing decision for the hero prompt as the Inspector rendered it
- * before the tree existed, captured from main. vitest runs with apps/demo
- * as its working directory; jsdom gives import.meta.url no file scheme.
+ * The autonomous routing decision for the hero prompt. vitest runs with
+ * apps/demo as its working directory; jsdom gives import.meta.url no file
+ * scheme.
  */
-const HERO_DECISION = readFileSync(join(process.cwd(), "tests", "fixtures", "routing-decision-hero.html"), "utf8");
+const HERO_DECISION = readFileSync(
+  join(process.cwd(), "tests", "fixtures", "routing-decision-hero.html"),
+  "utf8",
+).trimEnd();
 
 function typeQuery(view: RenderResult, text: string) {
   fireEvent.change(view.getByRole("textbox", { name: "Task to route" }), { target: { value: text } });

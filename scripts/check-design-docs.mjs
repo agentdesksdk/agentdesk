@@ -215,10 +215,10 @@ const CLAIMS = [
   ["frappe-adapter.md", /thrown before any write is dispatched/, "present", "the Frappe design refuses a stale stamp before submit is called"],
   ["frappe-adapter.md", /the stamp is a\s+coarser version than a row digest, in both directions/, "present", "the Frappe design states what the modified stamp does to the digest guarantee"],
   ["frappe-adapter.md", /A response that never arrived is indeterminate/, "present", "the Frappe design treats a lost submit response as indeterminate, not failed"],
-  ["docs/routing.md", /##\s*Narrowing in two calls/, "present", "routing states the two-call domain tree"],
+  ["docs/routing.md", /##\s*Automatic narrowing with an explicit override/, "present", "routing states the autonomous domain tree and explicit override"],
   ["docs/routing.md", /absent, it defaults from its domain/, "present", "routing says how a capability declares its subdomain"],
   ["docs/routing.md", /cached by the admitted set/, "present", "routing says how the tree is cached"],
-  ["docs/routing.md", /A client that skips the first call loses nothing/, "present", "routing says the single call is unchanged"],
+  ["docs/routing.md", /one call\s+for autonomous routing/, "present", "routing says one call uses the tree autonomously"],
   ["docs/routing.md", /##\s*[\d.]+% with a lexical domain step/, "present", "routing reports the hierarchical scorer against the reference"],
   ["docs/routing.md", /That is not a wide margin/, "present", "routing says plainly what the lexical step did not achieve"],
   ["docs/architecture.md", /##\s*The provider seam/, "present", "architecture states the capability provider seam"],
@@ -281,8 +281,9 @@ const REFERENCE_FIGURES = [
 
 /**
  * The hierarchical cell, reported beside the reference. The deterministic
- * cell of the same run has to agree with the reference, which is what
- * "the single call is unchanged" means in numbers.
+ * cell of the same run has to agree with the reference, which keeps the
+ * standalone deterministic comparison stable while the runtime selects the
+ * hierarchical scorer for autonomous discovery.
  */
 REFERENCE_FIGURES.push({
   report: "scripts/evals/runs/routing-2.2-single/report.json",

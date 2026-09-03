@@ -193,7 +193,7 @@ describe("a denied capability is absent from every level", () => {
   });
 });
 
-describe("the two-call path lands what the single call missed", () => {
+describe("the hierarchy lands documented routing misses without requiring a second call", () => {
   const misses: Array<{ id: string; query: string; domain: string; expected: string }> = [
     {
       id: "billing-refund-shipping",
@@ -222,13 +222,13 @@ describe("the two-call path lands what the single call missed", () => {
   ];
 
   for (const miss of misses) {
-    it(`${miss.id}: the single call misses, the domain call lands ${miss.expected}`, async () => {
+    it(`${miss.id}: the autonomous and explicit-domain paths both land ${miss.expected}`, async () => {
       const { find } = await booted(collidingCatalog());
 
       const single = await find({ query: miss.query });
       const narrowed = await find({ query: miss.query, domain: miss.domain });
 
-      expect(single.matches.map((m) => m.name)).not.toContain(miss.expected);
+      expect(single.matches.map((m) => m.name)).toContain(miss.expected);
       expect(narrowed.matches.map((m) => m.name)).toContain(miss.expected);
       expect(narrowed.domain).toBe(miss.domain);
       for (const match of narrowed.matches) {
@@ -247,16 +247,15 @@ describe("the two-call path lands what the single call missed", () => {
   });
 });
 
-describe("the single-call path is what it was", () => {
-  it("ranks exactly as rankCapabilities does, and adds the domain tree beside the matches", async () => {
-    const catalog = collidingCatalog();
-    const { find, runtime } = await booted(catalog);
+describe("the single-call path uses the hierarchy autonomously", () => {
+  it("adds the domain tree beside automatically narrowed matches", async () => {
+    const { find, runtime } = await booted(collidingCatalog());
     const query = "The customer on 10428 says we charged her for delivery she never asked for, can we give that money back";
 
     const payload = await find({ query });
 
-    const expected = rankCapabilities(catalog, { route: "/", state: {} }, query).map((r) => r.capability.name);
-    expect(payload.matches.map((m) => m.name)).toEqual(expected);
+    expect(payload.matches.map((m) => m.name)).toContain("refund_shipping_fee");
+    expect(payload.matches.every((match) => match.description.endsWith("(billing)"))).toBe(true);
     expect(payload.domain).toBeUndefined();
     const names = ["billing", "customers", "invoices", "orders", "payments", "shipping"];
     expect(payload.domains!.map((d) => d.name)).toEqual(names);

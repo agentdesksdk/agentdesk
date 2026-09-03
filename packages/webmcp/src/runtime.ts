@@ -19,6 +19,7 @@ import {
 import { CapabilityCatalog } from "./catalog.ts";
 import {
   catalogHierarchy,
+  rankHierarchically,
   rankWithin,
   viewOf,
   type CatalogDomain,
@@ -100,7 +101,6 @@ import {
   compareNames,
   DEFAULT_ROUTED,
   isRouteError,
-  rankCapabilities,
   routeCapability,
   tokenize,
   type RankedCapability,
@@ -3632,13 +3632,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   }
 
   /**
-   * `find_capabilities`. With no domain it is the single call it always
-   * was, ranked by `rankCapabilities` over the routable catalog, plus the
-   * domain tree beside the matches so a client can narrow. With a domain,
-   * or `domain/subdomain`, it ranks inside that branch under the same
-   * budget and the same routable predicate, so a denied capability is
-   * absent from every level. An unknown domain routes nothing and answers
-   * with the tree.
+   * `find_capabilities`. With no domain the runtime infers relevant branches
+   * and ranks across their members, so a one-call client gets the hierarchy's
+   * context without choosing a branch first. With a domain, or
+   * `domain/subdomain`, it ranks inside that branch under the same budget and
+   * routable predicate, so a denied capability is absent from every level.
+   * An unknown domain routes nothing and answers with the tree.
    */
   async function findCapabilities(
     query: string,
@@ -3659,7 +3658,15 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     } else if (unknownDomain) {
       ranked = [];
     } else {
-      ranked = rankCapabilities(appCaps, context, query);
+      ranked = rankHierarchically(
+        appCaps,
+        tree(),
+        query,
+        viewOf(query, context),
+        routable,
+      )
+        .slice(0, DEFAULT_ROUTED)
+        .map(({ member, score }) => ({ capability: member, score }));
     }
     let fallback = false;
     if (ranked.length === 0 && !unknownDomain) {

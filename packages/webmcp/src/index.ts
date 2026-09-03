@@ -37,6 +37,7 @@ export {
   hierarchicalScorer,
   hierarchicalScorerWith,
   NEAR_TIE,
+  rankHierarchically,
   type CatalogDomain,
   type CatalogHierarchy,
   type CatalogSubdomain,
