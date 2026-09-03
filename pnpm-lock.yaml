@@ -23,6 +23,9 @@ importers:
         specifier: ^7.8.2
         version: 7.18.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
     devDependencies:
+      '@agentdesksdk/rescue':
+        specifier: workspace:*
+        version: link:../rescue
       '@testing-library/dom':
         specifier: ^10.4.1
         version: 10.4.1
