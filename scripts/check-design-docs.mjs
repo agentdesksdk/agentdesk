@@ -280,23 +280,41 @@ const REFERENCE_FIGURES = [
  * "the single call is unchanged" means in numbers.
  */
 REFERENCE_FIGURES.push({
-  report: "scripts/evals/runs/routing-2.2/report.json",
+  report: "scripts/evals/runs/routing-2.2-single/report.json",
   phrases: (report) => {
     const pct = (v) => `${(v * 100).toFixed(1)}%`;
     const det = report.cells.deterministic.metrics;
     const cell = report.cells["custom:hierarchical"];
     const hit = cell.metrics.terminalInRoutedSet;
     const failing = (c) => new Set(c.failing.map((f) => f.taskId));
-    const before = failing(report.cells.deterministic);
-    const after = failing(cell);
-    const gained = [...before].filter((id) => !after.has(id)).length;
-    const lost = [...after].filter((id) => !before.has(id)).length;
+    const gainedLost = (r, c) => {
+      const before = failing(r.cells.deterministic);
+      const after = failing(c);
+      return {
+        gained: [...before].filter((id) => !after.has(id)).length,
+        lost: [...after].filter((id) => !before.has(id)).length,
+      };
+    };
+    const first = gainedLost(report, cell);
+    // The shipped step on the second held-out set, in the same sentence
+    // family, so the section quotes both seeds from their own runs.
+    const holdout = JSON.parse(readFileSync(join(root, "scripts/evals/runs/routing-holdout-2-single/report.json"), "utf8"));
+    const second = holdout.cells["custom:hierarchical"];
+    const secondDet = holdout.cells.deterministic.metrics;
+    const secondHit = second.metrics.terminalInRoutedSet;
+    const later = gainedLost(holdout, second);
+    // The first measurement's near tie, kept as the ablation it was.
+    const earlier = JSON.parse(readFileSync(join(root, "scripts/evals/runs/routing-2.2/report.json"), "utf8"));
+    const earlierCell = earlier.cells["custom:hierarchical"];
     return {
       "docs/routing.md": [
         [`## ${pct(hit.value)} with a lexical domain step`, "the hierarchical heading figure"],
         [`for ${pct(hit.value)} of tasks, ${hit.numerator} of ${hit.denominator}, beside the reference's ${pct(det.terminalInRoutedSet.value)}`, "the hierarchical expected-in-routed-set sentence"],
         [`a tie at the cut in ${pct(cell.metrics.tieAtCut.value)} of tasks against ${pct(det.tieAtCut.value)}`, "the hierarchical tie sentence"],
-        [`It gains ${gained} tasks and loses ${lost}`, "the gained-and-lost sentence"],
+        [`It gains ${first.gained} tasks and loses ${first.lost}`, "the gained-and-lost sentence"],
+        [`it routes ${pct(secondHit.value)} of tasks, ${secondHit.numerator} of ${secondHit.denominator}, against the deterministic scorer's ${pct(secondDet.terminalInRoutedSet.value)}, with a tie at the cut in ${pct(second.metrics.tieAtCut.value)} of tasks against ${pct(secondDet.tieAtCut.value)}, gaining ${later.gained} and losing ${later.lost}`, "the second-seed sentence"],
+        [`scored ${pct(earlierCell.metrics.terminalInRoutedSet.value)} on the first set`, "the first measurement's near-tie figure"],
+        [`at a tie rate of ${pct(earlierCell.metrics.tieAtCut.value)}`, "the first measurement's tie rate"],
         [`--scorer ${cell.scorer.path}`, "the scorer path"],
       ],
     };
@@ -358,8 +376,10 @@ REFERENCE_FIGURES.push({
   phrases: (report) => {
     const read = (path) => JSON.parse(readFileSync(join(root, path), "utf8"));
     const routing = read("scripts/evals/runs/routing-reference/report.json");
-    const step = read("scripts/evals/runs/routing-2.2/report.json");
-    const holdout = read("scripts/evals/runs/routing-holdout-2/report.json");
+    // The shipped step's own runs, single-domain on both seeds; the 0.75
+    // runs stay committed as the ablation docs/evaluations.md describes.
+    const step = read("scripts/evals/runs/routing-2.2-single/report.json");
+    const holdout = read("scripts/evals/runs/routing-holdout-2-single/report.json");
     const pct = (v) => `${(v * 100).toFixed(1)}%`;
     const num = (v) => Math.round(v).toLocaleString("en-US");
     const cell = (key) => report.cells[key].metrics;
