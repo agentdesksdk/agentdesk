@@ -248,7 +248,7 @@ describe("result and routing hardening", () => {
     expect(tool?.annotations?.readOnlyHint).toBe(false);
   });
 
-  it("switching flat to routed compacts tombstones instead of keeping 78", async () => {
+  it("switching flat to routed compacts tombstones instead of keeping the full catalog", async () => {
     const model = createMockModelContext();
     const runtime = createAgentDeskRuntime({
       registerTool: model.registerTool,

@@ -114,6 +114,7 @@ export const inventoryCapabilities: Capability[] = [
     title: "Adjust stock",
     description: "Apply a positive or negative stock adjustment after a count.",
     domain,
+    intents: ["adjust stock", "stock adjustment"],
     keywords: ["adjust", "correct", "stock"],
     entities: ["sku"],
     inputSchema: obj(
@@ -140,7 +141,18 @@ export const inventoryCapabilities: Capability[] = [
           target.stock += delta;
         }
       });
-      return { sku: product.sku, stock: product.stock + delta };
+      return receipt({
+        entity: `Product ${product.sku}`,
+        changes: [
+          {
+            field: `Product ${product.sku} stock`,
+            before: product.stock,
+            after: product.stock + delta,
+          },
+        ],
+        undoable: false,
+        result: { sku: product.sku, stock: product.stock + delta },
+      });
     },
     verify: (input, _ctx, changes) => {
       const sku = str(input, "sku");

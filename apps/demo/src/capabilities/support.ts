@@ -1,6 +1,7 @@
 import {
   AVAILABLE,
   CapabilityUnavailableError,
+  receipt,
   unavailable,
   type Capability,
 } from "@agentdesksdk/webmcp";
@@ -100,6 +101,45 @@ export const supportCapabilities: Capability[] = [
     },
   }),
   createUpdateCapability({
+    name: "assign_ticket",
+    title: "Assign ticket",
+    description: "Assign a support ticket to a named support agent.",
+    domain,
+    intents: ["assign support ticket", "assign ticket"],
+    keywords: ["assign", "assignee", "agent", "ticket", "support"],
+    entities: ["ticketId"],
+    routes: ["/support"],
+    inputSchema: obj(
+      { ticket_id: s("Ticket id"), agent: s("Support agent name") },
+      ["ticket_id", "agent"],
+    ),
+    presentation: {
+      route: (input) => `/support/${String(input.ticket_id ?? "")}`,
+      reveal: "ticket-details",
+      message: (input) =>
+        `Assigning ${String(input.ticket_id ?? "ticket")} to ${String(input.agent ?? "an agent")}`,
+    },
+    execute: (input) => {
+      const ticket = requireTicket(input);
+      const assignee = requireStr(input, "agent");
+      const before = ticket.assignee;
+      mutate((draft) => {
+        const target = draft.tickets.find((candidate) => candidate.id === ticket.id);
+        if (target) {
+          target.assignee = assignee;
+        }
+      });
+      return receipt({
+        entity: `Ticket ${ticket.id}`,
+        changes: [
+          { field: `Ticket ${ticket.id} assignee`, before, after: assignee },
+        ],
+        undoable: false,
+        result: { ticket_id: ticket.id, assignee },
+      });
+    },
+  }),
+  createUpdateCapability({
     name: "create_ticket",
     title: "Create ticket",
     description: "Open a new support ticket for a customer.",
@@ -128,6 +168,7 @@ export const supportCapabilities: Capability[] = [
           status: "open",
           priority:
             priority === "low" || priority === "high" ? priority : "normal",
+          assignee: null,
           createdAt: nowIso(),
           messages: [
             { from: "customer", text: subject, at: nowIso() },

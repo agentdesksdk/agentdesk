@@ -209,6 +209,7 @@ export const orderCapabilities: Capability[] = [
     title: "Add order note",
     description: "Append an internal note to an order.",
     domain,
+    intents: ["add internal note to order", "add order note"],
     keywords: ["note", "order"],
     entities: ["orderId"],
     inputSchema: obj({ order_id: s("Order id"), note: s("Note text") }, [
@@ -221,7 +222,18 @@ export const orderCapabilities: Capability[] = [
       mutate((draft) => {
         draft.orders.find((o) => o.id === order.id)?.notes.push(note);
       });
-      return { order_id: order.id, note_added: true };
+      return receipt({
+        entity: `Order #${order.id}`,
+        changes: [
+          {
+            field: `Order #${order.id} internal notes`,
+            before: order.notes.length,
+            after: order.notes.length + 1,
+          },
+        ],
+        undoable: false,
+        result: { order_id: order.id, note_added: true },
+      });
     },
     verify: (input) => {
       const orderId = str(input, "order_id")?.replace(/^#/, "");

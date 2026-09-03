@@ -108,6 +108,7 @@ const CASES: Record<string, ExerciseCase> = {
   create_support_note: {
     input: { ticket_id: "T-2001", note: "Warehouse confirmed the mispick." },
   },
+  assign_ticket: { input: { ticket_id: "T-2001", agent: "Mia" } },
   escalate_ticket: { input: { ticket_id: "T-2001" } },
   close_ticket: { input: { ticket_id: "T-2001" } },
   reopen_ticket: { input: { ticket_id: "T-2005" } },

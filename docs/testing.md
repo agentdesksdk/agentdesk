@@ -182,7 +182,7 @@ page.
 1. Open `/agentdesk` and connect a WebMCP client.
 2. Prompt: *Find Alice Johnson's unshipped order. If she paid shipping,
    refund the shipping fee. Do not perform the refund without my approval.*
-3. Watch the inspector: 78 → ≤6 routed tools after `find_capabilities`.
+3. Watch the inspector: 79 → ≤6 routed tools after `find_capabilities`.
 4. The refund returns `APPROVAL_REQUIRED`; the approval card shows order
    #10428, Alice Johnson, $18.00.
 5. Approve. Order #10428's shipping shows "Refunded", Billing shows a

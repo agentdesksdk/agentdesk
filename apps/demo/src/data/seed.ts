@@ -206,6 +206,7 @@ export function buildSeed(): DemoState {
       subject,
       status,
       priority,
+      assignee: null,
       createdAt: iso(2026, 7, 2 + i * 3),
       messages: [
         { from: "customer", text: subject, at: iso(2026, 7, 2 + i * 3) },
@@ -222,6 +223,7 @@ export function buildSeed(): DemoState {
     subject: `Shipping fee on order ${hero.id}`,
     status: "open",
     priority: "normal",
+    assignee: null,
     createdAt: iso(2026, 8, 22),
     messages: [
       {

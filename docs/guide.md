@@ -16,7 +16,7 @@ Hero prompt:
 > shipping fee. Do not perform the refund without my approval.
 
 Order **#10428** is seeded: processing, not shipped, $18.00 shipping paid,
-not refunded. The flow shows routing (78 → ≤6), typed native activation, the
+not refunded. The flow shows routing (79 → ≤6), typed native activation, the
 approval card, the audit timeline, and the state change. **Reset Demo**
 restores the pristine seed instantly.
 

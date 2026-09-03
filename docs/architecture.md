@@ -271,7 +271,7 @@ partitions those names. That is where "what now" lives: the step this one
 needed, the step it just unblocked, the alternative its author named, and
 the working set the agent already holds. It is bounded by the routing
 budget plus a capability's declared edges, so a result in flat exposure
-does not list seventy-eight names. The routing report's own lists are the
+does not list dozens of names. The routing report's own lists are the
 matches it offered plus the repairs those matches named. Bootstrap tools
 are in neither list, because they are the constant surface.
 

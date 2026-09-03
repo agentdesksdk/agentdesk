@@ -57,7 +57,7 @@ Files `apps/demo/src/routes/Overview.tsx`, `apps/demo/src/components/Inspector.t
 Gate: the counters read from the snapshot, never from a constant.
 
 **0.2 Show the routing decision.** Demo lane, small, same files as 0.1 so
-same PR. The Inspector shows "78 candidates, these 6, because", with the
+same PR. The Inspector shows "79 candidates, these 6, because", with the
 score per capability and the hybrid `reasons` when present. The data is in
 `find_capabilities` output and `lastRouting` today. Gate: the list is the
 snapshot's routed set in its order, and a screenshot shows a tie broken by

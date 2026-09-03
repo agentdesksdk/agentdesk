@@ -21,7 +21,14 @@ const MISSED_ONE_CALL_TASKS = [
     prompt: "Get ticket T-2001.",
     expected: "get_ticket",
   },
+  {
+    prompt: "Assign support ticket T-2001 to agent Mia.",
+    expected: "assign_ticket",
+  },
 ] as const;
+
+const MULTI_STEP_PROMPT =
+  "Add an internal note to order 10428, mark order 10408 shipped, assign support ticket T-2001 to agent Mia, adjust stock for a product, and apply a customer credit.";
 
 describe("default autonomous routing", () => {
   beforeEach(() => {
@@ -98,5 +105,27 @@ describe("default autonomous routing", () => {
       expect(snapshot.tombstones.length).toBeLessThanOrEqual(6);
       expect(tools.size).toBeLessThanOrEqual(16);
     }
+  });
+
+  it("keeps one actionable capability for every clause of a five-step request", async () => {
+    const runtime = createAgentDeskRuntime({
+      capabilities,
+      registerTool: async () => {},
+      staging: stagingAdapter,
+    });
+    await runtime.start();
+
+    await runtime.routeTask(MULTI_STEP_PROMPT);
+
+    expect(runtime.getSnapshot().routedTools).toEqual(
+      expect.arrayContaining([
+        "add_order_note",
+        "mark_order_shipped",
+        "assign_ticket",
+        "adjust_stock",
+        "issue_credit",
+      ]),
+    );
+    expect(runtime.getSnapshot().routedTools).toHaveLength(5);
   });
 });

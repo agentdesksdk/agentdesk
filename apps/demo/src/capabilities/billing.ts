@@ -216,8 +216,8 @@ export const billingCapabilities: Capability[] = [
     // prepared before the human issued one would mint a duplicate. Re-derive
     // against current state at approval instead of merging the stale write.
     commitMode: "rederive",
-    intents: ["issue credit", "goodwill credit"],
-    keywords: ["credit", "goodwill", "compensate"],
+    intents: ["issue credit", "goodwill credit", "apply customer credit"],
+    keywords: ["credit", "customer", "goodwill", "compensate"],
     entities: ["customerId"],
     inputSchema: obj(
       {
@@ -461,7 +461,18 @@ export const billingCapabilities: Capability[] = [
           target.total = newTotal;
         }
       });
-      return { invoice_id: invoice.id, percent, new_total: newTotal };
+      return receipt({
+        entity: `Invoice ${invoice.id}`,
+        changes: [
+          {
+            field: `Invoice ${invoice.id} total`,
+            before: invoice.total,
+            after: newTotal,
+          },
+        ],
+        undoable: false,
+        result: { invoice_id: invoice.id, percent, new_total: newTotal },
+      });
     },
   }),
   createUpdateCapability({

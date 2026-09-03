@@ -46,6 +46,7 @@ export function Support() {
               <th>Customer</th>
               <th>Opened</th>
               <th>Priority</th>
+              <th>Assignee</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -67,6 +68,7 @@ export function Support() {
                   <td>
                     <Pill value={ticket.priority} />
                   </td>
+                  <td>{ticket.assignee ?? "Unassigned"}</td>
                   <td>
                     <Pill value={ticket.status} />
                   </td>

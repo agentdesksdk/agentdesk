@@ -370,15 +370,25 @@ export type RankedMember<M extends HierarchyMember> = { member: M; score: number
  * Keep the domain choices of distinct task clauses separate. A multi-step
  * request such as "find the order. refund its shipping" needs both branches;
  * scoring the whole paragraph as one bag of words lets the repeated shipping
- * terms erase the first step. `then` is the only word boundary here because
- * splitting ordinary "and" phrases would turn one object name into two tasks.
+ * terms erase the first step. Commas become boundaries only when three or
+ * more segments make an enumerated request likely; a single prose comma stays
+ * inside its sentence.
  */
 function taskClauses(query: string): string[] {
-  const clauses = query
+  const hardClauses = query
     .split(/[!?;]+|\.(?=\s|$)|\bthen\b/iu)
     .map((clause) => clause.trim())
     .filter((clause) => clause !== "");
-  return clauses.length === 0 ? [query] : clauses;
+  if (hardClauses.length > 1) {
+    return hardClauses;
+  }
+  const listClauses = query
+    .split(/,+/u)
+    .map((clause) => clause.trim())
+    .filter((clause) => clause !== "");
+  // A single comma is ordinary prose surprisingly often. Three or more
+  // segments are enough evidence that the request is enumerating work.
+  return listClauses.length >= 3 ? listClauses : hardClauses.length === 0 ? [query] : hardClauses;
 }
 
 function inferredDomains<M extends HierarchyMember>(
@@ -434,7 +444,43 @@ export function rankHierarchically<M extends HierarchyMember>(
       .sort((a, b) => b.score - a.score || compareNames(a.member.name, b.member.name));
   }
   const narrowed = domains.flatMap((domain) => hierarchy.within(domain, routable) ?? []);
-  return rankWithin(narrowed, view, hierarchy.fold(query, routable));
+  const ranked = rankWithin(narrowed, view, hierarchy.fold(query, routable));
+  const clauses = taskClauses(query);
+  const actionableClauses = clauses.filter(
+    (clause) => !/^(?:do not|don't|never|without)\b/iu.test(clause),
+  );
+  // Domain inference already preserves a two-step request. Slot reservation
+  // is for longer plans where the normal top-five cut can erase whole steps.
+  if (actionableClauses.length < 3) {
+    return ranked;
+  }
+
+  // Reserve the front of the result for one concrete operation per clause.
+  // The publisher owns the final budget, so putting clause heads first keeps
+  // a five-step task from spending all five slots on one vocabulary-rich
+  // branch. Remaining matches retain the whole-query ranking.
+  const heads: RankedMember<M>[] = [];
+  const selected = new Set<string>();
+  for (const clause of actionableClauses) {
+    const clauseView: RoutingView = {
+      ...view,
+      tokens: new Set(tokenize(clause)),
+    };
+    // An exact operation intent is stronger evidence than a broad domain.
+    // Choosing the domain first made "mark order shipped" enter the orders
+    // branch and excluded the shipping operation that named the intent.
+    const clauseRanking = rankWithin(
+      members.filter(routable),
+      clauseView,
+      hierarchy.fold(clause, routable),
+    );
+    const head = clauseRanking.find((entry) => !selected.has(entry.member.name));
+    if (head !== undefined) {
+      selected.add(head.member.name);
+      heads.push(head);
+    }
+  }
+  return [...heads, ...ranked.filter((entry) => !selected.has(entry.member.name))];
 }
 
 /**

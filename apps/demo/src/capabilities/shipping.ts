@@ -497,6 +497,7 @@ export const shippingCapabilities: Capability[] = [
     title: "Mark order shipped",
     description: "Mark a processing order as shipped and generate tracking.",
     domain,
+    intents: ["mark order shipped", "ship order"],
     keywords: ["ship", "dispatch", "shipped"],
     entities: ["orderId"],
     availability: (ctx) => {
@@ -521,6 +522,8 @@ export const shippingCapabilities: Capability[] = [
         );
       }
       const tracking = `TRK-${600000 + Number(order.id)}`;
+      const carrier =
+        order.carrier === "unassigned" ? "Northwind Express" : order.carrier;
       mutate((draft) => {
         const target = draft.orders.find((o) => o.id === order.id);
         if (target) {
@@ -531,7 +534,32 @@ export const shippingCapabilities: Capability[] = [
           }
         }
       });
-      return { order_id: order.id, status: "shipped", tracking_number: tracking };
+      return receipt({
+        entity: `Order #${order.id}`,
+        changes: [
+          { field: `Order #${order.id} status`, before: order.status, after: "shipped" },
+          {
+            field: `Order #${order.id} tracking number`,
+            before: order.trackingNumber,
+            after: tracking,
+          },
+          ...(carrier !== order.carrier
+            ? [
+                {
+                  field: `Order #${order.id} carrier`,
+                  before: order.carrier,
+                  after: carrier,
+                },
+              ]
+            : []),
+        ],
+        undoable: false,
+        result: {
+          order_id: order.id,
+          status: "shipped",
+          tracking_number: tracking,
+        },
+      });
     },
   }),
   createUpdateCapability({
