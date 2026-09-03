@@ -159,7 +159,7 @@ test("the reference report says plainly what the current scorer gets wrong", () 
 });
 
 test(
-  "the probe reports schema bytes the way the runtime measures them, and the default budget is five",
+  "the hierarchical probe reports schema bytes the way the autonomous runtime measures them, under the same budget",
   { skip: sdk ? false : "dist not built" },
   async () => {
     const { capabilities, specs } = buildRoutingCatalog(sdk.defineCapability, 2026);
@@ -169,8 +169,24 @@ test(
       repoRoot,
       tokenize: sdk.tokenize,
     });
-    const probed = await probeRouting({ routeTask: sdk.routeTask, capabilities, task, strategy: "deterministic", runId: "t" });
-    assert.equal(probed.strategy, "deterministic");
+    const runtimeStrategy = {
+      name: "custom:runtime-hierarchical",
+      kind: "custom",
+      path: "@agentdesksdk/webmcp#hierarchicalScorer",
+      strategy: {
+        kind: "custom",
+        scorer: sdk.hierarchicalScorer,
+        onFailure: "refuse",
+      },
+    };
+    const probed = await probeRouting({
+      routeTask: sdk.routeTask,
+      capabilities,
+      task,
+      strategy: runtimeStrategy,
+      runId: "t",
+    });
+    assert.equal(probed.strategy, "custom:runtime-hierarchical");
     assert.equal(probed.observed.budget, ROUTED_BUDGET);
     assert.ok(probed.observed.routed.length <= ROUTED_BUDGET);
     assert.equal(typeof probed.observed.tieAtCut, "boolean");

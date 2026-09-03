@@ -5,7 +5,11 @@ import { stagingAdapter } from "../capabilities/staged.ts";
 import { StatCard } from "../components/bits.tsx";
 import { useBenchmark, useRuntime } from "../components/hooks.ts";
 import { resetStore } from "../data/store.ts";
-import { benchmark, estimateTokens } from "../instrumentation/benchmark.ts";
+import {
+  benchmark,
+  estimateTokens,
+  isComparableRun,
+} from "../instrumentation/benchmark.ts";
 import {
   BOOTSTRAP,
   REFUND_SHIPPING_HAPPY,
@@ -175,8 +179,12 @@ export function Benchmark() {
               </span>
             </>
           ) : (
-            <button className="primary" onClick={() => benchmark.startRun()}>
-              Start run in current mode
+            <button
+              className="primary"
+              disabled={bench.starting}
+              onClick={() => void benchmark.startRun()}
+            >
+              {bench.starting ? "Resetting to benchmark seed…" : "Start fresh run in current mode"}
             </button>
           )}
           <button onClick={() => benchmark.clearRuns()}>Clear saved runs</button>
@@ -186,6 +194,7 @@ export function Benchmark() {
           <thead>
             <tr>
               <th>Mode</th>
+              <th>Comparable</th>
               <th>Peak tools</th>
               <th>Bytes before routing</th>
               <th>Bytes peak (task)</th>
@@ -200,7 +209,7 @@ export function Benchmark() {
           <tbody>
             {bench.runs.length === 0 ? (
               <tr>
-                <td colSpan={10} className="empty">
+                <td colSpan={11} className="empty">
                   No saved runs yet.
                 </td>
               </tr>
@@ -208,6 +217,7 @@ export function Benchmark() {
               bench.runs.map((run) => (
                 <tr key={run.id}>
                   <td>{run.mode === "flat" ? "baseline" : "agentdesk"}</td>
+                  <td>{isComparableRun(run) ? "current" : "stale"}</td>
                   <td>{run.activeTools}</td>
                   <td>{run.schemaBytesStart.toLocaleString()}</td>
                   <td>{run.schemaBytesPeak.toLocaleString()}</td>
@@ -234,6 +244,11 @@ export function Benchmark() {
       <div className="panel">
         <h2>What is and is not measured</h2>
         <ul className="note-list">
+          <li>
+            Starting a timed run resets Meridian Ops to the canonical seed.
+            Only rows from this benchmark revision, scenario, and catalog are
+            marked comparable; older saved rows stay visible as stale.
+          </li>
           <li>
             Schema bytes are the UTF-8 length of the serialized tool
             definitions actually registered with WebMCP right now.
