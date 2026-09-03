@@ -39,22 +39,19 @@ body {
   white-space: nowrap;
 }
 
+/* One column: header, the scene, the communication band, the Inspector. */
 .shell {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  grid-template-rows: 56px minmax(0, 1fr);
-  grid-template-areas:
-    "topbar topbar"
-    "main rail";
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
 }
 
 .topbar {
-  grid-area: topbar;
   display: flex;
   align-items: center;
   gap: 16px;
   padding: 0 18px;
+  min-height: 56px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
 }
@@ -76,6 +73,38 @@ body {
   gap: 8px;
 }
 
+/* The agent's connection, as words with a dot beside them. */
+.agent-status {
+  font-size: 12.5px;
+  padding: 4px 10px 4px 22px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  position: relative;
+  white-space: nowrap;
+}
+
+.agent-status::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-top: -3.5px;
+  border-radius: 50%;
+  background: var(--line);
+}
+
+.agent-status.connected {
+  color: var(--good);
+  border-color: var(--good);
+}
+
+.agent-status.connected::before {
+  background: var(--good);
+}
+
 .presence {
   display: flex;
   align-items: center;
@@ -86,6 +115,8 @@ body {
   border: 1px solid var(--line);
   border-radius: 999px;
   min-width: 0;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .presence .dot {
@@ -106,75 +137,211 @@ body {
   text-overflow: ellipsis;
 }
 
-.mission {
-  grid-area: main;
-  padding: 20px 22px 40px;
-  min-width: 0;
-}
-
-.mission h1 {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 22px;
-  margin: 0 0 16px;
-}
-
-.pill {
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 700;
-  padding: 3px 8px;
-  border-radius: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  border: 1px solid var(--line);
-  color: var(--ink-soft);
-}
-
-.pill.mission-launched {
-  color: var(--good);
-  border-color: var(--good);
-}
-
-.panels {
+/* The stage: the scene fills the width; on a narrow screen it scrolls sideways in its own box. */
+.stage {
+  flex: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 12px;
-  margin-bottom: 18px;
+  place-items: center;
+  padding: 8px 12px 0;
+  min-height: 0;
+  overflow-x: auto;
 }
 
-.panel {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 14px 16px;
-  min-width: 0;
+.scene {
+  width: 100%;
+  max-width: 1400px;
+  max-height: 60vh;
+  display: block;
+  font-family: inherit;
 }
 
-.panel h2 {
-  margin: 0 0 8px;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--ink-soft);
+.scene .star {
+  fill: #ffffff;
+  opacity: 0.55;
 }
 
-.panel .value {
+.scene .label {
+  fill: var(--ink);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.scene .status {
+  fill: var(--ink-soft);
+  font-size: 15px;
+  letter-spacing: 0.04em;
+}
+
+.scene .mission {
+  font-size: 18px;
+  fill: var(--ink);
+  font-weight: 600;
+}
+
+.scene .mission .id {
+  fill: var(--ink-soft);
+}
+
+.scene .hull {
+  fill: #1c2735;
+  stroke: #3a4a5e;
+  stroke-width: 2;
+}
+
+.scene .window {
+  fill: #0b1017;
+  stroke: #3a4a5e;
+}
+
+.scene .engine {
+  fill: #141c27;
+  stroke: #3a4a5e;
+}
+
+.scene .beacon {
+  fill: var(--danger);
+  animation: beacon 1.6s ease-in-out infinite;
+}
+
+@keyframes beacon {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.scene .route {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-dasharray: 10 8;
+  opacity: 0.9;
+}
+
+.scene .drone {
+  transition: transform 2.6s ease-in-out;
+}
+
+.scene .drone .body {
+  fill: #6b7684;
+  stroke: #8a95a3;
+  stroke-width: 2;
+  transition: fill 0.6s ease, stroke 0.6s ease;
+}
+
+.scene .drone .arm {
+  fill: #4a5563;
+}
+
+.scene .drone .bay {
+  fill: #0b1017;
+  stroke: #4a5563;
+}
+
+.scene .drone .halo {
+  fill: url(#glow);
+  opacity: 0;
+  transition: opacity 0.8s ease;
+}
+
+.scene .drone[data-assigned="true"] .body {
+  fill: var(--accent);
+  stroke: #9bccff;
+}
+
+.scene .drone[data-assigned="true"] .arm {
+  fill: #2f6fb5;
+}
+
+.scene .drone[data-assigned="true"] .halo {
+  opacity: 1;
+}
+
+.scene .oxygen .shelf {
+  fill: var(--panel);
+  stroke: var(--line);
+}
+
+.scene .canister {
+  fill: #2a3644;
+  stroke: #3a4a5e;
+  stroke-width: 1.5;
+  transition: fill 0.5s ease, opacity 0.8s ease, transform 0.8s ease;
+}
+
+.scene .canister.lit {
+  fill: var(--good);
+  stroke: #8ff0bb;
+}
+
+/* Reserved canisters leave the shelf for the drone's bay once the runtime says the reservation landed. */
+.scene .oxygen[data-loaded="true"] .canister.loaded {
+  opacity: 0;
+  transform: translateY(-40px);
+}
+
+.scene .dock .structure {
+  fill: #2a1512;
+  stroke: var(--danger);
+  stroke-width: 2;
+  transition: fill 0.8s ease, stroke 0.8s ease;
+}
+
+.scene .dock .pad {
+  fill: #1c2735;
+  stroke: #3a4a5e;
+}
+
+.scene .dock[data-powered="true"] .structure {
+  fill: #10263d;
+  stroke: var(--accent);
+}
+
+.scene .ring-track {
+  fill: none;
+  stroke: #24303f;
+  stroke-width: 9;
+}
+
+.scene .ring-fill {
+  fill: none;
+  stroke: var(--danger);
+  stroke-width: 9;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1.4s ease, stroke 0.8s ease;
+}
+
+.scene .dock[data-powered="true"] .ring-fill {
+  stroke: var(--accent);
+}
+
+.scene .power {
+  fill: var(--ink);
   font-size: 26px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  line-height: 1.1;
-  overflow-wrap: anywhere;
 }
 
-.detail {
-  font-size: 12.5px;
-  color: var(--ink-soft);
-  margin: 6px 0 0;
+/* The agent's attention on a part of the scene. */
+.scene .agent-reveal {
+  animation: scene-flash 2.4s ease;
 }
 
-/* The agent's attention on a panel: the border, and the text beside it. */
+@keyframes scene-flash {
+  0% {
+    filter: drop-shadow(0 0 2px rgba(90, 169, 255, 1));
+  }
+  50% {
+    filter: drop-shadow(0 0 14px rgba(90, 169, 255, 0.9));
+  }
+  100% {
+    filter: none;
+  }
+}
+
 .agent-reveal {
   animation: reveal-flash 2.4s ease;
 }
@@ -182,21 +349,68 @@ body {
 @keyframes reveal-flash {
   0% {
     box-shadow: 0 0 0 0 rgba(90, 169, 255, 0.9);
-    border-color: var(--accent);
   }
   60% {
     box-shadow: 0 0 0 6px rgba(90, 169, 255, 0.15);
-    border-color: var(--accent);
   }
   100% {
     box-shadow: 0 0 0 0 rgba(90, 169, 255, 0);
   }
 }
 
-[data-reveal]:focus-visible,
-.receipt:focus-visible {
+[data-reveal]:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* The communication and authorization band. */
+.band {
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  padding: 12px 18px 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.plan-status {
+  margin: 0;
+  font-size: 14px;
+}
+
+.objective-band {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.objective-band .eyebrow {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.objective-band blockquote {
+  margin: 0;
+  color: var(--ink-soft);
+  border-left: 2px solid var(--line);
+  padding-left: 10px;
+  overflow-wrap: anywhere;
+}
+
+.objective-band .actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  margin: 6px 0 0;
 }
 
 .risk {
@@ -249,103 +463,89 @@ button.primary {
 }
 
 button:focus-visible,
-textarea:focus-visible {
+summary:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-/* The plan card: every state as words, the border echoing the risk. */
-.plan-card {
+/* The authorization overlay, centred over the scene. */
+.overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgba(4, 8, 14, 0.74);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.overlay {
+  width: min(640px, 100%);
+  max-height: 92vh;
+  overflow: auto;
   background: var(--panel);
   border: 1px solid var(--danger);
   border-radius: 14px;
-  padding: 16px 18px;
-  margin-bottom: 18px;
+  padding: 20px 22px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
 
-.plan-card.status-COMMITTED {
-  border-color: var(--good);
-}
-
-.plan-card.status-REJECTED {
-  border-color: var(--line);
-  opacity: 0.8;
-}
-
-.plan-card.status-PARTIAL,
-.plan-card.status-INTERRUPTED {
-  border-color: var(--warn);
-}
-
-.plan-card header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.plan-card .title {
-  font-weight: 700;
-}
-
-.plan-card .summary {
+.overlay h2 {
   margin: 0 0 6px;
-  font-size: 14px;
+  font-size: 15px;
+  letter-spacing: 0.1em;
+  color: var(--danger);
 }
 
-.plan-card .state {
+.overlay .objective {
   margin: 0 0 12px;
-  font-size: 12.5px;
-  color: var(--warn);
+  font-size: 15px;
 }
 
-.plan-card.status-COMMITTED .state {
-  color: var(--good);
-}
-
-.plan-card .operations {
-  list-style: none;
-  margin: 0 0 12px;
-  padding: 0;
-}
-
-.plan-card .operations li {
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
-  gap: 6px 10px;
-  padding: 6px 0;
-  border-top: 1px solid var(--line);
-  font-size: 13.5px;
-}
-
-.plan-card .operations .step {
-  font-family: var(--mono);
-  color: var(--ink-soft);
-}
-
-.plan-card .operations .cap,
-.plan-card .operations .outcome {
-  grid-column: 2;
-  font-size: 12px;
-  color: var(--ink-soft);
-}
-
-.plan-card .will-change h4 {
-  margin: 0 0 4px;
+.overlay h3 {
+  margin: 14px 0 4px;
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--ink-soft);
 }
 
-.plan-card .evidence {
-  margin: 0 0 8px;
-  font-size: 12px;
-  color: var(--ink-soft);
+.checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
-.plan-card ul,
-.receipt ul {
+.checklist li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+}
+
+.checklist .step {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  display: inline-grid;
+  place-items: center;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--ink-soft);
+  flex: none;
+}
+
+.checklist .what {
+  flex: 1;
+}
+
+.overlay ul,
+.evidence ul,
+.receipt ul,
+.plan-record ul {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -383,76 +583,113 @@ textarea:focus-visible {
   color: var(--good);
 }
 
-.plan-card .actions {
+.overlay .actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 16px;
 }
 
-.receipt {
-  background: var(--panel);
+/* The confirmation after a commit. */
+.confirmation {
   border: 1px solid var(--good);
-  border-radius: 14px;
-  padding: 16px 18px;
-  margin-bottom: 18px;
+  background: var(--good-soft);
+  border-radius: 12px;
+  padding: 12px 16px;
 }
 
-.receipt h2 {
-  margin: 0 0 4px;
-  font-family: var(--mono);
+.confirmation h2 {
+  margin: 0;
   font-size: 15px;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   color: var(--good);
 }
 
-.rail {
-  grid-area: rail;
-  border-left: 1px solid var(--line);
-  background: var(--panel);
-  min-width: 0;
-  overflow-y: auto;
+.confirmation .line {
+  margin: 4px 0 0;
+  font-size: 15px;
 }
 
-.rail-section {
-  border-bottom: 1px solid var(--line);
-  padding: 14px 16px;
+.confirmation .counts {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-soft);
 }
 
-.rail-section h3 {
-  margin: 0 0 10px;
+.evidence {
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.evidence summary {
+  cursor: pointer;
+  color: var(--accent);
+}
+
+.evidence .operations,
+.plan-record .operations {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  font-size: 12.5px;
+}
+
+.evidence .operations li,
+.plan-record .operations li {
+  display: flex;
+  gap: 10px;
+  padding: 4px 0;
+  border-top: 1px dashed var(--line);
+}
+
+.evidence code,
+.plan-record code,
+.tools code,
+.matches code {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.outcome {
+  color: var(--ink-soft);
+}
+
+/* The Inspector: closed by default, the runtime's record in full. */
+.inspector {
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+  padding: 0 18px 24px;
+}
+
+.inspector > summary {
+  cursor: pointer;
+  padding: 12px 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+.inspector-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 18px;
+}
+
+.inspector h3 {
+  margin: 0 0 4px;
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--ink-soft);
 }
 
-.stat-row {
-  display: flex;
-  justify-content: space-between;
+.inspector h4 {
+  margin: 10px 0 4px;
   font-size: 13px;
-  padding: 3px 0;
 }
 
-.stat-row .num {
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.rail textarea {
-  width: 100%;
-  font: inherit;
-  font-size: 12.5px;
-  color: var(--ink);
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 8px;
-  margin: 8px 0;
-  resize: vertical;
-}
-
-.calls,
+.tools,
 .matches,
 .activity {
   list-style: none;
@@ -461,28 +698,12 @@ textarea:focus-visible {
   font-size: 12.5px;
 }
 
-.calls li,
+.tools li,
 .matches li,
 .activity li {
   padding: 6px 0;
   border-top: 1px dashed var(--line);
   overflow-wrap: anywhere;
-}
-
-.calls li .status {
-  font-size: 11px;
-  color: var(--ink-soft);
-}
-
-.calls li.refused .status,
-.calls li.error .status {
-  color: var(--danger);
-}
-
-.calls code,
-.matches code {
-  font-family: var(--mono);
-  font-size: 12px;
 }
 
 .matches .score {
@@ -508,202 +729,29 @@ textarea:focus-visible {
   color: var(--ink-soft);
 }
 
-@media (max-width: 900px) {
-  .shell {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas:
-      "topbar"
-      "main"
-      "rail";
-  }
-
-  .rail {
-    border-left: none;
-    border-top: 1px solid var(--line);
-  }
-
-  .topbar {
-    height: auto;
-    flex-wrap: wrap;
-    padding: 10px 14px;
-  }
-
-  .controls {
-    margin-left: 0;
-  }
-
-  .presence {
-    max-width: 100%;
-  }
-
-  .mission {
-    padding: 16px 14px 32px;
-  }
+.receipt {
+  font-size: 13px;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .agent-reveal {
-    animation: none;
-    border-color: var(--accent);
-  }
-}
-
-/* The mission head: the id, its status, and where the workflow stands. */
-.mission-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px 18px;
-  margin-bottom: 16px;
-}
-
-.mission-head h1 {
-  margin: 0;
-}
-
-.agent-status {
-  margin: 0;
-  font-size: 13.5px;
-  color: var(--ink-soft);
-}
-
-/* Crew beside readiness: one deliberate layout, not a grid of equal cards. */
-.mission-grid {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(0, 2fr);
-  gap: 12px;
-  margin-bottom: 18px;
-}
-
-.readiness h2 {
-  margin: 0 0 8px;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--ink-soft);
-}
-
-.readiness .row {
-  display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) auto;
-  grid-template-areas:
-    "mark label value"
-    "mark detail value";
-  gap: 2px 12px;
-  align-items: center;
-  padding: 10px 14px;
-  margin-bottom: 8px;
-}
-
-.readiness .row .mark {
-  grid-area: mark;
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 3px 0;
-  text-align: center;
-  border-radius: 6px;
+.plan-record {
+  margin-top: 10px;
   border: 1px solid var(--line);
-  color: var(--ink-soft);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
 }
 
-.readiness .row .mark.met {
-  color: var(--good);
-  border-color: var(--good);
-}
-
-.readiness .row .label {
-  grid-area: label;
-  font-size: 13.5px;
-}
-
-.readiness .row .value {
-  grid-area: value;
-  font-size: 22px;
-  text-align: right;
-}
-
-.readiness .row .detail {
-  grid-area: detail;
-  margin: 0;
-}
-
-/* The prompt a person gives their client. Text, a copy button, nothing else. */
-.try-this {
-  background: var(--panel);
-  border: 1px dashed var(--line);
-  border-radius: 12px;
-  padding: 14px 16px;
-  margin-bottom: 18px;
-}
-
-.try-this h2 {
-  margin: 0 0 6px;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--ink-soft);
-}
-
-.try-this blockquote {
-  margin: 8px 0;
-  padding: 10px 12px;
-  border-left: 3px solid var(--accent);
-  background: var(--accent-soft);
-  border-radius: 6px;
-  font-size: 14px;
-}
-
-.try-this .actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-/* The Inspector folds; its counts and scores are there when wanted. */
-details.inspector > summary {
+.plan-record summary {
   cursor: pointer;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+}
+
+.plan-record .state {
   color: var(--ink-soft);
-  list-style: none;
 }
 
-details.inspector > summary::before {
-  content: "▸ ";
-}
-
-details.inspector[open] > summary::before {
-  content: "▾ ";
-}
-
-details.inspector h3 {
-  margin-top: 12px;
-}
-
-/* A settled plan folds under the receipt. */
-.plan-card.settled > summary {
-  cursor: pointer;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  list-style: none;
-}
-
-.plan-card.settled > summary .state {
-  margin: 0;
+.plan-record .summary {
+  margin: 8px 0 4px;
   color: var(--ink-soft);
-  flex: 1;
-  font-size: 12.5px;
-}
-
-.plan-card.settled[open] > summary {
-  margin-bottom: 8px;
 }
 
 /* The scripted walkthrough, only behind ?walkthrough=1, and labelled. */
@@ -730,8 +778,45 @@ details.inspector h3 {
   margin: 0 0 8px;
 }
 
-@media (max-width: 900px) {
-  .mission-grid {
+@media (max-width: 700px) {
+  .topbar {
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    gap: 8px;
+  }
+
+  .stage {
+    place-items: start;
+  }
+
+  .scene {
+    min-width: 680px;
+    max-height: none;
+  }
+
+  .objective-band {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .overlay .actions {
+    flex-direction: column-reverse;
+  }
+
+  .overlay .actions button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scene .drone,
+  .scene .canister,
+  .scene .ring-fill {
+    transition: none;
+  }
+
+  .scene .beacon,
+  .agent-reveal,
+  .scene .agent-reveal {
+    animation: none;
   }
 }

@@ -58,9 +58,9 @@ describe("the mission screen is an application: it records, shows, and authorize
     expect(inspector.tagName).toBe("DETAILS");
     expect(inspector.open).toBe(false);
     expect(inspector.textContent).toContain("AgentDesk Inspector");
-    // Nothing from the Inspector leaks into the default view.
+    // The runtime's record lives only inside the Inspector.
     expect(view.container.querySelector("[data-event]")).toBeNull();
-    expect(view.container.querySelector("[data-tool]")).toBeNull();
+    expect(view.container.querySelector("[data-tool]")?.closest("[data-inspector]")).toBe(inspector);
   });
 
   it("clicking every control on the page creates no plan and changes no state", async () => {
@@ -139,7 +139,7 @@ describe("the mission screen is an application: it records, shows, and authorize
     expect(getState()).toEqual(seed());
     expect(view.queryByRole("alertdialog")).toBeNull();
     expect(view.queryByRole("region", { name: "Rescue launched" })).toBeNull();
-    expect(view.container.querySelector("[data-plan-status]")?.textContent).toMatch(/PLAN-1 authorized/);
+    expect(view.container.querySelector("[data-plan-status]")?.textContent).toBe(`${planId} authorized. Waiting for the agent to commit.`);
     expect(view.queryByRole("button", { name: "Authorize rescue" })).toBeNull();
   });
 
@@ -170,7 +170,7 @@ describe("the mission screen is an application: it records, shows, and authorize
     expect(confirmation.textContent).toContain("NIA-7 is en route to Asteria");
     expect(confirmation.textContent).toContain("4 operations completed");
     expect(confirmation.textContent).toContain("4 outcomes verified");
-    expect(confirmation.textContent).toContain("Receipt PLAN-1");
+    expect(confirmation.textContent).toContain(`Receipt ${planId}`);
     const evidence = confirmation.querySelector<HTMLDetailsElement>("[data-evidence]")!;
     expect(evidence.open).toBe(false);
     expect(within(evidence).getByText("View evidence")).toBeDefined();
