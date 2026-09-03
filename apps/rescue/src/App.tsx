@@ -58,7 +58,7 @@ function planStatus(plans: OperationPlan[]): string | null {
     return `The agent is committing ${open.id}.`;
   }
   const last = plans[plans.length - 1];
-  if (last !== undefined && last.status !== "COMMITTED") {
+  if (last !== undefined && isSettled(last) && last.status !== "COMMITTED") {
     return `${last.id} ${stateWords(last)}.`;
   }
   return null;

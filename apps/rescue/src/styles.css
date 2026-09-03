@@ -786,11 +786,11 @@ summary:focus-visible {
   }
 
   .stage {
-    place-items: start;
+    overflow-x: visible;
+    padding: 4px 8px 0;
   }
 
   .scene {
-    min-width: 680px;
     max-height: none;
   }
 
