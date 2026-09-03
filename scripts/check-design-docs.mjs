@@ -344,6 +344,58 @@ REFERENCE_FIGURES.push({
   },
 });
 
+/**
+ * The README's first screen. A judge reading only that screen sees the
+ * thesis; the "Measured, not claimed" block under the pipeline is where
+ * the committed runs' figures reach it, and every sentence there is held
+ * to the report it quotes: the surface per arm and the result-shape cost
+ * from the four-cell reference, the routing figures from the stress
+ * reference, the 2.2 run, and the second held-out set, and the sentence
+ * about model-dependent metrics, which must go once a transcript exists.
+ */
+REFERENCE_FIGURES.push({
+  report: "scripts/evals/runs/reference/report.json",
+  phrases: (report) => {
+    const read = (path) => JSON.parse(readFileSync(join(root, path), "utf8"));
+    const routing = read("scripts/evals/runs/routing-reference/report.json");
+    const step = read("scripts/evals/runs/routing-2.2/report.json");
+    const holdout = read("scripts/evals/runs/routing-holdout-2/report.json");
+    const pct = (v) => `${(v * 100).toFixed(1)}%`;
+    const num = (v) => Math.round(v).toLocaleString("en-US");
+    const cell = (key) => report.cells[key].metrics;
+    const flat = cell("baseline.structured");
+    const routed = cell("agentdesk.structured");
+    const bare = cell("agentdesk.bare");
+    for (const [a, b, what] of [
+      ["baseline.bare", "baseline.structured", "the flat arm's surface"],
+      ["agentdesk.bare", "agentdesk.structured", "the routed arm's surface"],
+    ]) {
+      if (cell(a).visibleToolCount.value !== cell(b).visibleToolCount.value || cell(a).registeredSchemaBytes.value !== cell(b).registeredSchemaBytes.value) {
+        throw new Error(`${what} differs between shapes, so the README cannot quote it per arm`);
+      }
+    }
+    if (cell("baseline.bare").resultBytes.value !== bare.resultBytes.value || cell("baseline.structured").resultBytes.value !== routed.resultBytes.value) {
+      throw new Error("result bytes differ between arms, so the README cannot quote them per shape");
+    }
+    const shipped = routing.cells.deterministic.metrics.terminalInRoutedSet;
+    const domainStep = step.cells["custom:hierarchical"].metrics.terminalInRoutedSet;
+    const second = holdout.cells["custom:hierarchical"].metrics;
+    const secondDet = holdout.cells.deterministic.metrics;
+    const confirmed = second.terminalInRoutedSet.value >= secondDet.terminalInRoutedSet.value && second.tieAtCut.value <= secondDet.tieAtCut.value;
+    const modelDependent = ["toolSelectionAccuracy", "argumentAccuracy", "taskCompletion"];
+    const noTranscript = Object.values(report.cells).every((c) => modelDependent.every((m) => c.metrics[m].provenance === "unavailable"));
+    return {
+      "./README.md": [
+        ["## Measured, not claimed", "the block's heading"],
+        [`the routed arm hands the agent ${num(routed.visibleToolCount.value)} visible tools and ${num(routed.registeredSchemaBytes.value)} schema bytes against ${num(flat.visibleToolCount.value)} and ${num(flat.registeredSchemaBytes.value)} flat`, "the surface sentence"],
+        [`a structured result costs ${num(routed.resultBytes.value)} bytes against ${num(bare.resultBytes.value)} bare, and carries an evidence link on ${pct(routed.evidenceCoverage.value)} of consequential completions against ${pct(bare.evidenceCoverage.value)}`, "the result-shape sentence"],
+        [`the shipped scorer routes the expected capability for ${pct(shipped.value)} of held-out tasks; the domain step, ${pct(domainStep.value)}, ${confirmed ? `confirmed at ${pct(second.terminalInRoutedSet.value)} on a second seed` : "not confirmed on a second seed"}`, "the routing sentence and its verdict"],
+        ["are `unavailable` until someone records a transcript", "the transcript sentence", noTranscript ? "present" : "absent"],
+      ],
+    };
+  },
+});
+
 /** A phrase as a pattern: literal text, with any run of whitespace allowed where the prose wraps. */
 function loose(text) {
   const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -365,9 +417,13 @@ function checkReferenceFigures() {
         found.push(`${doc} is missing (quotes ${report})`);
         continue;
       }
-      for (const [phrase, what] of list) {
-        if (!loose(phrase).test(body)) {
+      for (const [phrase, what, mode = "present"] of list) {
+        const stated = loose(phrase).test(body);
+        if (mode === "present" && !stated) {
           found.push(`${doc} does not state "${phrase}", ${what} computed from ${report}; the prose is stale against the run`);
+        }
+        if (mode === "absent" && stated) {
+          found.push(`${doc} still states "${phrase}", ${what}; ${report} no longer supports it`);
         }
       }
     }
