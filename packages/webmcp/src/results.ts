@@ -231,8 +231,8 @@ export type EvidenceLink = Omit<AuthoredEvidenceLink, "source"> & {
 /**
  * Application-authored evidence of a completed write: which entity
  * changed, field-level before/after, and whether it can be undone. The
- * runtime carries receipts verbatim into the tool result, the audit
- * timeline, and the approval record.
+ * runtime owns the receipt, derives evidence when absent, and marks rollback
+ * unsupported when the registered capability has no compensating handler.
  */
 export type Receipt = {
   entity: string;
