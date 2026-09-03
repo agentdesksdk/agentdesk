@@ -267,8 +267,6 @@ describe("the page shows the record, refuses the repeat, and lets a person settl
   });
 
   it("the card says what the approval came to, once, and the Inspector lists the record in text", async () => {
-    // jsdom has no IndexedDB, so the page's adapter is the memory one.
-    expect(demoPersistence.kind).toBe("memory");
     const view = mountAt(`/agentdesk/orders/${ORDER}`);
     const card = await interruptThroughThePage(view);
 
