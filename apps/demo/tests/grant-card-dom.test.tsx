@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, within, type RenderResult } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { ToolResult } from "@agentdesk/webmcp";
+import type { ToolResult } from "@agentdesksdk/webmcp";
 import { ActivityPanel } from "../src/components/ActivityPanel.tsx";
 import { ApprovalCards } from "../src/components/ApprovalCards.tsx";
 import { GrantCard } from "../src/components/GrantCard.tsx";

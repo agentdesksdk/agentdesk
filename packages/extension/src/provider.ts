@@ -6,7 +6,7 @@ import {
   type ProviderHooks,
   type ProviderRefusal,
   type RegisterToolFn,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 import { attachBridge, type Bridge } from "./bridge.ts";
 
 /** Refusals held before the runtime has connected; older ones are dropped past this. */

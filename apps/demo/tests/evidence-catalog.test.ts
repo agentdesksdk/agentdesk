@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { createAgentDeskRuntime, type Capability } from "@agentdesk/webmcp";
+import { createAgentDeskRuntime, type Capability } from "@agentdesksdk/webmcp";
 import { capabilities } from "../src/capabilities/index.ts";
 import { stagingAdapter } from "../src/capabilities/staged.ts";
 import { isRegisteredRevealToken } from "../src/components/reveal.ts";

@@ -30,7 +30,7 @@ function argValue(flag, fallback) {
 
 async function main() {
   if (!existsSync(dist)) {
-    console.error("packages/webmcp/dist is missing. Run `pnpm --filter @agentdesk/webmcp build` first.");
+    console.error("packages/webmcp/dist is missing. Run `pnpm --filter @agentdesksdk/webmcp build` first.");
     process.exit(1);
   }
   const sdk = await import(pathToFileURL(dist).href);

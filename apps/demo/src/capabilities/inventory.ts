@@ -3,7 +3,7 @@ import {
   unavailable,
   type Capability,
   receipt,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 import { getState, mutate } from "../data/store.ts";
 import {
   createReadCapability,

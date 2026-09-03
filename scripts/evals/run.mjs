@@ -20,7 +20,7 @@ function argValue(flag, fallback) {
 async function main() {
   if (!existsSync(dist)) {
     console.error(
-      "packages/webmcp/dist is missing. Run `pnpm --filter @agentdesk/webmcp build` first;\n" +
+      "packages/webmcp/dist is missing. Run `pnpm --filter @agentdesksdk/webmcp build` first;\n" +
         "the eval measures the published surface, not the source tree.",
     );
     process.exit(1);

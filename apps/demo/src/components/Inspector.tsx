@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { ROUTING_WEIGHTS, type CatalogDomain, type RuntimeSnapshot } from "@agentdesk/webmcp";
+import { ROUTING_WEIGHTS, type CatalogDomain, type RuntimeSnapshot } from "@agentdesksdk/webmcp";
 import { BOOTSTRAP } from "../instrumentation/sideBySide.ts";
 import { agentdesk, webmcpNative } from "../runtime/agentdesk.ts";
 import { useAnnouncer } from "./announcer.ts";

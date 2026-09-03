@@ -1,6 +1,6 @@
 # Changelog
 
-Notable changes to `@agentdesk/webmcp`. Entries are the pull requests merged
+Notable changes to `@agentdesksdk/webmcp`. Entries are the pull requests merged
 to `main`, newest first within each group. A release is cut by pushing a
 `v<version>` tag that matches the version in `package.json`; the workflow in
 `.github/workflows/release.yml` refuses anything else.
@@ -93,7 +93,7 @@ merged since it.
   own branches ([#52](https://github.com/agentdesksdk/agentdesk/pull/52))
 - Pin workflow actions to commit SHAs, package install line, repair wording
   ([#35](https://github.com/agentdesksdk/agentdesk/pull/35))
-- Publish `@agentdesk/webmcp` on a `v*` tag with provenance
+- Publish `@agentdesksdk/webmcp` on a `v*` tag with provenance
   ([#33](https://github.com/agentdesksdk/agentdesk/pull/33))
 - Wave 0 review follow-ups in the demo and p0 apps
   ([#32](https://github.com/agentdesksdk/agentdesk/pull/32))

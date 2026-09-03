@@ -24,7 +24,7 @@ The useful claim that `@mcp-b/global`, `@mcp-b/transports`, and
 Standard Schema packages are pulled is not.
 
 Both MCP-B packages and the MCP server/core packages declare Node 20 or newer,
-while `@agentdesk/webmcp` advertises Node 18 or newer. Because these are
+while `@agentdesksdk/webmcp` advertises Node 18 or newer. Because these are
 development-only dependencies, the published SDK can still retain an empty
 runtime dependency set and support Node 18. The repository's new interop test
 lane, however, is not a Node 18 lane, and CI currently exercises only Node 22.

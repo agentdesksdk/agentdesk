@@ -27,10 +27,10 @@ try {
     .pop()
     .trim();
 
-  const target = join(work, "node_modules", "@agentdesk", "webmcp");
+  const target = join(work, "node_modules", "@agentdesksdk", "webmcp");
   mkdirSync(target, { recursive: true });
   // Relative names only. GNU tar reads a Windows drive colon as a remote host.
-  run("tar", ["-xzf", packed, "-C", "node_modules/@agentdesk/webmcp", "--strip-components=1"], work);
+  run("tar", ["-xzf", packed, "-C", "node_modules/@agentdesksdk/webmcp", "--strip-components=1"], work);
 
   writeFileSync(
     join(work, "package.json"),
@@ -44,7 +44,7 @@ import {
   createAgentDeskRuntime,
   defineCapability,
   receipt,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 import assert from "node:assert/strict";
 
 const tools = new Map();

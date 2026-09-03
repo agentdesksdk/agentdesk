@@ -7,7 +7,7 @@ import {
   type NativeToolDefinition,
   type RegisterToolFn,
   type ToolResult,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 import { ARMS, CELLS } from "../../scripts/evals/arms.mjs";
 import { buildCatalog } from "../../scripts/evals/catalog.mjs";
 import { parseTask, STRUCTURED_FIELDS } from "../../scripts/evals/schema.mjs";

@@ -4,7 +4,7 @@ import {
   type NativeToolDefinition,
   type RegisterToolOptions,
   type ToolResult,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 import {
   cellFromSearch,
   cellHref,

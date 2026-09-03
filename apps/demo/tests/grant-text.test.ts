@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Grant, HumanActor, StoredReceipt } from "@agentdesk/webmcp";
+import type { Grant, HumanActor, StoredReceipt } from "@agentdesksdk/webmcp";
 import {
   authorityLine,
   consideredGrantText,

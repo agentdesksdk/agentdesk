@@ -3,7 +3,7 @@ import {
   unavailable,
   AVAILABLE,
   type Capability,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 
 /**
  * Kept free of DOM access so a test can construct them. Definition-time

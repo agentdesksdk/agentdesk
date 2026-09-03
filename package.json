@@ -4,15 +4,15 @@
   "type": "module",
   "packageManager": "pnpm@10.14.0",
   "scripts": {
-    "dev": "pnpm --filter @agentdesk/demo dev",
-    "p0": "pnpm --filter @agentdesk/p0 dev",
+    "dev": "pnpm --filter @agentdesksdk/demo dev",
+    "p0": "pnpm --filter @agentdesksdk/p0 dev",
     "test": "pnpm -r test",
-    "test:pack": "pnpm --filter @agentdesk/webmcp pack:smoke",
+    "test:pack": "pnpm --filter @agentdesksdk/webmcp pack:smoke",
     "eval": "node scripts/evals/run.mjs",
     "eval:test": "node --test scripts/evals/test/",
     "typecheck": "pnpm -r typecheck",
     "check:docs": "node scripts/check-design-docs.mjs",
     "build": "pnpm -r build && node scripts/assemble-dist.mjs",
-    "preview": "pnpm --filter @agentdesk/demo preview"
+    "preview": "pnpm --filter @agentdesksdk/demo preview"
   }
 }

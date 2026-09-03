@@ -1,5 +1,5 @@
 import { Link, useParams } from "react-router-dom";
-import type { Receipt, RuntimeSnapshot } from "@agentdesk/webmcp";
+import type { Receipt, RuntimeSnapshot } from "@agentdesksdk/webmcp";
 import { orderTotal, round2 } from "../data/types.ts";
 import { Pill, StatCard, fmtDate, fmtMoney } from "../components/bits.tsx";
 import { useDemoStore, useRuntime } from "../components/hooks.ts";

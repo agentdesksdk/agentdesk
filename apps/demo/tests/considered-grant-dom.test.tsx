@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render } from "@testing-library/react";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PendingAction, RuntimeSnapshot } from "@agentdesk/webmcp";
+import type { PendingAction, RuntimeSnapshot } from "@agentdesksdk/webmcp";
 import { ApprovalCards } from "../src/components/ApprovalCards.tsx";
 import { resetStore } from "../src/data/store.ts";
 import { agentdesk } from "../src/runtime/agentdesk.ts";

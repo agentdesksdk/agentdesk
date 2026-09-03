@@ -1,4 +1,4 @@
-import type { Capability } from "@agentdesk/webmcp";
+import type { Capability } from "@agentdesksdk/webmcp";
 import { billingCapabilities } from "./billing.ts";
 import { customerCapabilities } from "./customers.ts";
 import { inventoryCapabilities } from "./inventory.ts";

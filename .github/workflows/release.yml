@@ -1,6 +1,6 @@
 name: Release
 
-# Publishes @agentdesk/webmcp to npm when a version tag is pushed:
+# Publishes @agentdesksdk/webmcp to npm when a version tag is pushed:
 #
 #   git tag v0.2.0 && git push origin v0.2.0
 #
@@ -9,7 +9,7 @@ name: Release
 # does not, so the published version is always the one someone tagged.
 #
 # Needs one repository secret: NPM_TOKEN, an npm granular access token with
-# publish rights on the @agentdesk scope. Provenance comes from the OIDC
+# publish rights on the @agentdesksdk scope. Provenance comes from the OIDC
 # token this job is granted below, not from the secret.
 
 on:

@@ -1,4 +1,4 @@
-import type { StoredReceipt } from "@agentdesk/webmcp";
+import type { StoredReceipt } from "@agentdesksdk/webmcp";
 
 /** Reads as a phrase in an aria-label: "Undo refund shipping on Order #10428". */
 export function describeAction(entry: StoredReceipt): string {

@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, within, type RenderResult } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { memoryPersistence, type ToolResult } from "@agentdesk/webmcp";
+import { memoryPersistence, type ToolResult } from "@agentdesksdk/webmcp";
 import { App } from "../src/App.tsx";
 import { armCommitFault } from "../src/capabilities/staged.ts";
 import { describeAttempt } from "../src/components/DurabilityCard.tsx";

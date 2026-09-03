@@ -6,7 +6,7 @@ import {
   type AppContext,
   type Exposure,
   type RuntimeSnapshot,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 import { capabilities } from "../capabilities/index.ts";
 import { stagingAdapter } from "../capabilities/staged.ts";
 import { getState, resetStore } from "../data/store.ts";

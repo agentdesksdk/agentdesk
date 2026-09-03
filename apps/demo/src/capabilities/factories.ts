@@ -5,7 +5,7 @@ import {
   type DirectCapabilitySpec,
   type DistributiveOmit,
   type ExecutionContext,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 import { registerOperation, type CommitMode } from "./staged.ts";
 
 type FactorySpec = DistributiveOmit<CapabilitySpec, "risk" | "policy">;

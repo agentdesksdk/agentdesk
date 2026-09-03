@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, within, type RenderResult } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { EvidenceLink, PresentationEvent } from "@agentdesk/webmcp";
+import type { EvidenceLink, PresentationEvent } from "@agentdesksdk/webmcp";
 import { App } from "../src/App.tsx";
 import { EvidenceControls } from "../src/components/EvidenceControls.tsx";
 import { getState, resetStore } from "../src/data/store.ts";

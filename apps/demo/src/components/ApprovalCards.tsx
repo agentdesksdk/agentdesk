@@ -4,7 +4,7 @@ import { money } from "../capabilities/helpers.ts";
 import { projectedConflicts } from "../capabilities/staged.ts";
 import { consideredGrantText } from "./grant-text.ts";
 import { useDemoStore, useRuntime } from "./hooks.ts";
-import type { PendingAction } from "@agentdesk/webmcp";
+import type { PendingAction } from "@agentdesksdk/webmcp";
 
 function detailRows(action: PendingAction): Array<[string, string]> {
   const rows: Array<[string, string]> = [];

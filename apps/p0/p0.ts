@@ -4,7 +4,7 @@
   type Actor,
   type AppContext,
   type ToolResult,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 import { p0Capabilities } from "./capabilities.ts";
 
 /** The person driving the harness. Approving is a human act, not the agent's. */

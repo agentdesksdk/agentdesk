@@ -3,7 +3,7 @@ import {
   createAgentDeskRuntime,
   type NativeToolDefinition,
   type ToolResult,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 import { capabilities } from "../src/capabilities/index.ts";
 import { supportCapabilities } from "../src/capabilities/support.ts";
 import { stagingAdapter } from "../src/capabilities/staged.ts";

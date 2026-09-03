@@ -12,7 +12,7 @@ adopter will actually have.
 ## What we depend on, and what we do not
 
 `@mcp-b/webmcp-types` and `@mcp-b/webmcp-polyfill` are **development**
-dependencies of `@agentdesk/webmcp`. Those are the direct additions. The full
+dependencies of `@agentdesksdk/webmcp`. Those are the direct additions. The full
 transitive closure they bring is larger:
 
 ```text

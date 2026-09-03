@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ToolResult } from "@agentdesk/webmcp";
+import type { ToolResult } from "@agentdesksdk/webmcp";
 import { ARMS, CELLS } from "../../../scripts/evals/arms.mjs";
 import { SHAPES, projectResult } from "../../../scripts/evals/shapes.mjs";
 import {

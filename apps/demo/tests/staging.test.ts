@@ -3,7 +3,7 @@ import {
   createAgentDeskRuntime,
   defineCapability,
   type Change,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 import { capabilities } from "../src/capabilities/index.ts";
 import { createStateTransitionCapability } from "../src/capabilities/factories.ts";
 import {

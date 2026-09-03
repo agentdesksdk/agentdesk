@@ -1459,7 +1459,7 @@ discriminated result rather than throwing, so the approval and review paths
 cannot drift apart on how they handle it.
 
 ```ts
-import { createAgentDeskRuntime } from "@agentdesk/webmcp";
+import { createAgentDeskRuntime } from "@agentdesksdk/webmcp";
 
 const runtime = createAgentDeskRuntime({
   capabilities,

@@ -1,5 +1,5 @@
 {
-  "name": "@agentdesk/extension",
+  "name": "@agentdesksdk/extension",
   "version": "0.0.1",
   "private": true,
   "description": "AgentDesk Universal: the extension-context CapabilityProvider and the page bridge it governs.",
@@ -27,7 +27,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@agentdesk/webmcp": "workspace:*"
+    "@agentdesksdk/webmcp": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

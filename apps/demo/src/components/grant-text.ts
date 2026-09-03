@@ -1,4 +1,4 @@
-import type { Grant, GrantOutcome, StoredReceipt } from "@agentdesk/webmcp";
+import type { Grant, GrantOutcome, StoredReceipt } from "@agentdesksdk/webmcp";
 
 /** The one capability the order page issues grants for. */
 export const REFUND_SHIPPING = "refund_shipping";

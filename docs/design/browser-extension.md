@@ -271,9 +271,9 @@ four-dimension `CapabilityProvenance` above, which is still a proposal.
 
 ## What has landed
 
-`@agentdesk/extension`, in `packages/extension`, holds the first slice: the
+`@agentdesksdk/extension`, in `packages/extension`, holds the first slice: the
 extension context as a `CapabilityProvider`, and the bridge between the
-page and it. It depends on `@agentdesk/webmcp` through its published
+page and it. It depends on `@agentdesksdk/webmcp` through its published
 exports and contains nothing else: no UI, no scanner, no store listing, no
 WXT entrypoints. It is not published; it is the seam the entrypoints will
 be written against.

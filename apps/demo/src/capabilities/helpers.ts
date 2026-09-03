@@ -2,7 +2,7 @@ import {
   CapabilityUnavailableError,
   unavailable,
   type InputSchema,
-} from "@agentdesk/webmcp";
+} from "@agentdesksdk/webmcp";
 import { getState } from "../data/store.ts";
 import type { Customer, Order, Product, Ticket } from "../data/types.ts";
 import { orderTotal } from "../data/types.ts";

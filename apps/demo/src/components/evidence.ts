@@ -1,4 +1,4 @@
-import type { EvidenceLink } from "@agentdesk/webmcp";
+import type { EvidenceLink } from "@agentdesksdk/webmcp";
 import { agentdesk } from "../runtime/agentdesk.ts";
 
 /**

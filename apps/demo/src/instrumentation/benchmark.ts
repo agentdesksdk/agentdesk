@@ -1,4 +1,4 @@
-import type { Exposure } from "@agentdesk/webmcp";
+import type { Exposure } from "@agentdesksdk/webmcp";
 import { agentdesk } from "../runtime/agentdesk.ts";
 
 export type BenchRun = {
