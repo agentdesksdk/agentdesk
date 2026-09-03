@@ -38,7 +38,7 @@ Every figure above is read from a committed `report.json` under
 `scripts/evals/runs` by `pnpm check:docs`, which fails if a sentence here
 stops agreeing with its run.
 
-**Live demo:** <https://webmcp.agentsdesk.dev> (see
+**Live demo:** <https://webmcp.agentsdesk.dev> and, on the same runtime, [Asteria Rescue Control](https://webmcp.agentsdesk.dev/rescue/) (see
 [docs/guide.md](docs/guide.md#deployment))
 
 Hero prompt, against the seeded Meridian Ops console:
