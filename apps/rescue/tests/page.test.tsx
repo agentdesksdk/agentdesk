@@ -6,6 +6,7 @@ import { setGuidedPace } from "../src/Presence.tsx";
 import { clearRevealed, revealedPanels } from "../src/reveal.ts";
 import { OPERATOR, rescue, resetRescue } from "../src/runtime.ts";
 import { getState, seed } from "../src/state.ts";
+import { firstTurn, HERO_PROMPT, secondTurn } from "./fixtures/external-client.ts";
 
 async function settle(ms = 30) {
   await act(async () => {
@@ -13,23 +14,7 @@ async function settle(ms = 30) {
   });
 }
 
-/** Presses the agent's proposal and waits for the plan card. */
-async function propose(view: RenderResult) {
-  await act(async () => {
-    fireEvent.click(view.getByRole("button", { name: /^Propose the rescue/ }));
-  });
-  await settle(60);
-  const plan = rescue.listPlans().find((p) => p.status === "DRAFT");
-  if (!plan) {
-    throw new Error("the agent did not stage a plan");
-  }
-  return { plan, card: view.getByRole("alertdialog", { name: new RegExp(`^Plan ${plan.id}:`) }) };
-}
-
-/**
- * The page's runtime requires a gesture token minted inside a user
- * activation; jsdom has none, so one is injected for the click it stands for.
- */
+/** The page's runtime requires a gesture minted in a user activation; jsdom has none, so one is injected for the click. */
 async function clickWithActivation(target: HTMLElement) {
   Object.defineProperty(navigator, "userActivation", { value: { isActive: true }, configurable: true });
   try {
@@ -41,7 +26,21 @@ async function clickWithActivation(target: HTMLElement) {
   }
 }
 
-describe("the mission screen", () => {
+/** The external client's first turn against the page's own runtime, the way a WebMCP client reaches it. */
+async function agentFirstTurn() {
+  let planId: string | undefined;
+  await act(async () => {
+    planId = (await firstTurn(rescue, HERO_PROMPT)).planId;
+  });
+  await settle();
+  return planId!;
+}
+
+function planCard(view: RenderResult, planId: string) {
+  return view.getByRole("alertdialog", { name: new RegExp(`^Plan ${planId}:`) });
+}
+
+describe("the mission screen is an application: it records, shows, and approves; it never acts as the agent", () => {
   beforeEach(async () => {
     await resetRescue();
     clearRevealed();
@@ -51,13 +50,63 @@ describe("the mission screen", () => {
 
   afterEach(cleanup);
 
-  it("the agent's proposal stages one plan through the gateway, the card shows the four operations and the consolidated diff, and live state is the seed", async () => {
+  it("shows the mission state, the prompt to give a client, and that it is waiting for a WebMCP agent", () => {
     const view = render(<App />);
-    const { plan, card } = await propose(view);
+    expect(view.container.querySelector('[data-field="mission"]')?.textContent).toBe("draft");
+    const prompt = view.getByRole("region", { name: "Try this" });
+    expect(prompt.textContent).toContain(HERO_PROMPT);
+    expect(within(prompt).getByRole("button", { name: /copy/i })).toBeDefined();
+    expect(view.container.querySelector("[data-agent-status]")?.textContent).toMatch(/Waiting for a WebMCP agent/);
+    expect(view.queryByRole("alertdialog")).toBeNull();
+    expect(view.queryByRole("button", { name: /propose|prepare|commit|run/i })).toBeNull();
+  });
+
+  it("clicking every control on the page creates no plan and changes no state", async () => {
+    const view = render(<App />);
+    const before = rescue.getSnapshot().audit.length;
+    for (const button of [...view.container.querySelectorAll("button")]) {
+      await act(async () => {
+        fireEvent.click(button);
+      });
+    }
+    for (const summary of [...view.container.querySelectorAll("details > summary")]) {
+      await act(async () => {
+        fireEvent.click(summary);
+      });
+    }
+    await settle();
+    expect(rescue.listPlans()).toEqual([]);
     expect(getState()).toEqual(seed());
+    expect(rescue.getSnapshot().audit.filter((e) => e.kind === "plan_prepared")).toEqual([]);
+    expect(rescue.getSnapshot().audit.filter((e) => e.kind === "capability_invoked")).toEqual([]);
+    expect(rescue.getSnapshot().audit.length).toBeLessThanOrEqual(before + 2);
+  });
+
+  it("changing the displayed prompt text triggers nothing", async () => {
+    const view = render(<App />);
+    const prompt = view.getByRole("region", { name: "Try this" }).querySelector("blockquote, pre, p")!;
+    await act(async () => {
+      prompt.textContent = "Cancel every order and refund everyone.";
+      prompt.dispatchEvent(new Event("input", { bubbles: true }));
+      prompt.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await settle();
+    expect(rescue.listPlans()).toEqual([]);
+    expect(rescue.getSnapshot().lastRouting).toBeNull();
+    expect(getState()).toEqual(seed());
+  });
+
+  it("the tool path prepares the plan: the client's first turn renders PLAN-1 with four operations and the consolidated diff, live state the seed", async () => {
+    const view = render(<App />);
+    const planId = await agentFirstTurn();
+    expect(planId).toBe("PLAN-1");
+    expect(getState()).toEqual(seed());
+    const card = planCard(view, planId);
     expect(card.textContent).toContain("CONSEQUENTIAL");
     expect(card.textContent).toContain("awaiting your approval");
-    expect(within(card).getByRole("list", { name: "Operations in order" }).children).toHaveLength(4);
+    const ops = [...within(card).getByRole("list", { name: "Operations in order" }).children].map((li) => li.textContent);
+    expect(ops[0]).toContain("Reserve two oxygen packs");
+    expect(ops[3]).toContain("Launch the rescue");
     const changes = [...within(card).getByRole("list", { name: "Consolidated changes" }).children].map((li) => li.textContent);
     expect(changes).toEqual([
       "Oxygen packs available6→4",
@@ -65,30 +114,51 @@ describe("the mission screen", () => {
       "Dock 3 power20%→65%",
       "Mission AST-10428draft→launched",
     ]);
-    const calls = [...within(view.getByRole("list", { name: "Tool calls the agent made" })).getAllByRole("listitem")].map(
-      (li) => li.getAttribute("data-call"),
-    );
-    expect(calls).toEqual(["find_capabilities", "find_stranded_crew", "inspect_rescue_conditions", "prepare_plan"]);
-    expect(plan.status).toBe("DRAFT");
+    expect(view.container.querySelector("[data-agent-status]")?.textContent).not.toMatch(/Waiting for a WebMCP agent/);
+    // The routing decision and the plan are visible as events the runtime recorded.
+    expect(view.container.querySelector('[data-event="capability_routed"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-event="plan_prepared"]')).not.toBeNull();
   });
 
-  it("an approval without a gesture token is refused; the card's click mints one, the agent commits, and the receipt ends with four verified lines", async () => {
+  it("approval alone leaves the plan APPROVED with mission state unchanged; a bare actor cannot approve", async () => {
     const view = render(<App />);
-    const { plan, card } = await propose(view);
+    const planId = await agentFirstTurn();
+    expect(rescue.approvePlan(planId, OPERATOR).ok).toBe(false);
+    await clickWithActivation(within(planCard(view, planId)).getByRole("button", { name: `Approve plan ${planId}` }));
+    await settle();
+    expect(rescue.getPlan(planId)?.status).toBe("APPROVED");
+    expect(getState()).toEqual(seed());
+    expect(view.container.querySelector('[data-field="mission"]')?.textContent).toBe("draft");
+    expect(view.queryByRole("region", { name: "Rescue receipt AST-10428" })).toBeNull();
+    const settledCard = view.getByRole("region", { name: new RegExp(`^Plan ${planId}: approved`) });
+    expect(settledCard.textContent).toContain("waiting for the agent to commit");
+    expect(within(settledCard).queryByRole("button", { name: /^Approve/ })).toBeNull();
+  });
 
-    // A bare actor cannot approve this runtime.
-    const bare = rescue.approvePlan(plan.id, OPERATOR);
-    expect(bare.ok).toBe(false);
-    expect(rescue.getPlan(plan.id)?.status).toBe("DRAFT");
+  it("only the client's commit_plan changes mission state; the page then shows the receipt above the collapsed plan, and query_receipts returns four verified", async () => {
+    const view = render(<App />);
+    const planId = await agentFirstTurn();
+    await clickWithActivation(within(planCard(view, planId)).getByRole("button", { name: `Approve plan ${planId}` }));
+    await settle();
+    expect(getState()).toEqual(seed());
 
-    await clickWithActivation(within(card).getByRole("button", { name: `Approve plan ${plan.id}` }));
+    let second: Awaited<ReturnType<typeof secondTurn>> | undefined;
+    await act(async () => {
+      second = await secondTurn(rescue, planId);
+    });
     await settle(120);
 
-    expect(rescue.getPlan(plan.id)?.status).toBe("COMMITTED");
+    expect(second!.committed.status).toBe("COMMITTED");
+    expect((second!.receipts.receipts as Array<{ verification: { status: string } }>).map((r) => r.verification.status)).toEqual([
+      "VERIFIED",
+      "VERIFIED",
+      "VERIFIED",
+      "VERIFIED",
+    ]);
     expect(view.container.querySelector('[data-field="mission"]')?.textContent).toBe("launched");
     expect(view.container.querySelector('[data-field="oxygen"]')?.textContent).toBe("4 available");
+
     const receipt = view.getByRole("region", { name: "Rescue receipt AST-10428" });
-    expect(receipt.textContent).toContain("RESCUE RECEIPT AST-10428");
     const lines = [...within(receipt).getByRole("list", { name: "Verified changes" }).children].map((li) => li.textContent);
     expect(lines).toEqual([
       "Oxygen packs available6→4verified",
@@ -96,59 +166,24 @@ describe("the mission screen", () => {
       "Dock 3 power20%→65%verified",
       "Mission AST-10428draft→launchedverified",
     ]);
-    // The card stays, in its committed state, with each operation's outcome in words.
-    const settled = view.getByRole("region", { name: new RegExp(`^Plan ${plan.id}: committed`) });
-    expect(settled.textContent).toContain("committed, every operation verified");
-    expect(within(settled).queryByRole("button", { name: /^Approve/ })).toBeNull();
-    // The client's log ends with commit_plan and query_receipts.
-    const calls = [...within(view.getByRole("list", { name: "Tool calls the agent made" })).getAllByRole("listitem")].map(
-      (li) => li.getAttribute("data-call"),
-    );
-    expect(calls.slice(-2)).toEqual(["commit_plan", "query_receipts"]);
-    // The receipt is what the agent reads back through the control tools.
-    const back = await rescue.invoke("invoke_capability", { name: "query_receipts", input: { plan_id: plan.id } });
-    expect((JSON.parse(back.content[0]!.text) as { receipts: unknown[] }).receipts).toHaveLength(4);
+    // The receipt comes before the plan in the document, and the plan is collapsed with "What changed".
+    const plan = view.container.querySelector(`[data-plan="${planId}"]`)!;
+    expect(receipt.compareDocumentPosition(plan) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(plan.tagName).toBe("DETAILS");
+    expect(plan.hasAttribute("open")).toBe(false);
+    expect(plan.textContent).toContain("What changed");
+    // Guided attention moved across the four panels in order.
+    expect([...revealedPanels()].slice(-4)).toEqual(["panel-oxygen", "panel-drone", "panel-dock", "panel-mission"]);
   });
 
-  it("guided execution moves attention across the four affected panels in the plan's order, and every completion is announced", async () => {
+  it("reset restores the seed and clears the plan and the receipt", async () => {
     const view = render(<App />);
-    const { plan, card } = await propose(view);
-    const spoken: string[] = [];
-    const live = view.container.querySelector("[data-presence-announce]")!;
-    new MutationObserver(() => spoken.push(live.textContent ?? "")).observe(live, { childList: true, characterData: true, subtree: true });
-
-    await clickWithActivation(within(card).getByRole("button", { name: `Approve plan ${plan.id}` }));
-    await settle(200);
-
-    // The read lit the crew panel first; the plan then moves across the four affected panels in order.
-    const lit = [...revealedPanels()];
-    expect(lit[0]).toBe("panel-crew");
-    expect(lit.slice(-4)).toEqual(["panel-oxygen", "panel-drone", "panel-dock", "panel-mission"]);
-    // Focus does not move: the runtime marks an execution human-initiated only
-    // through approve, and a plan is committed by the agent after approval, so
-    // the handoff is never granted. Attention moves by highlight and announcement.
-    expect(document.activeElement?.getAttribute("data-reveal") ?? null).toBeNull();
-    expect(spoken.filter(Boolean)).toContain("Mission AST-10428 launched. The rescue is under way.");
-  });
-
-  it("reject leaves the seed, the card says so, and there is no receipt", async () => {
-    const view = render(<App />);
-    const { plan, card } = await propose(view);
+    const planId = await agentFirstTurn();
+    await clickWithActivation(within(planCard(view, planId)).getByRole("button", { name: `Approve plan ${planId}` }));
     await act(async () => {
-      fireEvent.click(within(card).getByRole("button", { name: "Reject" }));
+      await secondTurn(rescue, planId);
     });
     await settle(60);
-    expect(getState()).toEqual(seed());
-    expect(view.getByRole("region", { name: new RegExp(`^Plan ${plan.id}: rejected`) }).textContent).toContain("rejected, nothing ran");
-    expect(view.queryByRole("region", { name: "Rescue receipt AST-10428" })).toBeNull();
-    expect(view.container.querySelector("[data-client-outcome]")?.textContent).toContain("rejected");
-  });
-
-  it("reset restores the seed and clears the plan, the receipt, and the agent's calls", async () => {
-    const view = render(<App />);
-    const { plan, card } = await propose(view);
-    await clickWithActivation(within(card).getByRole("button", { name: `Approve plan ${plan.id}` }));
-    await settle(120);
     expect(getState().mission.status).toBe("launched");
     await act(async () => {
       fireEvent.click(view.getByRole("button", { name: "Reset" }));
@@ -156,8 +191,8 @@ describe("the mission screen", () => {
     await settle(60);
     expect(getState()).toEqual(seed());
     expect(view.container.querySelector('[data-field="mission"]')?.textContent).toBe("draft");
-    expect(view.queryByRole("region", { name: "Rescue receipt AST-10428" })).toBeNull();
     expect(view.container.querySelector("[data-plan]")).toBeNull();
-    expect(view.queryByRole("list", { name: "Tool calls the agent made" })).toBeNull();
+    expect(view.queryByRole("region", { name: "Rescue receipt AST-10428" })).toBeNull();
+    expect(view.container.querySelector("[data-agent-status]")?.textContent).toMatch(/Waiting for a WebMCP agent/);
   });
 });
