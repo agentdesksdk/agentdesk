@@ -103,18 +103,20 @@ export const SIDE_BY_SIDE_EXPOSURES: readonly Exposure[] = ["flat", "routed"];
  * The same task under both exposures, in sequence, on one runtime.
  *
  * `reset` runs before each arm, so both start from the same seed the way
- * each eval arm gets a fresh catalog, and once more at the end so the page
- * is handed back untouched. The exposure the runtime had when the run
- * began is restored last.
+ * each eval arm gets a fresh catalog. `restore` is a different operation:
+ * it puts back the document the page had before the probe, so benchmark
+ * isolation never invalidates real receipts by leaving their data at seed.
+ * The exposure the runtime had when the run began is restored last.
  */
 export async function runSideBySide(options: {
   runtime: AgentDeskRuntime;
   task: SideBySideTask;
   approver: Actor;
   reset: () => Promise<void>;
+  restore: () => Promise<void>;
   exposures?: readonly Exposure[];
 }): Promise<ArmMeasurement[]> {
-  const { runtime, task, approver, reset } = options;
+  const { runtime, task, approver, reset, restore } = options;
   const exposures = options.exposures ?? SIDE_BY_SIDE_EXPOSURES;
   const original = runtime.getSnapshot().exposure;
   const rows: ArmMeasurement[] = [];
@@ -125,8 +127,11 @@ export async function runSideBySide(options: {
       rows.push(await measureArm(runtime, task, { approver }));
     }
   } finally {
-    await reset();
-    await runtime.setExposure(original);
+    try {
+      await restore();
+    } finally {
+      await runtime.setExposure(original);
+    }
   }
   return rows;
 }

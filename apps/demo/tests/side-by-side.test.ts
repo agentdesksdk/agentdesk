@@ -13,7 +13,7 @@ import {
 } from "@agentdesksdk/webmcp";
 import { capabilities } from "../src/capabilities/index.ts";
 import { stagingAdapter } from "../src/capabilities/staged.ts";
-import { getState, resetStore } from "../src/data/store.ts";
+import { getCommittedState, getState, land, mutate, resetStore } from "../src/data/store.ts";
 import {
   BOOTSTRAP_TOOLS,
   measureArm,
@@ -189,7 +189,7 @@ describe("side-by-side benchmark: the demo runtime", () => {
     resetStore();
   });
 
-  it("runs both arms on one runtime from the same seed, then restores mode and seed", async () => {
+  it("runs both arms from the seed, then restores the document it found", async () => {
     const runtime = createAgentDeskRuntime({
       capabilities,
       registerTool: async () => {},
@@ -197,6 +197,12 @@ describe("side-by-side benchmark: the demo runtime", () => {
       exposure: "routed",
     });
     await runtime.start();
+    mutate((draft) => {
+      draft.orders.find((order) => order.id === "10428")!.notes.push(
+        "Keep this operator note.",
+      );
+    });
+    const before = structuredClone(getCommittedState());
     const resets: number[] = [];
     const rows = await runSideBySide({
       runtime,
@@ -207,6 +213,10 @@ describe("side-by-side benchmark: the demo runtime", () => {
         resetStore();
         await runtime.reset();
       },
+      restore: async () => {
+        land(before);
+        await runtime.reset();
+      },
     });
 
     expect(rows.map((r) => r.exposure)).toEqual(["flat", "routed"]);
@@ -214,7 +224,7 @@ describe("side-by-side benchmark: the demo runtime", () => {
 
     // Every arm starts from the seed: the reset before the routed arm saw the
     // credit the flat arm's refund issued, and cleared it.
-    expect(resets).toEqual([0, 1, 1]);
+    expect(resets).toEqual([0, 1]);
 
     expect(flat.peakVisibleToolCount).toBe(capabilities.length + BOOTSTRAP_TOOLS.length);
     expect(flat.peakApplicationTools).toBe(capabilities.length);
@@ -229,8 +239,117 @@ describe("side-by-side benchmark: the demo runtime", () => {
     // The page is handed back the way the run found it.
     expect(runtime.getSnapshot().exposure).toBe("routed");
     expect(runtime.getSnapshot().pending).toEqual([]);
-    expect(getState().orders.find((o) => o.id === "10428")?.shippingRefunded).toBe(false);
-    expect(getState().credits).toHaveLength(0);
+    expect(getCommittedState()).toEqual(before);
+    await runtime.stop();
+  });
+
+  it("records a receipt for every mutation in a five-operation plan", async () => {
+    const runtime = createAgentDeskRuntime({
+      capabilities,
+      registerTool: async () => {},
+      staging: stagingAdapter,
+      exposure: "routed",
+    });
+    await runtime.start();
+    const plan = await runtime.prepare({
+      summary: "Five governed updates",
+      operations: [
+        { capability: "add_order_note", input: { order_id: "10428", note: "Extra foam" } },
+        { capability: "mark_order_shipped", input: { order_id: "10408" } },
+        { capability: "adjust_stock", input: { sku: "MER-DSK-01", delta: 1 } },
+        { capability: "apply_discount", input: { invoice_id: "INV-3021", percent: 5 } },
+        {
+          capability: "issue_credit",
+          input: { customer_id: "C-1001", amount: 10, reason: "Service recovery" },
+        },
+      ],
+    });
+    expect(runtime.approvePlan(plan.id, OPERATOR).ok).toBe(true);
+    expect((await runtime.commitPlan(plan.id)).ok).toBe(true);
+
+    expect(runtime.queryReceipts({ planId: plan.id }).map((entry) => entry.capability)).toEqual(
+      expect.arrayContaining([
+        "add_order_note",
+        "mark_order_shipped",
+        "adjust_stock",
+        "apply_discount",
+        "issue_credit",
+      ]),
+    );
+    expect(runtime.queryReceipts({ planId: plan.id })).toHaveLength(5);
+    await runtime.stop();
+  });
+
+  it("keeps an existing receipt consistent with its restored document", async () => {
+    const live = createAgentDeskRuntime({
+      capabilities,
+      registerTool: async () => {},
+      staging: stagingAdapter,
+      exposure: "routed",
+    });
+    const probe = createAgentDeskRuntime({
+      capabilities,
+      registerTool: async () => {},
+      staging: stagingAdapter,
+      exposure: "routed",
+    });
+    await live.start();
+    await probe.start();
+    await live.invoke("adjust_stock", { sku: "MER-DSK-01", delta: 2 });
+    const receiptBefore = live.queryReceipts()[0]!;
+    const documentBefore = structuredClone(getCommittedState());
+
+    await runSideBySide({
+      runtime: probe,
+      task: REFUND_SHIPPING_HAPPY,
+      approver: OPERATOR,
+      reset: async () => {
+        resetStore();
+        await probe.reset();
+      },
+      restore: async () => {
+        land(documentBefore);
+        await probe.reset();
+      },
+    });
+
+    expect(live.queryReceipts()).toEqual([receiptBefore]);
+    const stockChange = receiptBefore.receipt.changes.find((change) =>
+      change.field.endsWith("stock"),
+    );
+    expect(
+      getCommittedState().products.find((product) => product.sku === "MER-DSK-01")
+        ?.stock,
+    ).toBe(stockChange?.after);
+    await probe.stop();
+    await live.stop();
+  });
+
+  it("restores the original exposure even when document restoration fails", async () => {
+    const runtime = createAgentDeskRuntime({
+      capabilities,
+      registerTool: async () => {},
+      staging: stagingAdapter,
+      exposure: "routed",
+    });
+    await runtime.start();
+
+    await expect(
+      runSideBySide({
+        runtime,
+        task: REFUND_SHIPPING_HAPPY,
+        approver: OPERATOR,
+        exposures: ["flat"],
+        reset: async () => {
+          resetStore();
+          await runtime.reset();
+        },
+        restore: async () => {
+          throw new Error("document restore failed");
+        },
+      }),
+    ).rejects.toThrow("document restore failed");
+    expect(runtime.getSnapshot().exposure).toBe("routed");
     await runtime.stop();
   });
 });

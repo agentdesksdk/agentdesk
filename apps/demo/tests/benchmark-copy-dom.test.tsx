@@ -19,8 +19,8 @@ describe("the benchmark's side-by-side copy says who approves", () => {
     expect(text).toMatch(/harness approves/);
     expect(text).toMatch(/without a click/);
     // The rest of the sentence's facts stay: each arm starts from the seed
-    // and the seed is restored.
+    // and the operator's original document is restored.
     expect(text).toMatch(/starts from the demo seed/);
-    expect(text).toMatch(/seed is restored/);
+    expect(text).toMatch(/document the operator had.*is restored/);
   });
 });

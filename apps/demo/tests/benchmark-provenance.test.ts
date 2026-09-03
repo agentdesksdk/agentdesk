@@ -69,4 +69,39 @@ describe("timed benchmark provenance", () => {
       false,
     );
   });
+
+  it("persists the latest same-task comparison across a module reload", async () => {
+    const first = await import("../src/instrumentation/benchmark.ts");
+    const rows = [
+      {
+        exposure: "flat" as const,
+        peakVisibleToolCount: 83,
+        peakApplicationTools: 79,
+        peakSchemaBytes: 28_489,
+        approvalRequested: true,
+        blocked: false,
+        dispatched: true,
+      },
+      {
+        exposure: "routed" as const,
+        peakVisibleToolCount: 9,
+        peakApplicationTools: 5,
+        peakSchemaBytes: 3_776,
+        approvalRequested: true,
+        blocked: false,
+        dispatched: true,
+      },
+    ];
+    first.benchmark.saveComparison(rows);
+
+    vi.resetModules();
+    const reloaded = await import("../src/instrumentation/benchmark.ts");
+
+    expect(reloaded.benchmark.getState().comparison?.rows).toEqual(rows);
+    expect(
+      reloaded.isComparableComparison(
+        reloaded.benchmark.getState().comparison!,
+      ),
+    ).toBe(true);
+  });
 });
