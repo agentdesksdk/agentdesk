@@ -522,6 +522,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   /** Origins allowed to see registered tools (spec: `exposedTo`). */
   exposedTo?: string[];
   /**
+   * How many capabilities `find_capabilities` publishes and `routeTask`
+   * returns. Clamped like every other limit: never above `MAX_ROUTED`, and
+   * zero or below routes nothing. Absent, `DEFAULT_ROUTED`.
+   */
+  routing?: { limit?: number };
+  /**
    * Current application revision. Captured when a plan is prepared and
    * compared again at commit, so a human cannot approve a plan built
    * against state that has since moved.
