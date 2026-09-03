@@ -29,13 +29,14 @@ export function SupportTicket() {
 
   return (
     <>
-      <div className="detail-header">
-        <h1>Ticket {ticket.id}</h1>
-        <Pill value={ticket.status} />
-        <Pill value={ticket.priority} />
-      </div>
-      <p className="page-sub">{ticket.subject}</p>
-      <div className="ticket-meta">
+      <div id="ticket-details">
+        <div className="detail-header">
+          <h1>Ticket {ticket.id}</h1>
+          <Pill value={ticket.status} />
+          <Pill value={ticket.priority} />
+        </div>
+        <p className="page-sub">{ticket.subject}</p>
+        <div className="ticket-meta">
         <span>
           Customer{" "}
           <Link to={`/${mode}/customers/${ticket.customerId}`}>
@@ -48,9 +49,11 @@ export function SupportTicket() {
             Order <Link to={`/${mode}/orders/${order.id}`}>#{order.id}</Link>
           </span>
         ) : null}
+        <span>Assignee {ticket.assignee ?? "Unassigned"}</span>
         <span>
           <Link to={`/${mode}/support`}>All tickets</Link>
         </span>
+        </div>
       </div>
       <div
         className="panel"

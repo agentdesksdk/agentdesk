@@ -4,24 +4,23 @@ import { capabilities } from "../capabilities/index.ts";
 import { stagingAdapter } from "../capabilities/staged.ts";
 import { StatCard } from "../components/bits.tsx";
 import { useBenchmark, useRuntime } from "../components/hooks.ts";
-import { resetStore } from "../data/store.ts";
+import { getCommittedState, land, resetStore } from "../data/store.ts";
 import {
   benchmark,
   estimateTokens,
+  isComparableComparison,
   isComparableRun,
 } from "../instrumentation/benchmark.ts";
 import {
   BOOTSTRAP,
   REFUND_SHIPPING_HAPPY,
   runSideBySide,
-  type ArmMeasurement,
 } from "../instrumentation/sideBySide.ts";
-import { OPERATOR } from "../runtime/agentdesk.ts";
+import { agentdesk, OPERATOR } from "../runtime/agentdesk.ts";
 
 type SideBySide =
   | { status: "idle" }
   | { status: "running" }
-  | { status: "done"; rows: ArmMeasurement[] }
   | { status: "failed"; message: string };
 
 export function Benchmark() {
@@ -30,7 +29,25 @@ export function Benchmark() {
   const [sideBySide, setSideBySide] = useState<SideBySide>({ status: "idle" });
 
   async function runBothModes() {
+    const openPlan = snapshot.plans.find((plan) =>
+      plan.status === "DRAFT" ||
+      plan.status === "APPROVED" ||
+      plan.status === "COMMITTING"
+    );
+    if (
+      snapshot.pending.length > 0 ||
+      openPlan !== undefined ||
+      agentdesk.listUnreconciled().length > 0
+    ) {
+      setSideBySide({
+        status: "failed",
+        message:
+          "Finish or reject the open approval or plan before benchmarking; the comparison will not invalidate a reviewed proposal.",
+      });
+      return;
+    }
     setSideBySide({ status: "running" });
+    const documentBefore = structuredClone(getCommittedState());
     // A probe runtime over the page's own catalog and staging adapter, built
     // the way `pnpm eval` builds one. The page's runtime is left alone: its
     // guided presence navigates on every invoke, which would unmount this
@@ -56,8 +73,13 @@ export function Benchmark() {
           resetStore();
           await probe.reset();
         },
+        restore: async () => {
+          land(documentBefore);
+          await probe.reset();
+        },
       });
-      setSideBySide({ status: "done", rows });
+      benchmark.saveComparison(rows);
+      setSideBySide({ status: "idle" });
     } catch (err) {
       setSideBySide({
         status: "failed",
@@ -67,6 +89,8 @@ export function Benchmark() {
       await probe.stop();
     }
   }
+  const comparison = bench.comparison;
+  const comparisonRows = comparison?.rows;
   const modeLabel = snapshot.exposure === "flat" ? "Baseline (flat)" : "AgentDesk (routed)";
   const runtimeTools = snapshot.nativeTools.filter((name) => BOOTSTRAP.has(name)).length;
   const appTools = snapshot.nativeTools.length - runtimeTools;
@@ -103,8 +127,8 @@ export function Benchmark() {
           routed, on a runtime built from this page&apos;s catalog the way{" "}
           <code>pnpm eval</code> builds one. Each arm starts from the demo
           seed; the harness approves the refund as a person would, so both
-          arms complete without a click, and the seed is restored when the
-          run ends. Both columns are the task-time peak:
+          arms complete without a click. The document the operator had before
+          the probe is restored when the run ends. Both columns are the task-time peak:
           sampled after routing and after execution, the larger reported.
         </p>
         <div className="bench-controls">
@@ -136,16 +160,21 @@ export function Benchmark() {
             </tr>
           </thead>
           <tbody>
-            {sideBySide.status !== "done" ? (
+            {comparisonRows === undefined ? (
               <tr>
                 <td colSpan={5} className="empty">
                   Not run yet.
                 </td>
               </tr>
             ) : (
-              sideBySide.rows.map((row) => (
+              comparisonRows.map((row) => (
                 <tr key={row.exposure}>
-                  <td>{row.exposure === "flat" ? "baseline" : "agentdesk"}</td>
+                  <td>
+                    {row.exposure === "flat" ? "baseline" : "agentdesk"}
+                    {comparison !== null && !isComparableComparison(comparison)
+                      ? " (stale)"
+                      : ""}
+                  </td>
                   <td>{row.peakApplicationTools}</td>
                   <td>{row.peakSchemaBytes.toLocaleString()}</td>
                   <td>{row.approvalRequested ? "yes" : "no"}</td>
@@ -156,6 +185,11 @@ export function Benchmark() {
           </tbody>
         </table>
         </div>
+        {comparisonRows !== undefined ? (
+          <button onClick={() => benchmark.clearComparison()}>
+            Clear comparison
+          </button>
+        ) : null}
       </div>
       <div className="panel">
         <h2>Timed task run</h2>

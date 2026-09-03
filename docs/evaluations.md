@@ -240,7 +240,7 @@ copied into `apps/demo/dist/p0/` by the assemble script on `pnpm build`, so
 a deployed site carries it at `/p0/eval.html` next to the demo.
 
 Drive the tasks there, not on the Meridian Ops demo. The demo serves a
-different, 78-capability catalog, and of the names the task set expects only
+different, 79-capability catalog, and of the names the task set expects only
 `refund_shipping` and `add_order_note` exist there: the demo has
 `get_invoice` where the task set expects `read_invoice`,
 `anonymize_customer` where it has `close_account`, nothing resembling
@@ -561,6 +561,6 @@ adds is that the gain did not come from the first seed's vocabulary.
 
 ## Relationship to `docs/benchmark.md`
 
-No claim there changes. That document measures the demo's 78-capability
+No claim there changes. That document measures the demo's 79-capability
 catalog through the UI; this measures a seven-plus-filler catalog the eval
 owns, so its surface figures are its own and are not comparable to the demo's.

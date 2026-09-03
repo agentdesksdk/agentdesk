@@ -8,7 +8,7 @@ measurable instead of asserted.
 | | `/baseline` | `/agentdesk` |
 | --- | --- | --- |
 | Exposure | Entire applicable catalog registered flat | Bootstrap 4 + routed working set (≤6) |
-| Catalog | identical (78 capabilities) | identical |
+| Catalog | identical (79 capabilities) | identical |
 | Handlers | identical | identical |
 | Pipeline | identical | identical |
 
@@ -22,7 +22,7 @@ Everything comes from the live runtime, nothing is hardcoded:
 - **Catalog capability count** — size of the app catalog.
 - **Active WebMCP tool count** — tools currently registered, reported as
   application + runtime so the arithmetic is checkable
-  (e.g. baseline 78 application + 4 runtime = 82 total).
+  (e.g. baseline 79 application + 4 runtime = 83 total).
 - **Serialized schema bytes** — UTF-8 length of the serialized definitions
   (name, title, description, inputSchema, annotations) of every currently
   registered tool, summed. This is exactly what the page handed to
@@ -57,26 +57,26 @@ the moment both modes are actually doing the hero task:
 
 ```text
                        BASELINE      AGENTDESK
-Application catalog        78            78
+Application catalog        79            79
 Runtime tools               4             4
-Routed application tools   78             5
-Total active tools         82             9
+Routed application tools   79             5
+Total active tools         83             9
 Schema bytes           (peak)         (peak)   ← both measured live
 ```
 
-The `78 → 5` routing reduction stands on its own; the byte comparison must
+The `79 → 5` routing reduction stands on its own; the byte comparison must
 use peak-vs-peak. The run table reports before/peak/stop for every run so
 the idle figure can never be mistaken for the task figure.
 
-Sample measurement (2026-08-28, local build, hero task routed via
-`find_capabilities`; reproduce with the run table or the console):
+Sample measurement (2026-09-03, local build, hero task run through the
+side-by-side harness; reproduce with **Run in both modes**):
 
 ```text
                        BASELINE      AGENTDESK
-Total active tools         82             9
-Bytes before routing    27,286         1,836
-Bytes peak (task)       27,286         3,728
-Est. tokens (peak)      ~6,822          ~932   (bytes ÷ 4, estimated)
+Total active tools         83             9
+Bytes before routing    28,894         2,011
+Bytes peak (task)       28,894         3,776
+Est. tokens (peak)      ~7,224          ~944   (bytes ÷ 4, estimated)
 ```
 
 ## Running a comparison

@@ -2572,6 +2572,14 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     if (stored === undefined) {
       return errorResult(`unknown receipt: ${receiptId}`);
     }
+    const capability = routeCapability(catalog, stored.capability);
+    if (
+      stored.receipt.undoable === false ||
+      isRouteError(capability) ||
+      capability.rollback === undefined
+    ) {
+      return errorResult(`${stored.capability} does not support rollback`);
+    }
     if (stored.rollbackState !== "READY") {
       return errorResult(`${receiptId} is ${stored.rollbackState}, not READY`);
     }
@@ -3234,6 +3242,11 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       const settledReceipt: Receipt | undefined = isReceiptEnvelope(value)
         ? {
             ...value.receipt,
+            // A receipt cannot promise an undo the registered capability
+            // cannot perform. A compensating handler enables rollback unless
+            // the receipt explicitly opts out for this execution.
+            undoable:
+              capability.rollback !== undefined && value.receipt.undoable !== false,
             evidence:
               value.receipt.evidence !== undefined
                 ? authored(value.receipt.evidence)
@@ -4242,7 +4255,8 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       if (started) {
         await surface.reconcile(desiredNative());
         // A mode switch is an explicit operator action, not context drift;
-        // keeping 78 tombstones would defeat the small-surface premise.
+        // keeping a tombstone for every application tool would defeat the
+        // small-surface premise.
         await surface.clearTombstones();
         emit();
       } else {
@@ -4800,7 +4814,11 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         return { ok: false, reason: `unknown receipt: ${receiptId}` };
       }
       const routed = routeCapability(catalog, stored.capability);
-      if (isRouteError(routed) || !routed.rollback) {
+      if (
+        stored.receipt.undoable === false ||
+        isRouteError(routed) ||
+        !routed.rollback
+      ) {
         return {
           ok: false,
           reason: `${stored.capability} does not support rollback`,

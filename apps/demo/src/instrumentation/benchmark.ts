@@ -1,10 +1,11 @@
 import type { Exposure } from "@agentdesksdk/webmcp";
+import type { ArmMeasurement } from "./sideBySide.ts";
 import { capabilities } from "../capabilities/index.ts";
 import { buildSeed } from "../data/seed.ts";
 import { getCommittedState } from "../data/store.ts";
 import { agentdesk, resetDemo } from "../runtime/agentdesk.ts";
 
-export const BENCHMARK_REVISION = 2;
+export const BENCHMARK_REVISION = 3;
 export const BENCHMARK_SCENARIO = "alice-unshipped-shipping-refund";
 
 function fingerprint(value: unknown): string {
@@ -54,9 +55,21 @@ type BenchState = {
   starting: boolean;
   activeRun: BenchRun | null;
   runs: BenchRun[];
+  comparison: BenchComparison | null;
+};
+
+export type BenchComparison = {
+  id: string;
+  benchmarkRevision: number;
+  scenario: string;
+  catalogFingerprint: string;
+  seedFingerprint: string;
+  createdAt: number;
+  rows: ArmMeasurement[];
 };
 
 const STORAGE_KEY = "agentdesk-benchmark-runs";
+const COMPARISON_STORAGE_KEY = "agentdesk-benchmark-comparison-v1";
 
 function loadRuns(): BenchRun[] {
   try {
@@ -72,7 +85,36 @@ function loadRuns(): BenchRun[] {
   }
 }
 
-let state: BenchState = { starting: false, activeRun: null, runs: loadRuns() };
+function loadComparison(): BenchComparison | null {
+  try {
+    const raw = localStorage.getItem(COMPARISON_STORAGE_KEY);
+    if (raw === null) {
+      return null;
+    }
+    const candidate = JSON.parse(raw) as Partial<BenchComparison>;
+    if (
+      typeof candidate.id !== "string" ||
+      typeof candidate.benchmarkRevision !== "number" ||
+      typeof candidate.scenario !== "string" ||
+      typeof candidate.catalogFingerprint !== "string" ||
+      typeof candidate.seedFingerprint !== "string" ||
+      typeof candidate.createdAt !== "number" ||
+      !Array.isArray(candidate.rows)
+    ) {
+      return null;
+    }
+    return structuredClone(candidate as BenchComparison);
+  } catch {
+    return null;
+  }
+}
+
+let state: BenchState = {
+  starting: false,
+  activeRun: null,
+  runs: loadRuns(),
+  comparison: loadComparison(),
+};
 let auditCursor = 0;
 const listeners = new Set<() => void>();
 
@@ -81,6 +123,21 @@ function persist(): void {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state.runs));
   } catch {
     /* storage may be unavailable in private browsing; runs stay in memory */
+  }
+}
+
+function persistComparison(): void {
+  try {
+    if (state.comparison === null) {
+      localStorage.removeItem(COMPARISON_STORAGE_KEY);
+    } else {
+      localStorage.setItem(
+        COMPARISON_STORAGE_KEY,
+        JSON.stringify(state.comparison),
+      );
+    }
+  } catch {
+    /* storage may be unavailable; the comparison stays in memory */
   }
 }
 
@@ -209,7 +266,12 @@ export const benchmark = {
       endedAt: Date.now(),
       elapsedMs: Date.now() - run.startedAt,
     };
-    state = { starting: false, activeRun: null, runs: [finished, ...state.runs].slice(0, 20) };
+    state = {
+      ...state,
+      starting: false,
+      activeRun: null,
+      runs: [finished, ...state.runs].slice(0, 20),
+    };
     persist();
     emit();
   },
@@ -224,6 +286,25 @@ export const benchmark = {
     persist();
     emit();
   },
+  saveComparison(rows: ArmMeasurement[]): void {
+    const comparison: BenchComparison = {
+      id: `comparison-${Date.now()}`,
+      benchmarkRevision: BENCHMARK_REVISION,
+      scenario: BENCHMARK_SCENARIO,
+      catalogFingerprint: BENCHMARK_CATALOG,
+      seedFingerprint: BENCHMARK_SEED,
+      createdAt: Date.now(),
+      rows: structuredClone(rows),
+    };
+    state = { ...state, comparison };
+    persistComparison();
+    emit();
+  },
+  clearComparison(): void {
+    state = { ...state, comparison: null };
+    persistComparison();
+    emit();
+  },
 };
 
 export function isComparableRun(run: BenchRun): boolean {
@@ -232,6 +313,15 @@ export function isComparableRun(run: BenchRun): boolean {
     run.scenario === BENCHMARK_SCENARIO &&
     run.catalogFingerprint === BENCHMARK_CATALOG &&
     run.seedFingerprint === BENCHMARK_SEED
+  );
+}
+
+export function isComparableComparison(comparison: BenchComparison): boolean {
+  return (
+    comparison.benchmarkRevision === BENCHMARK_REVISION &&
+    comparison.scenario === BENCHMARK_SCENARIO &&
+    comparison.catalogFingerprint === BENCHMARK_CATALOG &&
+    comparison.seedFingerprint === BENCHMARK_SEED
   );
 }
 

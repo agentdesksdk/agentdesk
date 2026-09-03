@@ -33,7 +33,12 @@ function readPersistedState(): DemoState | undefined {
     ) {
       return undefined;
     }
-    return structuredClone(candidate as DemoState);
+    const restored = structuredClone(candidate as DemoState);
+    restored.tickets = restored.tickets.map((ticket) => ({
+      ...ticket,
+      assignee: ticket.assignee ?? null,
+    }));
+    return restored;
   } catch {
     return undefined;
   }

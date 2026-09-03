@@ -186,6 +186,41 @@ describe("governance through the WebMCP bootstrap", () => {
     ]);
   });
 
+  it("refuses a rollback before approval when the receipt has no compensating action", async () => {
+    const agentdesk = createAgentDeskRuntime({
+      capabilities: [
+        defineCapability({
+          name: "write_without_rollback",
+          description: "Write once without a compensating action",
+          risk: "WRITE",
+          inputSchema: { type: "object", properties: {} },
+          execute: () =>
+            receipt({
+              entity: "counter",
+              changes: [{ field: "value", before: 0, after: 1 }],
+              undoable: true,
+              result: { value: 1 },
+            }),
+        }),
+      ],
+      registerTool: async () => {},
+    });
+    await agentdesk.start();
+    await agentdesk.invoke("write_without_rollback", {});
+    const stored = agentdesk.queryReceipts()[0]!;
+
+    const requested = await agentdesk.invoke("invoke_capability", {
+      name: "request_rollback",
+      input: { receipt_id: stored.id },
+    });
+
+    expect(requested.isError).toBe(true);
+    expect(requested.content[0]?.text).toContain("does not support rollback");
+    expect(agentdesk.getSnapshot().pending).toEqual([]);
+    expect(agentdesk.queryReceipts()[0]?.rollbackState).toBe("UNSUPPORTED");
+    expect(agentdesk.queryReceipts()[0]?.receipt.undoable).toBe(false);
+  });
+
   it("refuses application capabilities that collide with governance operations", () => {
     expect(() =>
       createAgentDeskRuntime({

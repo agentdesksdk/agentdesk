@@ -65,6 +65,7 @@ export type Ticket = {
   subject: string;
   status: "open" | "pending" | "closed";
   priority: "low" | "normal" | "high";
+  assignee: string | null;
   createdAt: string;
   messages: TicketMessage[];
 };

@@ -4,7 +4,8 @@ import type { Actor, HumanActor, VerificationResult } from "./plan.ts";
 import type { Receipt } from "./results.ts";
 
 /**
- * READY is undoable, ROLLING_BACK is claimed by an in-flight rollback,
+ * UNSUPPORTED means the receipt has no compensating action. READY is
+ * undoable, ROLLING_BACK is claimed by an in-flight rollback, and
  * ROLLED_BACK is spent.
  *
  * INDETERMINATE is what a dispatched compensating action leaves behind when
@@ -23,6 +24,7 @@ import type { Receipt } from "./results.ts";
  * from a caller who went and looked.
  */
 export type RollbackState =
+  | "UNSUPPORTED"
   | "READY"
   | "ROLLING_BACK"
   | "ROLLED_BACK"
@@ -107,7 +109,7 @@ export class ReceiptStore {
     const stored: StoredReceipt = {
       ...structuredClone(entry),
       id: `RCPT-${this.nextId++}`,
-      rollbackState: "READY",
+      rollbackState: entry.receipt.undoable === false ? "UNSUPPORTED" : "READY",
     };
     deepFreeze(stored);
     this.receipts.push(stored);
@@ -250,7 +252,16 @@ export class ReceiptStore {
     }
     let highest = 0;
     this.receipts = checkpoint.receipts.map((entry) => {
-      const stored = deepFreeze(structuredClone(entry));
+      const stored = deepFreeze({
+        ...structuredClone(entry),
+        // Older checkpoints called every receipt READY. Normalize them at
+        // the hydration boundary so a reload cannot revive an impossible
+        // rollback.
+        rollbackState:
+          entry.receipt.undoable === false
+            ? "UNSUPPORTED"
+            : entry.rollbackState,
+      });
       const numeric = Number(String(stored.id).replace(/^RCPT-/, ""));
       if (Number.isFinite(numeric)) {
         highest = Math.max(highest, numeric);

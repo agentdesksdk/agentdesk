@@ -137,9 +137,12 @@ describe("demo verification and rollback", () => {
     ]);
     expect(settled.outcomes?.[0]?.verification.status).toBe("VERIFIED");
 
-    // Only the refund returns a receipt envelope, so only it lands in history.
+    // Every write returns a receipt, so the complete plan lands in history.
     const recorded = runtime.queryReceipts({ planId: plan.id });
-    expect(recorded.map((r) => r.capability)).toEqual(["refund_shipping"]);
+    expect(recorded.map((r) => r.capability)).toEqual([
+      "add_order_note",
+      "refund_shipping",
+    ]);
   });
 
   it("verifies planned order, customer, and support writes from live state", async () => {

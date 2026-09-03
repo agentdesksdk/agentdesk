@@ -30,7 +30,7 @@ function availabilityText(match: RoutedMatch, report: RoutingReport): string {
     : "available";
 }
 
-/** "3 domains, 78 capabilities" */
+/** "3 domains, 79 capabilities" */
 function treeSummary(tree: readonly CatalogDomain[]): string {
   const total = tree.reduce((sum, domain) => sum + domain.capabilities, 0);
   return `${tree.length} domain${tree.length === 1 ? "" : "s"}, ${total} capabilit${

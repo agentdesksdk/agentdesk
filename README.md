@@ -8,7 +8,7 @@ control.
 
 A real application has dozens or hundreds of operations. Register them all as
 WebMCP tools and the agent gets a flat, expensive, ambiguous surface: our
-demo catalog alone is 78 capabilities and tens of kilobytes of schema before
+demo catalog alone is 79 capabilities and tens of kilobytes of schema before
 the agent has done anything. Big surfaces cost context, invite wrong-tool
 calls, and make dangerous actions look exactly like safe ones.
 
@@ -70,7 +70,7 @@ static deployment.
 ## How it works
 
 ```text
-large internal capability catalog (78)
+large internal capability catalog (79)
   → context-aware deterministic router
   → dynamic native WebMCP registration (≤6 typed tools at a time)
   → availability with structured reasons + a checked repair (which capability to call, with what input)
