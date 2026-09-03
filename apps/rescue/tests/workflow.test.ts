@@ -27,8 +27,8 @@ describe("an external client performs the rescue through the tools; the applicat
     reset();
   });
 
-  it("declares six capabilities, the launch requiring the readiness read", () => {
-    expect(rescueCapabilities.map((c) => c.name)).toEqual(SIX);
+  it("declares the six launch capabilities and the post-launch completion, the launch requiring the readiness read", () => {
+    expect(rescueCapabilities.map((c) => c.name)).toEqual([...SIX, "complete_rescue"]);
     const launch = rescueCapabilities.find((c) => c.name === "launch_rescue")!;
     expect(launch.relationships.requires).toContain("inspect_rescue_conditions");
   });
@@ -80,6 +80,7 @@ describe("an external client performs the rescue through the tools; the applicat
       "Drone NIA-7": "assigned",
       "Dock 3 power": "65%",
       "Mission AST-10428": "launched",
+      "Crew Asteria": "stranded",
     });
     expect(forkLedger().open).toBe(0);
   });

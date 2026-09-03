@@ -9,7 +9,7 @@ import { createSceneStore, type SceneFlags } from "../src/scene.ts";
 import { getState, seed } from "../src/state.ts";
 import { firstTurn, HERO_PROMPT, secondTurn } from "./fixtures/external-client.ts";
 
-const NOTHING: SceneFlags = { oxygenLoaded: false, droneAssigned: false, dockPowered: false, underway: false };
+const NOTHING: SceneFlags = { oxygenLoaded: false, droneAssigned: false, dockPowered: false, underway: false, completed: false };
 
 async function settle(ms = 30) {
   await act(async () => {
@@ -98,6 +98,7 @@ describe("the scene store advances only on the runtime's completion event for ea
     ["assign_rescue_drone", "droneAssigned"],
     ["reroute_dock_power", "dockPowered"],
     ["launch_rescue", "underway"],
+    ["complete_rescue", "completed"],
   ] as const)("%s: started does nothing, a replay without an executionId does nothing, completion lights %s", (capability, flag) => {
     const { store, emit } = harness();
     emit({ phase: "capability_started", capability, executionId: "exec-1" });

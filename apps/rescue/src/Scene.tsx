@@ -73,13 +73,16 @@ const isCompact = () =>
 export function Scene({ state, flags }: { state: RescueState; flags: SceneFlags }) {
   const layout = useSyncExternalStore(subscribeCompact, isCompact, () => false) ? COMPACT : WIDE;
   const dockFill = RING_C * (1 - Math.min(state.dock.power, 100) / 100);
-  const droneAt = flags.underway ? layout.hatch : layout.droneHome;
+  // Under way is the stretch between the launch landing and the completion
+  // landing; the root scene and the drone say the same thing about it.
+  const isUnderway = flags.underway && !flags.completed;
+  const droneAt = flags.underway || flags.completed ? layout.hatch : layout.droneHome;
   const canisters = Array.from({ length: 6 }, (_, index) => ({
     index,
     lit: index < state.oxygen.reserved,
     loaded: flags.oxygenLoaded && index < state.oxygen.reserved,
   }));
-  const missionWords = flags.underway ? "Rescue underway" : "Awaiting rescue";
+  const missionWords = flags.completed ? "MISSION COMPLETE" : flags.underway ? "Rescue underway" : "Awaiting rescue";
 
   return (
     <svg
@@ -89,7 +92,8 @@ export function Scene({ state, flags }: { state: RescueState; flags: SceneFlags 
       aria-label={`${state.crew.name}, ${state.crew.status} at ${state.dock.name}. Drone ${state.drone.id} ${
         flags.droneAssigned ? `assigned to ${state.mission.id}` : "on standby"
       }. ${state.dock.name} at ${state.dock.power}% power. ${state.oxygen.available} oxygen packs available. ${missionWords}.`}
-      data-underway={flags.underway}
+      data-underway={isUnderway}
+      data-completed={flags.completed}
       data-layout={layout === COMPACT ? "compact" : "wide"}
     >
       <defs>
@@ -108,17 +112,17 @@ export function Scene({ state, flags }: { state: RescueState; flags: SceneFlags 
         <polygon points="0,60 60,20 190,20 230,60 190,100 60,100" className="hull" />
         <rect x="70" y="40" width="70" height="40" rx="6" className="window" />
         <polygon points="190,20 230,60 190,100 250,90 265,60 250,30" className="engine" />
-        <circle cx="30" cy="60" r="7" className="beacon" />
+        <circle cx="30" cy="60" r="7" className="beacon" data-beacon={flags.completed ? "stopped" : "distress"} />
         <text x="115" y="140" textAnchor="middle" className="label">
           {state.crew.name.toUpperCase()}
         </text>
         <text x="115" y="162" textAnchor="middle" className="status" data-crew-status>
-          {state.crew.status === "stranded" ? "STRANDED · no power" : "RESCUED"}
+          {flags.completed ? "RESCUED · crew safe" : "STRANDED · no power"}
         </text>
       </g>
 
-      {/* The route the drone follows, drawn once the drone is assigned. */}
-      {flags.droneAssigned ? (
+      {/* The route the drone follows, drawn once the drone is assigned and gone once the crew is aboard. */}
+      {flags.droneAssigned && !flags.completed ? (
         <line
           x1={layout.droneHome.x}
           y1={layout.droneHome.y}
@@ -185,7 +189,7 @@ export function Scene({ state, flags }: { state: RescueState; flags: SceneFlags 
         data-scene="drone"
         data-reveal={PANELS.drone}
         data-assigned={flags.droneAssigned}
-        data-underway={flags.underway}
+        data-underway={isUnderway}
         style={{ transform: `translate(${droneAt.x}px, ${droneAt.y}px)` }}
       >
         <circle r="70" className="halo" />
@@ -202,7 +206,7 @@ export function Scene({ state, flags }: { state: RescueState; flags: SceneFlags 
           {state.drone.id}
         </text>
         <text y="58" textAnchor="middle" className="status" data-drone-label>
-          {flags.droneAssigned ? `Assigned ${state.drone.assignment ?? state.mission.id}` : "Standby"}
+          {flags.completed ? "Crew aboard" : flags.droneAssigned ? `Assigned ${state.drone.assignment ?? state.mission.id}` : "Standby"}
         </text>
       </g>
 

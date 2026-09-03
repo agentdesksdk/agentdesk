@@ -32,6 +32,7 @@ const AFTER = {
   "Drone NIA-7": "assigned",
   "Dock 3 power": "65%",
   "Mission AST-10428": "launched",
+  "Crew Asteria": "stranded",
 };
 
 async function booted() {
@@ -60,6 +61,7 @@ describe("the rescue runtime", () => {
       "Drone NIA-7": "standby",
       "Dock 3 power": "20%",
       "Mission AST-10428": "draft",
+      "Crew Asteria": "stranded",
     });
   });
 
@@ -78,14 +80,21 @@ describe("the rescue runtime", () => {
       "assign_rescue_drone",
       "reroute_dock_power",
       "launch_rescue",
+      "complete_rescue",
     ]);
 
     await runtime.routeTask(HERO);
     const routed = runtime.getSnapshot().lastRouting!;
     const names = routed.activated;
     // The runtime routes with a budget of six, so the one call carries
-    // every rescue capability.
-    expect([...names].sort()).toEqual(rescueCapabilities.map((c) => c.name).sort());
+    // every rescue capability available before the launch; complete_rescue
+    // is unavailable until launch_rescue has completed, so it is not activated.
+    expect([...names].sort()).toEqual(
+      rescueCapabilities
+        .filter((c) => c.name !== "complete_rescue")
+        .map((c) => c.name)
+        .sort(),
+    );
     for (const name of names) {
       expect(model.tools.has(name)).toBe(true);
     }

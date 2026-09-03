@@ -278,6 +278,74 @@ export const launchRescue: Capability = staged({
   },
 });
 
+/** The post-launch capability's name, spelled once; every other module uses this constant. */
+export const COMPLETE_RESCUE = "complete_rescue";
+
+/**
+ * After the launch: the crew comes aboard and the mission closes. The
+ * availability hook reads mission state, so before the launch the router
+ * ranks it, annotates it unavailable with this reason, and does not
+ * register it; once launch_rescue has completed it routes and registers.
+ * Nothing on the page can call it; only a WebMCP client does.
+ */
+export const completeRescue: Capability = staged({
+  name: COMPLETE_RESCUE,
+  title: "Complete the rescue",
+  description: `Brings the ${CREW} crew aboard ${DRONE} and closes mission ${MISSION}: the crew becomes rescued and the mission completed. Available once the rescue has launched.`,
+  domain: DOMAIN,
+  risk: "WRITE",
+  intents: ["complete the rescue", "complete the asteria rescue", "finish the rescue", "verify the crew is safe", "close the mission"],
+  keywords: ["complete", "finish", "verify", "safe", "final", "receipt", "recover"],
+  entities: [],
+  inputSchema: {
+    type: "object",
+    properties: { mission: { type: "string", description: `The mission to complete; ${MISSION} when absent` } },
+  },
+  availability: () => {
+    const mission = getState().mission;
+    if (mission.status === "launched") {
+      return { available: true };
+    }
+    if (mission.status === "completed") {
+      return unavailable("ALREADY_COMPLETED", `Mission ${mission.id} is already complete; the crew is rescued.`);
+    }
+    return unavailable("NOT_LAUNCHED", `Mission ${mission.id} has not launched. complete_rescue becomes available once launch_rescue has completed.`);
+  },
+  // The optional mission argument is parsed exactly as launch_rescue parses
+  // it. Checked here, before staging, so a wrong one is refused with its
+  // reason and no fork is opened; the handler repeats the check as a guard.
+  checkInput: (input) => {
+    const mission = typeof input.mission === "string" ? input.mission : MISSION;
+    return mission === getState().mission.id
+      ? { available: true }
+      : unavailable("UNKNOWN_MISSION", `The only mission is ${getState().mission.id}.`);
+  },
+  presentation: {
+    reveal: PANELS.crew,
+    focus: "on_explicit_request",
+    message: `Completing the rescue of ${CREW}`,
+    announce: `Crew ${CREW} recovered. Mission ${MISSION} complete.`,
+  },
+  run: (input) => {
+    const state = draft();
+    // The optional mission argument is parsed exactly as launch_rescue parses
+    // it, and a wrong one is refused before anything on the fork is touched.
+    const mission = typeof input.mission === "string" ? input.mission : MISSION;
+    if (mission !== state.mission.id) {
+      refuse("UNKNOWN_MISSION", `The only mission is ${state.mission.id}.`, COMPLETE_RESCUE);
+    }
+    if (state.mission.status === "completed") {
+      refuse("ALREADY_COMPLETED", `Mission ${state.mission.id} is already complete.`, COMPLETE_RESCUE);
+    }
+    if (state.mission.status !== "launched") {
+      refuse("NOT_LAUNCHED", `Mission ${state.mission.id} has not launched.`, COMPLETE_RESCUE);
+    }
+    state.crew.status = "rescued";
+    state.mission.status = "completed";
+    return { crew: state.crew.status, mission: state.mission.status };
+  },
+});
+
 export const rescueCapabilities: Capability[] = [
   findStrandedCrew,
   inspectRescueConditions,
@@ -285,6 +353,7 @@ export const rescueCapabilities: Capability[] = [
   assignRescueDrone,
   rerouteDockPower,
   launchRescue,
+  completeRescue,
 ];
 
 /** The four operations the hero prompt asks for, in the order it asks. */

@@ -45,3 +45,49 @@ describe("the page's source never acts as the agent", () => {
     expect(main).toMatch(/import\("\.\/walkthrough\.ts"\)/);
   });
 });
+
+/**
+ * complete_rescue runs only when a WebMCP client calls it. Its name is
+ * spelled once, where the capability is defined; every other module reaches
+ * it through that constant, so a button, a timer, or a script that named it
+ * would be visible here. The walkthrough, the one module allowed to call
+ * tools, does not know it exists.
+ */
+describe("the page cannot complete the rescue by itself", () => {
+  const root = join(process.cwd(), "src");
+
+  it("spells complete_rescue only in the capability definition", () => {
+    const offenders: string[] = [];
+    for (const file of sourceFiles(root)) {
+      const base = file.split(/[\\/]/).pop()!;
+      if (base === "capabilities.ts") {
+        continue;
+      }
+      const text = readFileSync(file, "utf8");
+      for (const match of text.matchAll(/complete_rescue/g)) {
+        offenders.push(`${base}:${text.slice(0, match.index).split("\n").length}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("keeps the walkthrough away from it: no reference to the constant or the capability", () => {
+    const walkthrough = readFileSync(join(root, "walkthrough.ts"), "utf8");
+    expect(walkthrough).not.toMatch(/COMPLETE_RESCUE|completeRescue|complete_rescue/);
+  });
+
+  it("wires no timer or handler to an invocation anywhere in the page", () => {
+    const offenders: string[] = [];
+    for (const file of sourceFiles(root)) {
+      const base = file.split(/[\\/]/).pop()!;
+      if (ALLOWED_FILES.has(base)) {
+        continue;
+      }
+      const text = readFileSync(file, "utf8");
+      for (const match of text.matchAll(/(setTimeout|setInterval|onClick|addEventListener)[\s\S]{0,300}?invoke_capability/g)) {
+        offenders.push(`${base}:${text.slice(0, match.index).split("\n").length} ${match[1]}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});
