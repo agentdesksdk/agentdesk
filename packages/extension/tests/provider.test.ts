@@ -65,8 +65,13 @@ function specs(): DirectCapabilitySpec[] {
   ];
 }
 
-const denyDeletes = ({ capability }: { capability: { name: string } }) =>
-  capability.name === "delete_all_orders" ? ({ kind: "deny", reason: "never" } as const) : ({ kind: "allow" } as const);
+/** The risk-based default with one denial on top; a policy replaces the default, so risk is restated. */
+const denyDeletes = ({ capability }: { capability: { name: string; risk: string } }) =>
+  capability.name === "delete_all_orders"
+    ? ({ kind: "deny", reason: "never" } as const)
+    : capability.risk === "CONSEQUENTIAL"
+      ? ({ kind: "require_approval" } as const)
+      : ({ kind: "allow" } as const);
 
 type Payload = { matches: Array<{ name: string }>; activated_tools: string[] };
 
@@ -86,7 +91,7 @@ async function govern(runtime: ReturnType<typeof createAgentDeskRuntime>, execut
     activated: payload.activated_tools,
     deniedRouted: deniedPayload.matches.map((m) => m.name),
     asked: asked.code,
-    approvedError: approved?.isError ?? true,
+    approvedError: approved === undefined ? true : approved.isError === true,
     refused: refused.code,
     auditKinds: runtime.getSnapshot().audit.map((e) => e.kind),
   };

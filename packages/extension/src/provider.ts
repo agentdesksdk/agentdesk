@@ -1,5 +1,7 @@
 import {
   createWebMcpAdapter,
+  defineCapability,
+  type Capability,
   type CapabilityProvider,
   type RegisterToolFn,
 } from "@agentdesk/webmcp";
@@ -27,19 +29,69 @@ export type ExtensionProvider = CapabilityProvider & {
   detach: () => void;
 };
 
+/**
+ * The extension context as a `CapabilityProvider`.
+ *
+ * Capabilities come from the manifest the extension holds for the site,
+ * handlers included, so nothing the page says becomes a capability. The
+ * adapter is the extension's own `registerTool`, so registration never
+ * crosses into page script. `subscribe` fires when the page reports a
+ * change through the bridge, or when the extension replaces the manifest;
+ * either way the runtime reads `capabilities()` again, and a manifest whose
+ * capabilities are a function answers from the DOM as it is now.
+ */
 export function extensionProvider(options: ExtensionProviderOptions): ExtensionProvider {
+  let manifest = options.manifest;
+  const listeners = new Set<() => void>();
+  const announce = (): void => {
+    for (const listener of listeners) {
+      listener();
+    }
+  };
+
   const bridge = attachBridge({
     window: options.window,
-    origin: options.manifest.origin,
-    onRequest: () => {},
+    origin: manifest.origin,
+    ...(manifest.anchors !== undefined ? { anchors: manifest.anchors } : {}),
+    ...(options.now !== undefined ? { now: options.now } : {}),
+    onRequest: (request) => {
+      if (request.kind === "changed") {
+        announce();
+      } else if (request.kind === "reveal") {
+        options.onReveal?.(request.anchor);
+      }
+      // `anchors` is remembered by the bridge itself.
+    },
   });
+
+  const capabilities = (): readonly Capability[] => {
+    const specs = typeof manifest.capabilities === "function" ? manifest.capabilities() : manifest.capabilities;
+    return specs.map((spec) => defineCapability(spec));
+  };
+
   return {
     kind: "extension",
-    capabilities: () => [],
+    capabilities,
     adapter: createWebMcpAdapter({ registerTool: options.registerTool }),
-    subscribe: () => () => {},
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
     bridge,
-    replace: () => {},
-    detach: () => bridge.detach(),
+    replace: (next) => {
+      if (next.origin !== manifest.origin) {
+        throw new Error(
+          `a provider is bound to ${manifest.origin}; a manifest for ${next.origin} needs a provider of its own`,
+        );
+      }
+      manifest = next;
+      announce();
+    },
+    detach: () => {
+      listeners.clear();
+      bridge.detach();
+    },
   };
 }
