@@ -117,8 +117,10 @@ describe("the grant card on order 10428", () => {
     expect(authorized[0]!.grantId).toBe(grant.id);
     const receipt = view.getByRole("region", { name: "Receipt for Order #10428" });
     expect(receipt.textContent).toContain(`grant ${grant.id}`);
-    // The spend shows on the card too, as text.
-    expect(card.textContent).toContain("0 of 1");
+    // The spend shows on the card too, as text, the way the State row says
+    // it: nothing is "left" of a grant that can no longer be used.
+    expect(card.textContent).toContain("all 1 use spent");
+    expect(card.textContent).not.toContain("0 of 1 use left");
   });
 
   it("the second use after uses: 1 asks a person, and the card names the grant as exhausted", async () => {
@@ -163,6 +165,10 @@ describe("the grant card on order 10428", () => {
     expect(revoked?.remaining).toBe(2);
     expect(within(card).queryByRole("button", { name: /^Revoke/ })).toBeNull();
     expect(card.textContent).toContain("revoked");
+    // The Uses row reads the way the State row does once the grant is no
+    // longer live: what was left is unused, not still "left".
+    expect(card.textContent).toContain("2 uses unused of 2 granted");
+    expect(card.textContent).not.toContain("2 of 2 uses left");
     // The control that held focus is gone; focus lands on the card.
     expect(document.activeElement).toBe(card);
 

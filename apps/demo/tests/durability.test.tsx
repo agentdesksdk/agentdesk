@@ -349,16 +349,20 @@ describe("the page shows the record, refuses the repeat, and lets a person settl
     expect(seen[0]).toContain(record.id);
   });
 
-  it("Reset Demo leaves nothing persisted and nothing listed", async () => {
+  it("Reset Demo leaves nothing persisted and nothing listed, and the card reads as fresh without a reload", async () => {
     const view = mountAt(`/agentdesk/orders/${ORDER}`);
-    await interruptThroughThePage(view);
+    const card = await interruptThroughThePage(view);
     expect(await demoPersistence.adapter.loadOpenRecords()).toHaveLength(1);
     expect((await demoPersistence.adapter.loadIdempotencyClaims()).length).toBeGreaterThan(0);
+    expect(resultOf(card)).not.toBe("");
 
     await act(async () => {
       fireEvent.click(view.getByRole("button", { name: "Reset Demo" }));
     });
     await frames(2);
+    // The runtime and the store are clean; the card's last result goes with
+    // them, in the same page, rather than waiting for a reload.
+    expect(resultOf(card)).toBe("");
     expect(agentdesk.listUnreconciled()).toEqual([]);
     expect(await demoPersistence.adapter.loadOpenRecords()).toEqual([]);
     expect(await demoPersistence.adapter.loadIdempotencyClaims()).toEqual([]);

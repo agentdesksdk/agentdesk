@@ -42,9 +42,10 @@ The four share one spine, and one earlier claim about that spine was too
 strong. Both producers make capabilities that route, apply policy, and
 audit exactly like authored ones, because `Capability.execute` is an
 arbitrary function. What is not free is the boundary underneath.
-`createAgentDeskRuntime` constructs the WebMCP adapter and the tool
-surface itself, so a `CapabilityProvider` interface has to be extracted
-before the native SDK and the extension can share governance. And a
+`createAgentDeskRuntime` used to construct the WebMCP adapter and the tool
+surface itself; the `CapabilityProvider` seam in `packages/webmcp/src/provider.ts`
+has since been extracted, milestone 3 below, so the native SDK and the
+extension can share governance. And a
 generated manifest cannot feed the runtime unchanged, because
 `defineCapability` refuses a consequential capability that offers a human
 no evidence to approve. A compiler sits between them.
