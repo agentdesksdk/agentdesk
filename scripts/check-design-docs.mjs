@@ -221,6 +221,7 @@ const CLAIMS = [
   ["docs/routing.md", /one call\s+for autonomous routing/, "present", "routing says one call uses the tree autonomously"],
   ["docs/routing.md", /##\s*[\d.]+% with a lexical domain step/, "present", "routing reports the hierarchical scorer against the reference"],
   ["docs/routing.md", /That is not a wide margin/, "present", "routing says plainly what the lexical step did not achieve"],
+  ["docs/routing.md", /`routing: \{ limit \}` on\s+`createAgentDeskRuntime`, clamped through the same `clampBudget`/, "present", "routing states the budget option and that it is clamped"],
   ["docs/architecture.md", /##\s*The provider seam/, "present", "architecture states the capability provider seam"],
   ["docs/architecture.md", /One provider, bound once at construction like the staging\s+adapter/, "present", "architecture decides a provider is bound once"],
   ["docs/architecture.md", /`provider\.ts` the only file that constructs the adapter/, "present", "architecture says the provider seam is the only adapter constructor"],
