@@ -38,7 +38,7 @@ Every figure above is read from a committed `report.json` under
 `scripts/evals/runs` by `pnpm check:docs`, which fails if a sentence here
 stops agreeing with its run.
 
-**Live demo:** `https://<LIVE_URL_PLACEHOLDER>` (fill in at deploy time; see
+**Live demo:** <https://webmcp.agentsdesk.dev> (see
 [docs/guide.md](docs/guide.md#deployment))
 
 Hero prompt, against the seeded Meridian Ops console:

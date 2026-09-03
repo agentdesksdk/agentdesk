@@ -99,5 +99,5 @@ netlify deploy --prod    # or: vercel deploy --prod
 
 No environment variables, no secrets, no server.
 
-Once deployed, replace the `https://<LIVE_URL_PLACEHOLDER>` line at the top
+Once deployed, update the live demo line at the top
 of the README with the real URL.
