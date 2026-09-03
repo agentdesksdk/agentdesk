@@ -249,6 +249,36 @@ describe("a refusal on the bridge is the runtime's audit event", () => {
     provider.detach();
   });
 
+  it("records an overflowed hold as one held_overflow naming what was dropped, before replaying the rest", async () => {
+    const extension = extensionModelContext();
+    let tick = 1_000;
+    const provider = extensionProvider({
+      manifest: { origin: ORIGIN, capabilities: specs() },
+      registerTool: extension.registerTool,
+      window,
+      now: () => (tick += 1),
+    });
+    const runtime = createAgentDeskRuntime({ provider, actor: AGENT });
+
+    for (let i = 0; i < 70; i += 1) {
+      window.dispatchEvent(
+        new MessageEvent("message", { data: { ...forged, actionId: `ACT-${i}` }, origin: ORIGIN, source: window }),
+      );
+    }
+    await runtime.start();
+
+    const refusals = runtime.getSnapshot().audit.filter((event) => event.kind === "provider_refused");
+    expect(refusals).toHaveLength(65);
+    expect(refusals[0]).toMatchObject({
+      kind: "provider_refused",
+      provider: "extension",
+      reason: "held_overflow",
+      detail: { dropped: 6, from: 1_001, to: 1_006, held: 64 },
+    });
+    expect(refusals.slice(1).every((event) => event.kind === "provider_refused" && event.reason === "not_a_request")).toBe(true);
+    provider.detach();
+  });
+
   it("holds a refusal that arrives before the runtime starts and records it once it has", async () => {
     const extension = extensionModelContext();
     const provider = extensionProvider({
