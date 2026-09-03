@@ -6,7 +6,6 @@ import {
 } from "@agentdesksdk/webmcp";
 import { rescueAdapter } from "./adapter.ts";
 import { rescueCapabilities } from "./capabilities.ts";
-import { clearClientCalls } from "./client.ts";
 import { getState, reset, rows } from "./state.ts";
 
 /** The person at the console. Approving is a human act, not the agent's. */
@@ -14,6 +13,7 @@ export const OPERATOR: Actor = { id: "operator", name: "Operator", kind: "human"
 
 type ModelContextHost = { modelContext?: { registerTool?: unknown } };
 
+/** True when the browser exposes real WebMCP. */
 export const webmcpNative =
   typeof document !== "undefined" &&
   typeof (document as unknown as ModelContextHost).modelContext?.registerTool === "function";
@@ -39,11 +39,19 @@ export function createRescueRuntime(
     // mints one inside the click; nothing that only asserts an identity is
     // accepted by this instance.
     approvalGesture: options.approvalGesture ?? "required",
+    // Every rescue capability routes in one call: six, the SDK's MAX_ROUTED.
+    routing: { limit: 6 },
     // A plan approved against one state refuses to commit against another.
     revision: () => JSON.stringify(rows(getState())),
   });
 }
 
+/**
+ * The runtime lives for the document. The page only observes its snapshot
+ * and audit and answers approvals; it never calls a tool. An external
+ * WebMCP client reaches the tools registered here, or, in the browser
+ * without one, through `window.rescue.invoke` from the devtools console.
+ */
 export const rescue = createRescueRuntime();
 
 void rescue.start();
@@ -61,17 +69,17 @@ export function getRuntimeSnapshot(): RuntimeSnapshot {
   return cached;
 }
 
-/** Reset: the seed comes back, and the runtime forgets its plans, receipts, and the client's calls. */
+/** Reset: the seed comes back, and the runtime forgets its plans and receipts. */
 export async function resetRescue(): Promise<void> {
   reset();
-  clearClientCalls();
   await rescue.reset();
 }
 
 /**
- * What the page exposes for inspection. Minting is deliberately not on it:
- * only the plan card's click handler closes over `issueApprovalGesture`,
- * so a script that reaches `window.rescue` cannot mint a token.
+ * What the page exposes for inspection and for a client without WebMCP.
+ * Minting is deliberately not on it: only the plan card's click handler
+ * closes over `issueApprovalGesture`, so a script that reaches
+ * `window.rescue` cannot mint a token.
  */
 const { issueApprovalGesture: _mintOnlyFromTheCard, ...inspectable } = rescue;
 
