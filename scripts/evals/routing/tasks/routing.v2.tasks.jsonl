@@ -1,0 +1,55 @@
+{"schemaVersion":1,"id":"o2-stop-order","prompt":"Ravi rang, he ordered the wrong size on 31877, kill the whole thing before it gets picked","expected":"cancel_order"}
+{"schemaVersion":1,"id":"o2-merge-double","prompt":"Same customer placed 31877 and 31878 within a minute for the same address, make them one","expected":"merge_order"}
+{"schemaVersion":1,"id":"o2-backorder-release","prompt":"The restock for the blue hoodie landed, let the people waiting on it have theirs now","expected":"release_backorder"}
+{"schemaVersion":1,"id":"o2-note-gift","prompt":"Add to 31877 that it's a birthday gift and shouldn't show the price on the slip","expected":"create_order_note"}
+{"schemaVersion":1,"id":"s2-hold-parcel","prompt":"Don't let the Berlin parcel for 31877 leave until the customer confirms she's home Thursday","expected":"shipping_hold_shipment"}
+{"schemaVersion":1,"id":"s2-rate-change","prompt":"The 48 hour option for Ireland goes up to 9.90 from Monday","expected":"update_shipping_rate"}
+{"schemaVersion":1,"id":"s2-tracking-lookup","prompt":"The customer pasted 1Z7F2 into the chat, which order is that","expected":"find_tracking_number"}
+{"schemaVersion":1,"id":"s2-delivery-slot","prompt":"Ravi can only take the delivery after six, push the slot back","expected":"update_delivery"}
+{"schemaVersion":1,"id":"b2-refund-postage","prompt":"We charged 31877 for express but sent it standard, give the difference back","expected":"refund_shipping_fee"}
+{"schemaVersion":1,"id":"b2-hold-invoice","prompt":"Park INV-4410 until legal has looked at the wording","expected":"hold_invoice"}
+{"schemaVersion":1,"id":"b2-credit-approve","prompt":"The 200 goodwill credit for Acme is fine by me, put it through","expected":"approve_credit_note"}
+{"schemaVersion":1,"id":"b2-cycle-move","prompt":"Move Acme from monthly to quarterly invoicing starting January","expected":"update_billing_cycle"}
+{"schemaVersion":1,"id":"i2-pdf-regenerate","prompt":"The PDF for INV-4410 still shows the old address, make a new one","expected":"create_invoice_pdf"}
+{"schemaVersion":1,"id":"i2-remove-line","prompt":"Take the second row off INV-4410, the sample was free","expected":"delete_invoice_line"}
+{"schemaVersion":1,"id":"i2-terms-view","prompt":"What terms do we have Acme on at the moment","expected":"get_payment_terms"}
+{"schemaVersion":1,"id":"i2-batch-cancel","prompt":"Stop the month-end run before it goes out, the tax table is wrong","expected":"cancel_invoice_batch"}
+{"schemaVersion":1,"id":"i2-reopen","prompt":"INV-4410 was closed by mistake, open it back up so I can fix the PO number","expected":"reopen_invoice"}
+{"schemaVersion":1,"id":"p2-partial-back","prompt":"Give Ravi 12.50 of the 89.00 back, one item was missing from the box","expected":"refund_payment"}
+{"schemaVersion":1,"id":"p2-dispute-close","prompt":"The bank sided with us on the 89.00 dispute, wrap it up","expected":"close_chargeback"}
+{"schemaVersion":1,"id":"p2-payout-schedule","prompt":"Pay the vendor for October on the 15th instead of the 30th","expected":"schedule_payout"}
+{"schemaVersion":1,"id":"p2-hold-payment","prompt":"Don't settle Ravi's 89.00 yet, fraud wants a look first","expected":"hold_payment"}
+{"schemaVersion":1,"id":"p2-receipt-export","prompt":"Accounting need every receipt from last month as a spreadsheet","expected":"export_receipt"}
+{"schemaVersion":1,"id":"c2-merge-dupes","prompt":"Acme Ltd and ACME Limited are the same company, fold them into one record","expected":"merge_customer"}
+{"schemaVersion":1,"id":"c2-tag","prompt":"Mark everyone who bought the hoodie as a VIP","expected":"create_customer_tag"}
+{"schemaVersion":1,"id":"c2-release","prompt":"Acme paid what they owed, lift the freeze on their account","expected":"release_customer"}
+{"schemaVersion":1,"id":"c2-address-find","prompt":"Which of our customers are at 12 Harbour Street","expected":"find_address"}
+{"schemaVersion":1,"id":"a2-new-user","prompt":"Get Priya's replacement set up with a login before Monday","expected":"create_user"}
+{"schemaVersion":1,"id":"a2-role-new","prompt":"We need a read-only role for the auditors","expected":"create_role"}
+{"schemaVersion":1,"id":"a2-key-revoke","prompt":"The Shopify connector's token leaked, kill it","expected":"delete_api_key"}
+{"schemaVersion":1,"id":"a2-sessions","prompt":"Where is Jonas logged in right now","expected":"list_session"}
+{"schemaVersion":1,"id":"a2-merge-accounts","prompt":"Jonas has two logins, jonas@ and j.weber@, combine them","expected":"merge_account"}
+{"schemaVersion":1,"id":"v2-transfer-approve","prompt":"The 40 units heading to Cork can go, I've checked the paperwork","expected":"approve_stock_transfer"}
+{"schemaVersion":1,"id":"v2-count-close","prompt":"The October count in Cork is done and signed, close it out","expected":"close_stock_count"}
+{"schemaVersion":1,"id":"v2-reorder-new","prompt":"Start auto-reordering the hoodie at 30 units","expected":"create_reorder_point"}
+{"schemaVersion":1,"id":"v2-warehouse-find","prompt":"Which site holds the overflow stock for Ireland","expected":"find_warehouse"}
+{"schemaVersion":1,"id":"v2-bin-assign","prompt":"Put the hoodies on shelf C4 in Cork","expected":"assign_bin"}
+{"schemaVersion":1,"id":"k2-price-approve","prompt":"The 39.90 for the hoodie is agreed, make it live","expected":"approve_price"}
+{"schemaVersion":1,"id":"k2-discount-schedule","prompt":"Turn the newsletter code on for Black Friday week only","expected":"schedule_discount"}
+{"schemaVersion":1,"id":"k2-product-hold","prompt":"Pull the hoodie from the shop until the recall is sorted","expected":"hold_product"}
+{"schemaVersion":1,"id":"k2-variant-new","prompt":"We're adding an XXL in the blue hoodie","expected":"create_variant"}
+{"schemaVersion":1,"id":"k2-category-merge","prompt":"Outerwear and Jackets are the same shelf online, combine them","expected":"merge_category"}
+{"schemaVersion":1,"id":"r2-exchange-new","prompt":"Ravi wants a medium instead of the large he got","expected":"create_exchange"}
+{"schemaVersion":1,"id":"r2-label","prompt":"Send Ravi something to stick on the box so he can post it back free","expected":"create_return_label"}
+{"schemaVersion":1,"id":"r2-refund-approve","prompt":"The hoodie came back clean, release Ravi's money","expected":"returns_approve_refund"}
+{"schemaVersion":1,"id":"r2-restock-cancel","prompt":"Don't put the returned hoodie back on the shelf, it's damaged","expected":"cancel_restock"}
+{"schemaVersion":1,"id":"r2-hold-return","prompt":"Hold Ravi's return until the courier confirms they collected it","expected":"hold_return"}
+{"schemaVersion":1,"id":"t2-escalate-assign","prompt":"Give the Acme escalation to Priya, she knows their account","expected":"assign_escalation"}
+{"schemaVersion":1,"id":"t2-macro-archive","prompt":"Retire the old shipping-delay reply, we don't use it anymore","expected":"archive_macro"}
+{"schemaVersion":1,"id":"t2-ticket-export","prompt":"Pull every ticket about the hoodie recall into a spreadsheet","expected":"export_ticket"}
+{"schemaVersion":1,"id":"t2-survey","prompt":"How did Ravi rate the last conversation","expected":"get_satisfaction_survey"}
+{"schemaVersion":1,"id":"t2-reply-edit","prompt":"I made a typo in my last reply to Ravi, fix the amount to 12.50","expected":"update_reply"}
+{"schemaVersion":1,"id":"p2-dash-archive","prompt":"Nobody looks at the old ops board anymore, put it away","expected":"archive_dashboard"}
+{"schemaVersion":1,"id":"p2-inventory-schedule","prompt":"Every Monday morning I want the stock figures in my inbox","expected":"schedule_inventory_report"}
+{"schemaVersion":1,"id":"p2-report-hold","prompt":"Don't publish the Q3 numbers yet, the CFO hasn't signed them off","expected":"hold_report"}
+{"schemaVersion":1,"id":"p2-sales-list","prompt":"Which revenue breakdowns did we run this quarter","expected":"list_sales_report"}

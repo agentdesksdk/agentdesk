@@ -507,6 +507,32 @@ The catalog, the tasks, the loader, and the threshold are the same in
 every cell, so a custom cell and the deterministic cell in one run are
 the comparison 2.2 is accepted on.
 
+### The second held-out set, and the rule written before the run
+
+The 36.4% above was measured once, on the catalog and the tasks the
+scorer's author could see while building it. A second measurement uses
+what that author never saw: the catalog generated from seed 7, a
+different sample of the same tables, and 55 phrasings in
+`scripts/evals/routing/tasks/routing.v2.tasks.jsonl` authored after the
+scorer shipped, from the seed-7 names and descriptions only, under the
+same loader and the same overlap threshold. The scorer runs with its
+near-tie at the default, `NEAR_TIE` 0.75 in `hierarchy.ts`, and at 1.0,
+where only a domain that ties the top one exactly is kept. The 1.0 variant
+is composed in `scripts/evals/routing/scorers/hierarchical-near-tie-1.mjs`
+from the SDK's exports, restricting the candidates to the tied domains and
+delegating to `hierarchicalScorer`, because the constant itself is not a
+parameter.
+
+**The rule, written before the run.** The lexical domain step is
+confirmed as an improvement over the shipped scorer only if, on the second
+set, it routes the expected capability into the published set at least as
+often as the deterministic scorer does, and its tie-at-the-cut rate is no
+higher. If it does both, the 1.0 run says how much of the gain the second
+domain earns; if it fails either, the 36.4% is read as fitted to seed 2026
+and its phrasings, and the step is not confirmed, whatever the 1.0 run
+shows. The verdict below is that rule applied to the numbers, and nothing
+in this section above the verdict was edited after the run.
+
 ## Relationship to `docs/benchmark.md`
 
 No claim there changes. That document measures the demo's 78-capability
