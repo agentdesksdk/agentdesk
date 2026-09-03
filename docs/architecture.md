@@ -147,7 +147,8 @@ is exactly the optional half: `subscribe`, because its scanner discovers
 and retires capabilities as the page changes, and an `adapter` whose
 `registerTool` is its own, run from the world it registers in. The native
 provider's catalog never changes and its adapter is the page's model
-context, so it uses neither.
+context, so it uses neither. The extension's provider is
+`packages/extension`, described in `docs/design/browser-extension.md`.
 
 ## WebMCP surface coverage
 
