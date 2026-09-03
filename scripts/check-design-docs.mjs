@@ -226,6 +226,11 @@ const CLAIMS = [
   ["docs/architecture.md", /`provider\.ts` the only file that constructs the adapter/, "present", "architecture says the provider seam is the only adapter constructor"],
   ["browser-extension.md", /What the seam now satisfies of this document's assumptions/, "present", "the extension design says which assumptions the seam satisfies"],
   ["README.md", /has to be extracted/, "absent", "the design README no longer says the provider seam is still to be extracted"],
+  ["browser-extension.md", /Status: design only\. Nothing here is implemented\./, "absent", "the extension design no longer says nothing is implemented"],
+  ["browser-extension.md", /##\s*What has landed/, "present", "the extension design says what the first slice landed"],
+  ["browser-extension.md", /A page message is a\s+request and never an authorization/, "present", "the extension design states the bridge's rule"],
+  ["browser-extension.md", /checks origin, then source, then shape, in that order/, "present", "the extension design states the bridge's check order"],
+  ["browser-extension.md", /What this slice leaves unsatisfied/, "present", "the extension design says which assumptions remain unsatisfied"],
 ];
 
 /**

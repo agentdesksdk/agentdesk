@@ -1,6 +1,9 @@
 # AgentDesk Universal, browser extension design
 
-Status: design only. Nothing here is implemented.
+Status: the first slice is implemented, the provider and the bridge in
+`packages/extension`; "What has landed" below says exactly which of this
+document's assumptions that slice satisfies and which it does not. The
+rest is design.
 
 Goal. Make a site that never integrated AgentDesk agent-capable, without
 touching its source, while keeping the governance properties that make
@@ -264,14 +267,84 @@ because they arrive through the same `capabilities()`; the extension's
 a catalog that changes as the page changes is announced through
 `subscribe`, on which the runtime reconciles the surface. What it does not
 yet satisfy: provenance per capability beyond `untrustedContentHint`, the
-four-dimension `CapabilityProvenance` above, which is still a proposal;
-and the extension provider itself, which is milestone 4.
+four-dimension `CapabilityProvenance` above, which is still a proposal.
+
+## What has landed
+
+`@agentdesk/extension`, in `packages/extension`, holds the first slice: the
+extension context as a `CapabilityProvider`, and the bridge between the
+page and it. It depends on `@agentdesk/webmcp` through its published
+exports and contains nothing else: no UI, no scanner, no store listing, no
+WXT entrypoints. It is not published; it is the seam the entrypoints will
+be written against.
+
+**The provider.** `extensionProvider({ manifest, registerTool, window })`
+supplies `capabilities()` from a manifest the extension holds for one
+origin, handlers included, so nothing the page says becomes a capability;
+a manifest whose capabilities are a function answers from the DOM as it
+is now, which is where a scanner will plug in. Its `adapter` is the
+extension's own `registerTool`, the isolated world's model context once
+Gate 2 settles which world that is, so registration never crosses into
+page script: a test spies on the page's `postMessage` and its `message`
+listeners through a registration and sees nothing, and the page gains no
+global. `subscribe` fires when the page reports a change through the
+bridge or when the extension replaces the manifest, and the runtime reads
+the catalog again and reconciles the surface. Routing, policy denial, and
+approval over bridged capabilities are tested equal, result for result and
+tool for tool, to the native provider over the same specs. A manifest for
+another origin needs a provider of its own.
+
+**The bridge, which is the security-relevant part.** A page message is a
+request and never an authorization, as `docs/mcp-b-interop.md` requires.
+The bridge checks origin, then source, then shape, in that order, so a
+message from the wrong origin is refused before its shape is read and
+cannot probe the bridge from elsewhere; origin and source are routing
+facts, not authentication, which is why the request vocabulary is the
+whole of what a page can cause. That vocabulary is three requests: look
+again (`changed`), remember the reveal anchors the site placed
+(`anchors`), and reveal one of them (`reveal`). Anything else addressed to
+the bridge, an approve, an execute, a register, is a forgery and is
+refused as `not_a_request`. A request carrying an authorization claim,
+`approved`, `actor`, `by`, `token`, is refused whole rather than stripped,
+so nothing downstream sees a message that once carried one. A request
+naming a DOM node, `selector`, `target`, `element`, `xpath`, wherever it
+sits in the message, is refused as `dom_target`; a reveal names only a
+token matching the grammar `docs/accessibility.md` fixes, and only one the
+page registered. Every refusal is structured, with the reason and the
+detail, and every decision is audited on the bridge; traffic that never
+addressed the bridge is not its to audit.
+
+**What this slice leaves unsatisfied**, so no reader takes the package for
+the product:
+
+- Gate 2, the ISOLATED-world registration experiment, is unrun. The
+  provider takes `registerTool` as a function precisely so the answer can
+  be wired in without changing it, but which world supplies that function
+  is still the open question this document says it is.
+- No capability source is built. Native tools on the page, declarative
+  attribute injection, and structural inference are all still design; the
+  manifest's capabilities are the extension's own specs, and the scanner
+  that would fill them from a page does not exist.
+- Completion accounting, `filled`, `submitted`, and `abandoned`, is not
+  built, because no form-derived capability exists to account for.
+- Provenance per capability is still `untrustedContentHint` alone; the
+  four-dimension `CapabilityProvenance` is a proposal.
+- The permission model, the enabled-origins gate in the service worker,
+  and the WXT entrypoints are not built. The bridge is bound to one origin
+  by its manifest, which is the shape the enabled-origins gate will hand
+  it, not the gate itself.
+- The bridge's audit lives on the bridge, not in the runtime's audit
+  stream, because the runtime's audit vocabulary is fixed by the SDK; a
+  later slice decides whether a refused page message is a runtime event.
 
 <!-- code-anchors
 packages/webmcp/src/provider.ts CapabilityProvider nativeProvider subscribe
 packages/webmcp/src/runtime.ts ToolSurfaceManager provider
 packages/webmcp/src/capability.ts untrustedContentHint RiskLevel
 packages/webmcp/src/webmcp-adapter.ts createWebMcpAdapter
+packages/extension/src/provider.ts extensionProvider ExtensionProvider replace
+packages/extension/src/bridge.ts attachBridge BridgeRequest BridgeRefusal REQUEST_KINDS DOM_TARGET_KEYS AUTHORIZATION_KEYS ANCHOR validate
+packages/extension/src/manifest.ts ExtensionManifest
 -->
 
 
