@@ -298,6 +298,47 @@ REFERENCE_FIGURES.push({
   },
 });
 
+/**
+ * The second held-out set: one table from two runs, and a verdict that is
+ * the pre-written rule applied to the numbers. The rule is computed here
+ * again, so the word in the document has to be the word the numbers give.
+ */
+REFERENCE_FIGURES.push({
+  report: "scripts/evals/runs/routing-holdout-2/report.json",
+  phrases: (report) => {
+    const other = JSON.parse(
+      readFileSync(join(root, "scripts/evals/runs/routing-holdout-2-near-tie-1/report.json"), "utf8"),
+    );
+    const pct = (v) => `${(v * 100).toFixed(1)}%`;
+    const dec = (v) => v.toFixed(2);
+    const det = report.cells.deterministic.metrics;
+    const hyb = report.cells.hybrid.metrics;
+    const hier = report.cells["custom:hierarchical"];
+    const one = other.cells["custom:hierarchical-near-tie-1.0"];
+    if (JSON.stringify(det) !== JSON.stringify(other.cells.deterministic.metrics)) {
+      throw new Error("the two held-out runs disagree on their deterministic cell, so they are not one comparison");
+    }
+    const hit = (c) => c.metrics.terminalInRoutedSet;
+    const count = (c) => `${pct(hit(c).value)} (${hit(c).numerator} of ${hit(c).denominator})`;
+    const failing = (c) => new Set(c.failing.map((f) => f.taskId));
+    const gained = (c) => [...failing(report.cells.deterministic)].filter((id) => !failing(c).has(id)).length;
+    const lost = (c) => [...failing(c)].filter((id) => !failing(report.cells.deterministic).has(id)).length;
+    const confirmed = hit(hier).value >= det.terminalInRoutedSet.value && hier.metrics.tieAtCut.value <= det.tieAtCut.value;
+    return {
+      "docs/evaluations.md": [
+        [`| Expected capability in the routed set | ${count(report.cells.deterministic)} | ${count(report.cells.hybrid)} | ${count(hier)} | ${count(one)} | measured |`, "the held-out expected-in-routed-set row"],
+        [`| Tie at the cut | ${pct(det.tieAtCut.value)} | ${pct(hyb.tieAtCut.value)} | ${pct(hier.metrics.tieAtCut.value)} | ${pct(one.metrics.tieAtCut.value)} | measured |`, "the held-out tie-at-the-cut row"],
+        [`| Rank of the expected capability, when routed (mean) | ${dec(det.terminalRank.mean)} | ${dec(hyb.terminalRank.mean)} | ${dec(hier.metrics.terminalRank.mean)} | ${dec(one.metrics.terminalRank.mean)} | measured |`, "the held-out rank row"],
+        [`it gains ${gained(hier)} tasks and loses ${lost(hier)}`, "the default's gains and losses"],
+        [`gaining ${gained(one)} and losing ${lost(one)}`, "the 1.0 variant's gains and losses"],
+        [`**Verdict: ${confirmed ? "confirmed" : "not confirmed"}.**`, "the verdict the rule gives on these numbers"],
+        [`${report.catalog.size} capabilities`, "the held-out catalog size"],
+        [`seed ${report.catalog.seed}`, "the held-out seed"],
+      ],
+    };
+  },
+});
+
 /** A phrase as a pattern: literal text, with any run of whitespace allowed where the prose wraps. */
 function loose(text) {
   const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
