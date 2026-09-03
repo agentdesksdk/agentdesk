@@ -1,208 +1,274 @@
 import { useState, useSyncExternalStore } from "react";
-import type { Change, OperationPlan } from "@agentdesksdk/webmcp";
-import { RESCUE_PLAN } from "./capabilities.ts";
-import { getRuntimeSnapshot, OPERATOR, rescue, resetRescue, subscribeRuntime } from "./runtime.ts";
+import type { AuditEvent } from "@agentdesksdk/webmcp";
+import { PANELS } from "./capabilities.ts";
+import { getClientCalls, HERO_PROMPT, runHeroPrompt, subscribeClient, type ClientOutcome } from "./client.ts";
+import { PlanCard, show } from "./PlanCard.tsx";
+import { Presence, type PresenceMode } from "./Presence.tsx";
+import { getRuntimeSnapshot, rescue, resetRescue, subscribeRuntime } from "./runtime.ts";
 import { getState, subscribe } from "./state.ts";
 
 const useRescueState = () => useSyncExternalStore(subscribe, getState);
 const useRuntime = () => useSyncExternalStore(subscribeRuntime, getRuntimeSnapshot);
+const useClient = () => useSyncExternalStore(subscribeClient, getClientCalls);
 
-/** The plan's four previews in order: what a person approves, as one list. */
-export function consolidated(plan: OperationPlan): Change[] {
-  return plan.operations.flatMap((operation) => operation.preview);
+const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+function eventWords(event: AuditEvent): string | null {
+  switch (event.kind) {
+    case "capability_invoked":
+      return `${event.capability} invoked`;
+    case "plan_prepared":
+      return `plan ${event.planId} prepared, ${event.operations.length} operations, ${event.risk}`;
+    case "plan_approved":
+      return `plan ${event.planId} approved by ${event.actor.name ?? event.actor.id}`;
+    case "plan_rejected":
+      return `plan ${event.planId} rejected`;
+    case "execution_started":
+      return `${event.capability} started`;
+    case "execution_completed":
+      return `${event.capability} completed${event.receipt ? `, ${event.receipt.changes.length} change${event.receipt.changes.length === 1 ? "" : "s"}` : ""}`;
+    case "execution_failed":
+      return `${event.capability} failed: ${event.error}`;
+    case "execution_indeterminate":
+      return `${event.capability} outcome unknown, recorded as ${event.recordId}`;
+    case "capability_routed":
+      return `${event.catalogSize} capabilities searched, ${event.activated.length} activated`;
+    default:
+      return null;
+  }
 }
 
-const show = (value: unknown) => (value === null || value === undefined ? "none" : String(value));
+function outcomeWords(outcome: ClientOutcome): string {
+  switch (outcome.kind) {
+    case "committed":
+      return `The agent committed ${outcome.planId} and read back ${outcome.receipts} receipts.`;
+    case "rejected":
+      return `You rejected ${outcome.planId}; the agent stopped and nothing ran.`;
+    case "refused":
+      return `The agent stopped at ${outcome.step}: ${outcome.reason}`;
+  }
+}
 
-/**
- * Phase 1: the thinnest page that shows the slice working. No styling; the
- * mission's values, the rail's routing, a stand-in for the agent's plan,
- * the one plan card, and the receipt.
- */
 export function App() {
   const state = useRescueState();
   const snapshot = useRuntime();
-  const [query, setQuery] = useState("");
-  const [note, setNote] = useState("");
-  const [busy, setBusy] = useState<string | null>(null);
-  const plans = rescue.listPlans();
+  const calls = useClient();
+  const [mode, setMode] = useState<PresenceMode>("guided");
+  const [query, setQuery] = useState(HERO_PROMPT);
+  const [running, setRunning] = useState(false);
+  const [outcome, setOutcome] = useState<string>("");
+  const plans = snapshot.plans;
+  const committed = plans.filter((plan) => plan.status === "COMMITTED");
 
-  async function prepare() {
-    setNote("");
+  async function propose() {
+    setRunning(true);
+    setOutcome("");
     try {
-      const plan = await rescue.prepare({
-        operations: RESCUE_PLAN,
-        summary: `Rescue the ${state.crew.name} crew: reserve two oxygen packs, assign ${state.drone.id}, reroute power to ${state.dock.name}, launch ${state.mission.id}.`,
-      });
-      setNote(`Plan ${plan.id} prepared; nothing has changed yet.`);
-    } catch (error) {
-      setNote(`Could not prepare the plan: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  async function approve(plan: OperationPlan) {
-    setBusy(plan.id);
-    try {
-      const approved = rescue.approvePlan(plan.id, OPERATOR);
-      if (!approved.ok) {
-        setNote(`Not approved: ${approved.reason}`);
-        return;
-      }
-      const committed = await rescue.commitPlan(plan.id);
-      setNote(committed.ok ? `Plan ${plan.id} committed.` : `Commit refused: ${committed.reason}`);
+      const result = await runHeroPrompt(rescue, query.trim() || HERO_PROMPT);
+      setOutcome(outcomeWords(result));
     } finally {
-      setBusy(null);
+      setRunning(false);
     }
   }
 
-  function reject(plan: OperationPlan) {
-    const outcome = rescue.rejectPlan(plan.id);
-    setNote(outcome.ok ? `Plan ${plan.id} rejected; nothing changed.` : `Not rejected: ${outcome.reason}`);
-  }
+  const activity = [...snapshot.audit]
+    .reverse()
+    .map((event) => ({ event, words: eventWords(event) }))
+    .filter((row): row is { event: AuditEvent; words: string } => row.words !== null)
+    .slice(0, 40);
 
   return (
-    <main>
-      <h1>Asteria Rescue Control</h1>
-      <button type="button" onClick={() => void resetRescue()}>
-        Reset
-      </button>
+    <div className="shell">
+      <header className="topbar">
+        <div className="brand">
+          <span className="name">Asteria Rescue Control</span>
+          <span className="sub">powered by AgentDesk</span>
+        </div>
+        <Presence mode={mode} />
+        <div className="controls">
+          <button
+            type="button"
+            aria-label={`Presence: ${mode}. Switch to ${mode === "guided" ? "fast" : "guided"}`}
+            onClick={() => setMode(mode === "guided" ? "fast" : "guided")}
+          >
+            Presence: {mode}
+          </button>
+          <button type="button" onClick={() => void resetRescue()}>
+            Reset
+          </button>
+        </div>
+      </header>
 
-      <section aria-label="Mission state">
-        <h2>Mission state</h2>
-        <table>
-          <tbody>
-            <tr>
-              <th>Crew</th>
-              <td data-field="crew">
-                {state.crew.name}, {state.crew.status}, {state.crew.location}
-              </td>
-            </tr>
-            <tr>
-              <th>Oxygen packs</th>
-              <td data-field="oxygen">
-                available {state.oxygen.available}, reserved {state.oxygen.reserved}
-              </td>
-            </tr>
-            <tr>
-              <th>Drone {state.drone.id}</th>
-              <td data-field="drone">
-                {state.drone.status}, assignment {show(state.drone.assignment)}
-              </td>
-            </tr>
-            <tr>
-              <th>{state.dock.name} power</th>
-              <td data-field="dock">{state.dock.power}%</td>
-            </tr>
-            <tr>
-              <th>Mission {state.mission.id}</th>
-              <td data-field="mission">{state.mission.status}</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
-
-      <section aria-label="Route a task">
-        <h2>Route a task</h2>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (query.trim() !== "") {
-              void rescue.routeTask(query.trim());
-            }
-          }}
-        >
-          <input aria-label="Task to route" value={query} onChange={(event) => setQuery(event.target.value)} />
-          <button type="submit">Route</button>
-        </form>
-        <p>
-          Active tools: {snapshot.nativeTools.length} ({snapshot.routedTools.length} routed)
-        </p>
-        {snapshot.lastRouting ? (
-          <ol aria-label="Routed capabilities in rank order">
-            {snapshot.lastRouting.matches.map((match) => (
-              <li key={match.name} data-match={match.name}>
-                {match.name} score {match.score} {match.risk}
-                {match.requiresApproval ? " needs approval" : ""}
-              </li>
-            ))}
-          </ol>
-        ) : null}
-      </section>
-
-      <section aria-label="Agent stand-in">
-        <h2>Agent stand-in</h2>
-        <p>
-          Phase 1 has no client attached. This button sends the four-operation plan the hero prompt
-          asks for, the way an agent would through the runtime.
-        </p>
-        <button type="button" onClick={() => void prepare()}>
-          Prepare the rescue plan
-        </button>
-        <p role="status" aria-live="polite" data-note>
-          {note}
-        </p>
-      </section>
-
-      {plans
-        .filter((plan) => plan.status === "DRAFT")
-        .map((plan) => (
-          <section key={plan.id} role="region" aria-label={`Plan approval ${plan.id}`} data-plan={plan.id}>
-            <h2>
-              Plan {plan.id}: {plan.risk}
-            </h2>
-            <p>{plan.summary}</p>
-            <ol aria-label="Operations in order">
-              {plan.operations.map((operation, index) => (
-                <li key={`${operation.capability}-${index}`}>
-                  {operation.capability} {JSON.stringify(operation.input)}
-                </li>
-              ))}
-            </ol>
-            <h3>What will change</h3>
-            <ul aria-label="Consolidated changes">
-              {consolidated(plan).map((change) => (
-                <li key={change.field} data-change={change.field}>
-                  {change.field}: {show(change.before)} → {show(change.after)}
-                </li>
-              ))}
-            </ul>
-            <button type="button" disabled={busy !== null} onClick={() => reject(plan)}>
-              Reject
-            </button>
-            <button type="button" disabled={busy !== null} onClick={() => void approve(plan)}>
-              {busy === plan.id ? "Executing…" : "Approve"}
-            </button>
+      <main className="mission" id="main-content">
+        <h1>
+          Mission {state.mission.id}
+          <span className={`pill mission-${state.mission.status}`} data-mission-status>
+            {state.mission.status}
+          </span>
+        </h1>
+        <div className="panels">
+          <section className="panel" data-reveal={PANELS.crew} role="region" aria-label={`Crew ${state.crew.name}`}>
+            <h2>Crew</h2>
+            <div className="value" data-field="crew">
+              {state.crew.name}
+            </div>
+            <div className="detail">
+              {state.crew.status} at {state.crew.location}
+            </div>
           </section>
+          <section className="panel" data-reveal={PANELS.oxygen} role="region" aria-label="Oxygen packs">
+            <h2>Oxygen packs</h2>
+            <div className="value" data-field="oxygen">
+              {state.oxygen.available} available
+            </div>
+            <div className="detail">{state.oxygen.reserved} reserved for the rescue</div>
+          </section>
+          <section className="panel" data-reveal={PANELS.drone} role="region" aria-label={`Drone ${state.drone.id}`}>
+            <h2>Drone {state.drone.id}</h2>
+            <div className="value" data-field="drone">
+              {state.drone.status}
+            </div>
+            <div className="detail">assignment {show(state.drone.assignment)}</div>
+          </section>
+          <section className="panel" data-reveal={PANELS.dock} role="region" aria-label={`${state.dock.name} power`}>
+            <h2>{state.dock.name} power</h2>
+            <div className="value" data-field="dock">
+              {state.dock.power}%
+            </div>
+            <div className="detail">{state.dock.power >= 60 ? "enough to receive the rescue" : "below the 60% a rescue needs"}</div>
+          </section>
+          <section className="panel" data-reveal={PANELS.mission} role="region" aria-label={`Mission ${state.mission.id}`}>
+            <h2>Mission {state.mission.id}</h2>
+            <div className="value" data-field="mission">
+              {state.mission.status}
+            </div>
+            <div className="detail">{state.mission.status === "launched" ? "the rescue is under way" : "not launched; a launch needs your approval"}</div>
+          </section>
+        </div>
+
+        {plans.map((plan) => (
+          <PlanCard key={plan.id} plan={plan} />
         ))}
 
-      {plans
-        .filter((plan) => plan.status !== "DRAFT")
-        .map((plan) => {
+        {committed.map((plan) => {
           const receipts = [...rescue.queryReceipts({ planId: plan.id })].reverse();
           return (
-            <section key={plan.id} role="region" aria-label={`Rescue receipt ${plan.id}`} data-receipt={plan.id}>
-              <h2>
-                Plan {plan.id}: {plan.status}
-              </h2>
+            <section key={plan.id} className="receipt" role="region" aria-label={`Rescue receipt ${state.mission.id}`} data-receipt={plan.id}>
+              <h2>RESCUE RECEIPT {state.mission.id}</h2>
+              <p className="detail">
+                Plan {plan.id}, four operations, each read back from the console after it landed.
+              </p>
               <ul aria-label="Verified changes">
                 {receipts.flatMap((entry) =>
                   entry.receipt.changes.map((change) => (
-                    <li key={`${entry.id}-${change.field}`} data-verified={change.field}>
-                      {change.field}: {show(change.before)} → {show(change.after)} ({entry.verification.status})
+                    <li key={`${entry.id}-${change.field}`} className="change-row" data-verified={change.field}>
+                      <span className="field">{change.field}</span>
+                      <span className="before">{show(change.before)}</span>
+                      <span className="arrow" aria-hidden="true">
+                        →
+                      </span>
+                      <span className="after">{show(change.after)}</span>
+                      <span className="verify">{entry.verification.status.toLowerCase()}</span>
                     </li>
                   )),
                 )}
               </ul>
-              <ol aria-label="Operation outcomes">
-                {(plan.outcomes ?? []).map((outcome, index) => (
-                  <li key={`${outcome.capability}-${index}`}>
-                    {outcome.capability}: {outcome.status}, verification {outcome.verification.status}
-                  </li>
-                ))}
-              </ol>
+              <p className="detail">
+                Retrievable by the agent: <code>invoke_capability</code> with <code>query_receipts</code> and{" "}
+                <code>plan_id {plan.id}</code>.
+              </p>
             </section>
           );
         })}
-    </main>
+      </main>
+
+      <aside className="rail" aria-label="Agent activity">
+        <section className="rail-section">
+          <h3>Surface</h3>
+          <div className="stat-row">
+            <span>Capabilities</span>
+            <span className="num">{snapshot.catalogSize}</span>
+          </div>
+          <div className="stat-row">
+            <span>Active tools</span>
+            <span className="num">{snapshot.nativeTools.length}</span>
+          </div>
+          <div className="stat-row">
+            <span>Routed</span>
+            <span className="num">{snapshot.routedTools.length}</span>
+          </div>
+          <div className="stat-row">
+            <span>Pending plans</span>
+            <span className="num">{plans.filter((plan) => plan.status === "DRAFT").length}</span>
+          </div>
+        </section>
+
+        <section className="rail-section">
+          <h3>Agent proposal</h3>
+          <p className="detail">
+            The prompt a WebMCP client would be given. The control below makes the calls that client would make:
+            find_capabilities, the reads, prepare_plan through the gateway, then commit_plan once you approve.
+          </p>
+          <textarea aria-label="Prompt to the agent" rows={5} value={query} onChange={(event) => setQuery(event.target.value)} />
+          <button
+            type="button"
+            className="primary"
+            disabled={running}
+            aria-label="Propose the rescue: the agent's tool calls for this prompt"
+            onClick={() => void propose()}
+          >
+            {running ? "Agent working…" : "Propose the rescue"}
+          </button>
+          <p role="status" aria-live="polite" data-client-outcome>
+            {outcome}
+          </p>
+          {calls.length > 0 ? (
+            <ol className="calls" aria-label="Tool calls the agent made">
+              {calls.map((call, index) => (
+                <li key={`${call.tool}-${index}`} data-call={call.name ?? call.tool} className={call.status}>
+                  <code>{call.tool}</code>
+                  {call.name ? <code className="name"> {call.name}</code> : null}
+                  <span className="status"> {call.status}</span>
+                  <div className="detail">{call.summary}</div>
+                </li>
+              ))}
+            </ol>
+          ) : null}
+        </section>
+
+        <section className="rail-section">
+          <h3>Routing decision</h3>
+          {snapshot.lastRouting ? (
+            <ol className="matches" aria-label="Routed capabilities in rank order">
+              {snapshot.lastRouting.matches.map((match) => (
+                <li key={match.name} data-match={match.name}>
+                  <code>{match.name}</code> <span className="score">score {match.score}</span>{" "}
+                  <span className={`risk ${match.risk}`}>{match.risk}</span>
+                  {match.requiresApproval ? <span className="policy"> needs approval</span> : null}
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="detail">No task routed yet.</p>
+          )}
+        </section>
+
+        <section className="rail-section">
+          <h3>Activity</h3>
+          {activity.length === 0 ? (
+            <p className="detail">Nothing yet.</p>
+          ) : (
+            <ol className="activity" aria-label="Runtime activity, newest first">
+              {activity.map(({ event, words }, index) => (
+                <li key={`${event.kind}-${event.at}-${index}`} className="event" data-event={event.kind}>
+                  <time>{clock(event.at)}</time>
+                  <span>{words}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+      </aside>
+    </div>
   );
 }

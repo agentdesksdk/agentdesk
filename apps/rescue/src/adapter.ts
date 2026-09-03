@@ -50,6 +50,16 @@ export function forkLedger(): { open: number; forked: number; released: number }
   return { open: live.size, forked, released };
 }
 
+/**
+ * Test fixture: the next commit of `operation` refuses before it writes.
+ * The plan then stops at that operation; nothing after it runs.
+ */
+const faults = new Map<string, string>();
+
+export function armCommitFault(operation: string, detail = "The dock controller did not acknowledge the write."): void {
+  faults.set(operation, detail);
+}
+
 onReset(() => {
   for (const staged of [...live]) {
     staged.settled = true;
@@ -57,6 +67,7 @@ onReset(() => {
   }
   forked = 0;
   released = 0;
+  faults.clear();
 });
 
 /**
@@ -89,6 +100,11 @@ export const rescueAdapter: StagingAdapter<RescueFork> = {
   commit(staged) {
     const changes = deriveChanges(staged.base, staged.head);
     release(staged);
+    const fault = faults.get(staged.operation);
+    if (fault !== undefined) {
+      faults.delete(staged.operation);
+      throw new Error(fault);
+    }
     land(staged.head);
     return receipt({
       entity: `Mission ${MISSION}`,

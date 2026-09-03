@@ -11,6 +11,15 @@ import { CREW, DOCK, DRONE, MISSION, draft, getState, rows } from "./state.ts";
 
 const DOMAIN = "rescue";
 
+/** The panel each write moves attention to, by the id the screen registers. */
+export const PANELS = {
+  crew: "panel-crew",
+  oxygen: "panel-oxygen",
+  drone: "panel-drone",
+  dock: "panel-dock",
+  mission: "panel-mission",
+} as const;
+
 /** Did live state end up where the change said it would? Read back, not trusted. */
 function verifyRows(changes: readonly Change[]): VerificationResult {
   const observed = rows(getState());
@@ -29,13 +38,15 @@ function refuse(code: string, detail: string, capability: string): never {
 const number = (value: unknown, fallback: number): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 
+type Spec = Parameters<typeof defineCapability>[0];
+
 /**
  * A staged write. The handler runs on the adapter's fork; the capability
  * names the operation and verifies the outcome, and declares no evidence
  * of its own: the diff a person approves is derived from the fork.
  */
 function staged(
-  spec: Omit<Parameters<typeof defineCapability>[0], "risk" | "execute" | "staging" | "verify"> & {
+  spec: Omit<Spec, "risk" | "execute" | "staging" | "verify"> & {
     risk: "WRITE" | "CONSEQUENTIAL";
     run: (input: Record<string, unknown>) => unknown;
   },
@@ -47,7 +58,7 @@ function staged(
     risk,
     staging: { operation: spec.name },
     verify: (_input, _ctx, changes) => verifyRows(changes),
-  } as Parameters<typeof defineCapability>[0]);
+  } as Spec);
 }
 
 export const findStrandedCrew: Capability = defineCapability({
@@ -60,6 +71,11 @@ export const findStrandedCrew: Capability = defineCapability({
   keywords: ["stranded", "crew", "find", "locate", "asteria"],
   entities: [],
   inputSchema: { type: "object", properties: {} },
+  presentation: {
+    reveal: PANELS.crew,
+    message: "Finding the stranded crew",
+    announce: () => `Found the ${CREW} crew, stranded at ${DOCK}.`,
+  },
   execute: () => {
     const state = getState();
     return {
@@ -86,6 +102,9 @@ export const inspectRescueConditions: Capability = defineCapability({
   keywords: ["conditions", "inspect", "oxygen", "drone", "dock", "power", "mission"],
   entities: [],
   inputSchema: { type: "object", properties: {} },
+  presentation: {
+    message: "Reading oxygen, drone, dock power, and the mission",
+  },
   execute: () => {
     const state = getState();
     return {
@@ -110,6 +129,12 @@ export const reserveOxygen: Capability = staged({
   inputSchema: {
     type: "object",
     properties: { packs: { type: "number", description: "Packs to reserve; 2 when absent" } },
+  },
+  presentation: {
+    reveal: PANELS.oxygen,
+    focus: "on_explicit_request",
+    message: (input) => `Reserving ${number(input.packs, 2)} oxygen packs`,
+    announce: (input) => `Reserved ${number(input.packs, 2)} oxygen packs for ${MISSION}.`,
   },
   run: (input) => {
     const packs = number(input.packs, 2);
@@ -143,6 +168,12 @@ export const assignRescueDrone: Capability = staged({
       mission: { type: "string", description: `Mission id; ${MISSION} when absent` },
     },
   },
+  presentation: {
+    reveal: PANELS.drone,
+    focus: "on_explicit_request",
+    message: `Assigning ${DRONE} to ${MISSION}`,
+    announce: `Drone ${DRONE} assigned to ${MISSION}.`,
+  },
   run: (input) => {
     const state = draft();
     const drone = typeof input.drone === "string" ? input.drone : DRONE;
@@ -175,6 +206,12 @@ export const rerouteDockPower: Capability = staged({
       percent: { type: "number", description: "Power allocation to set; 65 when absent" },
     },
   },
+  presentation: {
+    reveal: PANELS.dock,
+    focus: "on_explicit_request",
+    message: (input) => `Rerouting ${DOCK} to ${number(input.percent, 65)}% power`,
+    announce: (input) => `${DOCK} power at ${number(input.percent, 65)}%.`,
+  },
   run: (input) => {
     const state = draft();
     const dock = typeof input.dock === "string" ? input.dock : DOCK;
@@ -202,6 +239,12 @@ export const launchRescue: Capability = staged({
   inputSchema: {
     type: "object",
     properties: { mission: { type: "string", description: `Mission id; ${MISSION} when absent` } },
+  },
+  presentation: {
+    reveal: PANELS.mission,
+    focus: "on_explicit_request",
+    message: `Launching ${MISSION}`,
+    announce: `Mission ${MISSION} launched. The rescue is under way.`,
   },
   run: (input) => {
     const state = draft();
