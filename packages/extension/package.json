@@ -1,0 +1,38 @@
+{
+  "name": "@agentdesk/extension",
+  "version": "0.0.1",
+  "private": true,
+  "description": "AgentDesk Universal: the extension-context CapabilityProvider and the page bridge it governs.",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agentdesk/webmcp": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "jsdom": "^30.0.1",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

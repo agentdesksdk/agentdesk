@@ -67,6 +67,25 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@24.13.3)(jsdom@30.0.1)
 
+  packages/extension:
+    dependencies:
+      '@agentdesk/webmcp':
+        specifier: workspace:*
+        version: link:../webmcp
+    devDependencies:
+      '@types/node':
+        specifier: ^24.3.0
+        version: 24.13.3
+      jsdom:
+        specifier: ^30.0.1
+        version: 30.0.1
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@24.13.3)(jsdom@30.0.1)
+
   packages/webmcp:
     devDependencies:
       '@mcp-b/webmcp-polyfill':
