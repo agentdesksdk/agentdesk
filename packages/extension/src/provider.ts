@@ -56,17 +56,27 @@ export function extensionProvider(options: ExtensionProviderOptions): ExtensionP
 
   // One audit: the runtime's. A refusal that arrives before the runtime has
   // connected is held and recorded once it has, so a forgery in the first
-  // instant of a page is not the one that goes unrecorded.
+  // instant of a page is not the one that goes unrecorded. When the hold
+  // overflows the oldest are dropped, and the drop itself is recorded on
+  // connect as one held_overflow naming how many and over what span, ahead
+  // of the replay: an unknown outcome stays visible, even a flood.
+  const now = options.now ?? (() => Date.now());
   let hooks: ProviderHooks | undefined;
-  const held: ProviderRefusal[] = [];
+  const held: Array<{ refusal: ProviderRefusal; at: number }> = [];
+  let dropped = 0;
+  let droppedFrom: number | undefined;
+  let droppedTo: number | undefined;
   const refused = (refusal: ProviderRefusal): void => {
     if (hooks !== undefined) {
       hooks.refused(refusal);
       return;
     }
-    held.push(refusal);
-    if (held.length > HELD_REFUSALS) {
-      held.splice(0, held.length - HELD_REFUSALS);
+    held.push({ refusal, at: now() });
+    while (held.length > HELD_REFUSALS) {
+      const oldest = held.shift()!;
+      dropped += 1;
+      droppedFrom ??= oldest.at;
+      droppedTo = oldest.at;
     }
   };
 
@@ -102,7 +112,21 @@ export function extensionProvider(options: ExtensionProviderOptions): ExtensionP
     },
     connect: (given) => {
       hooks = given;
-      for (const refusal of held.splice(0)) {
+      if (dropped > 0) {
+        given.refused({
+          reason: "held_overflow",
+          detail: {
+            dropped,
+            from: droppedFrom,
+            to: droppedTo,
+            held: held.length,
+          },
+        });
+        dropped = 0;
+        droppedFrom = undefined;
+        droppedTo = undefined;
+      }
+      for (const { refusal } of held.splice(0)) {
         given.refused(refusal);
       }
       return () => {

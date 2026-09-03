@@ -319,7 +319,9 @@ sentence, the origin the message came from, and the kind it claimed. The
 bridge keeps no log of its own, because two logs of one refusal are two
 places for an operator to look and one of them to be stale; a refusal
 that arrives before the runtime has connected is held and recorded once
-it has. Traffic that never addressed the bridge is not audited.
+it has, and if the hold overflows, the drop is recorded too, as one
+`held_overflow` naming how many were dropped and over what span, ahead of
+the replay. Traffic that never addressed the bridge is not audited.
 
 **What this slice leaves unsatisfied**, so no reader takes the package for
 the product:
