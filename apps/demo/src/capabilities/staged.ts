@@ -59,11 +59,15 @@ export type StagedBranch = {
   settled: boolean;
 };
 
-/** What a persisted record keeps of a fork: enough to stage it again. */
+/** What a persisted record keeps of a fork: the exact branch when cloneable. */
 export type BranchIdentity = {
   capability: string;
   input: Record<string, unknown>;
   at: number;
+  /** Exact fork, so a multi-operation plan restores each reviewed step. */
+  branch?: Branch;
+  mode?: CommitMode;
+  result?: unknown;
 };
 
 /**
@@ -156,13 +160,33 @@ export function rebuildBranch(identity: unknown): StagedBranch | undefined {
   if (typeof identity !== "object" || identity === null) {
     return undefined;
   }
-  const { capability, input, at } = identity as Partial<BranchIdentity>;
+  const candidate = identity as Partial<BranchIdentity>;
+  const { capability, input, at } = candidate;
   if (typeof capability !== "string" || typeof input !== "object" || input === null || typeof at !== "number") {
     return undefined;
   }
   const owned = registry.get(capability);
   if (owned === undefined) {
     return undefined;
+  }
+  if (
+    typeof candidate.branch === "object" &&
+    candidate.branch !== null &&
+    (candidate.mode === "merge" || candidate.mode === "rederive")
+  ) {
+    try {
+      return {
+        capability,
+        mode: candidate.mode,
+        branch: structuredClone(candidate.branch),
+        input: structuredClone(input as Record<string, unknown>),
+        operation: owned,
+        result: structuredClone(candidate.result),
+        settled: false,
+      };
+    } catch {
+      return undefined;
+    }
   }
   try {
     const { result, branch } = stage(capability, () => owned.run(input), at);
@@ -294,6 +318,9 @@ export const stagingAdapter: StagingAdapter<StagedBranch> = {
     capability: staged.capability,
     input: staged.input,
     at: staged.branch.at,
+    branch: staged.branch,
+    mode: staged.mode,
+    result: staged.result,
   }),
 
   /**

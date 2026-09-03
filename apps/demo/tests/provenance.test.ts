@@ -141,4 +141,86 @@ describe("demo verification and rollback", () => {
     const recorded = runtime.queryReceipts({ planId: plan.id });
     expect(recorded.map((r) => r.capability)).toEqual(["refund_shipping"]);
   });
+
+  it("verifies planned order, customer, and support writes from live state", async () => {
+    const runtime = await startRuntime();
+    const plan = await runtime.prepare({
+      operations: [
+        {
+          capability: "add_order_note",
+          input: { order_id: "10428", note: "Plan verification note." },
+        },
+        {
+          capability: "tag_customer",
+          input: { customer_id: "C-1001", tag: "plan-verified" },
+        },
+        {
+          capability: "create_support_note",
+          input: { ticket_id: "T-2009", note: "Plan verification support note." },
+        },
+      ],
+    });
+
+    expect(runtime.approvePlan(plan.id, OPERATOR).ok).toBe(true);
+    expect((await runtime.commitPlan(plan.id)).ok).toBe(true);
+
+    const settled = runtime.getPlan(plan.id);
+    expect(settled?.status).toBe("COMMITTED");
+    expect(settled?.outcomes?.map((outcome) => outcome.verification.status)).toEqual([
+      "VERIFIED",
+      "VERIFIED",
+      "VERIFIED",
+    ]);
+    expect(
+      getState().orders.find((order) => order.id === "10428")?.notes,
+    ).toContain("Plan verification note.");
+    expect(
+      getState().customers.find((customer) => customer.id === "C-1001")?.tags,
+    ).toContain("plan-verified");
+    expect(
+      getState().tickets.find((ticket) => ticket.id === "T-2009")?.messages,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from: "agent",
+          text: "[internal] Plan verification support note.",
+        }),
+      ]),
+    );
+  });
+
+  it("verifies planned inventory and shipping writes from live state", async () => {
+    const runtime = await startRuntime();
+    const initialStock = getState().products.find(
+      (product) => product.sku === "MER-LMP-03",
+    )!.stock;
+    const plan = await runtime.prepare({
+      operations: [
+        {
+          capability: "adjust_stock",
+          input: { sku: "MER-LMP-03", delta: 1 },
+        },
+        {
+          capability: "assign_carrier",
+          input: { order_id: "10428", carrier: "UPS" },
+        },
+      ],
+    });
+
+    expect(runtime.approvePlan(plan.id, OPERATOR).ok).toBe(true);
+    expect((await runtime.commitPlan(plan.id)).ok).toBe(true);
+
+    const settled = runtime.getPlan(plan.id);
+    expect(settled?.status).toBe("COMMITTED");
+    expect(settled?.outcomes?.map((outcome) => outcome.verification.status)).toEqual([
+      "VERIFIED",
+      "VERIFIED",
+    ]);
+    expect(
+      getState().products.find((product) => product.sku === "MER-LMP-03")?.stock,
+    ).toBe(initialStock + 1);
+    expect(
+      getState().orders.find((order) => order.id === "10428")?.carrier,
+    ).toBe("UPS");
+  });
 });
