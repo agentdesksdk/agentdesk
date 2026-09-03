@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, within, type RenderResult } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App.tsx";
 import { setGuidedPace } from "../src/Presence.tsx";
@@ -36,11 +36,7 @@ async function agentFirstTurn() {
   return planId!;
 }
 
-function planCard(view: RenderResult, planId: string) {
-  return view.getByRole("alertdialog", { name: new RegExp(`^Plan ${planId}:`) });
-}
-
-describe("the mission screen is an application: it records, shows, and approves; it never acts as the agent", () => {
+describe("the mission screen is an application: it records, shows, and authorizes; it never acts as the agent", () => {
   beforeEach(async () => {
     await resetRescue();
     clearRevealed();
@@ -50,15 +46,21 @@ describe("the mission screen is an application: it records, shows, and approves;
 
   afterEach(cleanup);
 
-  it("shows the mission state, the prompt to give a client, and that it is waiting for a WebMCP agent", () => {
+  it("shows the objective to give a client, waits for a WebMCP agent, and keeps the Inspector closed", () => {
     const view = render(<App />);
-    expect(view.container.querySelector('[data-field="mission"]')?.textContent).toBe("draft");
-    const prompt = view.getByRole("region", { name: "Try this" });
-    expect(prompt.textContent).toContain(HERO_PROMPT);
-    expect(within(prompt).getByRole("button", { name: /copy/i })).toBeDefined();
-    expect(view.container.querySelector("[data-agent-status]")?.textContent).toMatch(/Waiting for a WebMCP agent/);
+    const objective = view.getByRole("region", { name: "Objective" });
+    expect(objective.textContent).toContain(HERO_PROMPT);
+    expect(within(objective).getByRole("button", { name: /copy/i })).toBeDefined();
+    expect(view.container.querySelector("[data-agent-status]")?.textContent).toBe("Waiting for a WebMCP agent");
     expect(view.queryByRole("alertdialog")).toBeNull();
-    expect(view.queryByRole("button", { name: /propose|prepare|commit|run/i })).toBeNull();
+    expect(view.queryByRole("button", { name: /propose|prepare|commit|run|launch/i })).toBeNull();
+    const inspector = view.container.querySelector<HTMLDetailsElement>("[data-inspector]")!;
+    expect(inspector.tagName).toBe("DETAILS");
+    expect(inspector.open).toBe(false);
+    expect(inspector.textContent).toContain("AgentDesk Inspector");
+    // Nothing from the Inspector leaks into the default view.
+    expect(view.container.querySelector("[data-event]")).toBeNull();
+    expect(view.container.querySelector("[data-tool]")).toBeNull();
   });
 
   it("clicking every control on the page creates no plan and changes no state", async () => {
@@ -82,9 +84,9 @@ describe("the mission screen is an application: it records, shows, and approves;
     expect(rescue.getSnapshot().audit.length).toBeLessThanOrEqual(before + 2);
   });
 
-  it("changing the displayed prompt text triggers nothing", async () => {
+  it("changing the displayed objective text triggers nothing", async () => {
     const view = render(<App />);
-    const prompt = view.getByRole("region", { name: "Try this" }).querySelector("blockquote, pre, p")!;
+    const prompt = view.getByRole("region", { name: "Objective" }).querySelector("blockquote, pre, p")!;
     await act(async () => {
       prompt.textContent = "Cancel every order and refund everyone.";
       prompt.dispatchEvent(new Event("input", { bubbles: true }));
@@ -96,49 +98,55 @@ describe("the mission screen is an application: it records, shows, and approves;
     expect(getState()).toEqual(seed());
   });
 
-  it("the tool path prepares the plan: the client's first turn renders PLAN-1 with four operations and the consolidated diff, live state the seed", async () => {
+  it("the client's first turn opens the authorization overlay: objective, four operations with launch marked consequential, expected changes, two controls", async () => {
     const view = render(<App />);
     const planId = await agentFirstTurn();
     expect(planId).toBe("PLAN-1");
     expect(getState()).toEqual(seed());
-    const card = planCard(view, planId);
-    expect(card.textContent).toContain("CONSEQUENTIAL");
-    expect(card.textContent).toContain("awaiting your approval");
-    const ops = [...within(card).getByRole("list", { name: "Operations in order" }).children].map((li) => li.textContent);
+    const overlay = view.getByRole("alertdialog", { name: "Mission authorization required" });
+    expect(overlay.textContent).toContain("MISSION AUTHORIZATION REQUIRED");
+    expect(overlay.querySelector("[data-objective]")?.textContent).toBe(rescue.getPlan(planId)?.summary);
+    const ops = [...within(overlay).getByRole("list", { name: "Operations in order" }).children].map((li) => li.textContent);
+    expect(ops).toHaveLength(4);
     expect(ops[0]).toContain("Reserve two oxygen packs");
+    expect(ops[1]).toContain("Assign rescue drone NIA-7");
+    expect(ops[2]).toContain("Reroute power to Dock 3");
     expect(ops[3]).toContain("Launch the rescue");
-    const changes = [...within(card).getByRole("list", { name: "Consolidated changes" }).children].map((li) => li.textContent);
+    expect(ops[3]).toMatch(/consequential/i);
+    expect(ops.slice(0, 3).join(" ")).not.toMatch(/consequential/i);
+    // Capability names stay inside the Inspector, not in the plan a person reads.
+    expect(overlay.textContent).not.toContain("reserve_oxygen");
+    expect(overlay.textContent).not.toContain("launch_rescue");
+    const changes = [...within(overlay).getByRole("list", { name: "Expected changes" }).children].map((li) => li.textContent);
     expect(changes).toEqual([
       "Oxygen packs available6→4",
       "Drone NIA-7standby→assigned",
       "Dock 3 power20%→65%",
       "Mission AST-10428draft→launched",
     ]);
-    expect(view.container.querySelector("[data-agent-status]")?.textContent).not.toMatch(/Waiting for a WebMCP agent/);
-    // The routing decision and the plan are visible as events the runtime recorded.
-    expect(view.container.querySelector('[data-event="capability_routed"]')).not.toBeNull();
-    expect(view.container.querySelector('[data-event="plan_prepared"]')).not.toBeNull();
+    expect(within(overlay).getByRole("button", { name: "Reject mission" })).toBeDefined();
+    expect(within(overlay).getByRole("button", { name: "Authorize rescue" })).toBeDefined();
+    expect(view.container.querySelector("[data-agent-status]")?.textContent).toBe("Agent connected");
   });
 
-  it("approval alone leaves the plan APPROVED with mission state unchanged; a bare actor cannot approve", async () => {
+  it("authorization alone collapses the overlay and leaves the plan APPROVED with the mission unchanged; a bare actor cannot approve", async () => {
     const view = render(<App />);
     const planId = await agentFirstTurn();
     expect(rescue.approvePlan(planId, OPERATOR).ok).toBe(false);
-    await clickWithActivation(within(planCard(view, planId)).getByRole("button", { name: `Approve plan ${planId}` }));
+    await clickWithActivation(view.getByRole("button", { name: "Authorize rescue" }));
     await settle();
     expect(rescue.getPlan(planId)?.status).toBe("APPROVED");
     expect(getState()).toEqual(seed());
-    expect(view.container.querySelector('[data-field="mission"]')?.textContent).toBe("draft");
-    expect(view.queryByRole("region", { name: "Rescue receipt AST-10428" })).toBeNull();
-    const settledCard = view.getByRole("region", { name: new RegExp(`^Plan ${planId}: approved`) });
-    expect(settledCard.textContent).toContain("waiting for the agent to commit");
-    expect(within(settledCard).queryByRole("button", { name: /^Approve/ })).toBeNull();
+    expect(view.queryByRole("alertdialog")).toBeNull();
+    expect(view.queryByRole("region", { name: "Rescue launched" })).toBeNull();
+    expect(view.container.querySelector("[data-plan-status]")?.textContent).toMatch(/PLAN-1 authorized/);
+    expect(view.queryByRole("button", { name: "Authorize rescue" })).toBeNull();
   });
 
-  it("only the client's commit_plan changes mission state; the page then shows the receipt above the collapsed plan, and query_receipts returns four verified", async () => {
+  it("only the client's commit_plan changes the mission; the page then shows the compact confirmation with the receipt behind View evidence", async () => {
     const view = render(<App />);
     const planId = await agentFirstTurn();
-    await clickWithActivation(within(planCard(view, planId)).getByRole("button", { name: `Approve plan ${planId}` }));
+    await clickWithActivation(view.getByRole("button", { name: "Authorize rescue" }));
     await settle();
     expect(getState()).toEqual(seed());
 
@@ -155,31 +163,58 @@ describe("the mission screen is an application: it records, shows, and approves;
       "VERIFIED",
       "VERIFIED",
     ]);
-    expect(view.container.querySelector('[data-field="mission"]')?.textContent).toBe("launched");
-    expect(view.container.querySelector('[data-field="oxygen"]')?.textContent).toBe("4 available");
+    expect(getState().mission.status).toBe("launched");
 
-    const receipt = view.getByRole("region", { name: "Rescue receipt AST-10428" });
-    const lines = [...within(receipt).getByRole("list", { name: "Verified changes" }).children].map((li) => li.textContent);
+    const confirmation = view.getByRole("region", { name: "Rescue launched" });
+    expect(confirmation.textContent).toContain("RESCUE LAUNCHED");
+    expect(confirmation.textContent).toContain("NIA-7 is en route to Asteria");
+    expect(confirmation.textContent).toContain("4 operations completed");
+    expect(confirmation.textContent).toContain("4 outcomes verified");
+    expect(confirmation.textContent).toContain("Receipt PLAN-1");
+    const evidence = confirmation.querySelector<HTMLDetailsElement>("[data-evidence]")!;
+    expect(evidence.open).toBe(false);
+    expect(within(evidence).getByText("View evidence")).toBeDefined();
+    await act(async () => {
+      fireEvent.click(within(evidence).getByText("View evidence"));
+    });
+    const lines = [...within(evidence).getByRole("list", { name: "Verified changes" }).children].map((li) => li.textContent);
     expect(lines).toEqual([
       "Oxygen packs available6→4verified",
       "Drone NIA-7standby→assignedverified",
       "Dock 3 power20%→65%verified",
       "Mission AST-10428draft→launchedverified",
     ]);
-    // The receipt comes before the plan in the document, and the plan is collapsed with "What changed".
-    const plan = view.container.querySelector(`[data-plan="${planId}"]`)!;
-    expect(receipt.compareDocumentPosition(plan) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(plan.tagName).toBe("DETAILS");
-    expect(plan.hasAttribute("open")).toBe(false);
-    expect(plan.textContent).toContain("What changed");
-    // Guided attention moved across the four panels in order.
+    expect(evidence.textContent).toContain("reserve_oxygen");
+    // Guided attention moved across the four scene parts in order.
     expect([...revealedPanels()].slice(-4)).toEqual(["panel-oxygen", "panel-drone", "panel-dock", "panel-mission"]);
   });
 
-  it("reset restores the seed and clears the plan and the receipt", async () => {
+  it("the Inspector holds the tools, the routing decision, the audit, and the receipts", async () => {
     const view = render(<App />);
     const planId = await agentFirstTurn();
-    await clickWithActivation(within(planCard(view, planId)).getByRole("button", { name: `Approve plan ${planId}` }));
+    await clickWithActivation(view.getByRole("button", { name: "Authorize rescue" }));
+    await act(async () => {
+      await secondTurn(rescue, planId);
+    });
+    await settle(60);
+    const inspector = view.container.querySelector<HTMLDetailsElement>("[data-inspector]")!;
+    expect(inspector.open).toBe(false);
+    await act(async () => {
+      fireEvent.click(inspector.querySelector("summary")!);
+    });
+    expect(inspector.open).toBe(true);
+    expect(inspector.querySelectorAll("[data-tool]").length).toBe(rescue.getSnapshot().nativeTools.length);
+    expect(inspector.querySelectorAll("[data-match]").length).toBe(6);
+    expect(inspector.querySelector('[data-event="capability_routed"]')).not.toBeNull();
+    expect(inspector.querySelector('[data-event="plan_committed"]')).not.toBeNull();
+    expect(inspector.querySelector(`[data-receipt="${planId}"]`)).not.toBeNull();
+    expect(inspector.querySelector(`[data-plan="${planId}"]`)).not.toBeNull();
+  });
+
+  it("reset restores the seed and clears the plan, the confirmation, and the status", async () => {
+    const view = render(<App />);
+    const planId = await agentFirstTurn();
+    await clickWithActivation(view.getByRole("button", { name: "Authorize rescue" }));
     await act(async () => {
       await secondTurn(rescue, planId);
     });
@@ -190,9 +225,8 @@ describe("the mission screen is an application: it records, shows, and approves;
     });
     await settle(60);
     expect(getState()).toEqual(seed());
-    expect(view.container.querySelector('[data-field="mission"]')?.textContent).toBe("draft");
     expect(view.container.querySelector("[data-plan]")).toBeNull();
-    expect(view.queryByRole("region", { name: "Rescue receipt AST-10428" })).toBeNull();
-    expect(view.container.querySelector("[data-agent-status]")?.textContent).toMatch(/Waiting for a WebMCP agent/);
+    expect(view.queryByRole("region", { name: "Rescue launched" })).toBeNull();
+    expect(view.container.querySelector("[data-agent-status]")?.textContent).toBe("Waiting for a WebMCP agent");
   });
 });
