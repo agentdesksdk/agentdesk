@@ -3,9 +3,14 @@ import {
   defineCapability,
   type Capability,
   type CapabilityProvider,
+  type ProviderHooks,
+  type ProviderRefusal,
   type RegisterToolFn,
 } from "@agentdesk/webmcp";
 import { attachBridge, type Bridge } from "./bridge.ts";
+
+/** Refusals held before the runtime has connected; older ones are dropped past this. */
+const HELD_REFUSALS = 64;
 import type { ExtensionManifest } from "./manifest.ts";
 
 export type ExtensionProviderOptions = {
@@ -49,11 +54,37 @@ export function extensionProvider(options: ExtensionProviderOptions): ExtensionP
     }
   };
 
+  // One audit: the runtime's. A refusal that arrives before the runtime has
+  // connected is held and recorded once it has, so a forgery in the first
+  // instant of a page is not the one that goes unrecorded. When the hold
+  // overflows the oldest are dropped, and the drop itself is recorded on
+  // connect as one held_overflow naming how many and over what span, ahead
+  // of the replay: an unknown outcome stays visible, even a flood.
+  const now = options.now ?? (() => Date.now());
+  let hooks: ProviderHooks | undefined;
+  const held: Array<{ refusal: ProviderRefusal; at: number }> = [];
+  let dropped = 0;
+  let droppedFrom: number | undefined;
+  let droppedTo: number | undefined;
+  const refused = (refusal: ProviderRefusal): void => {
+    if (hooks !== undefined) {
+      hooks.refused(refusal);
+      return;
+    }
+    held.push({ refusal, at: now() });
+    while (held.length > HELD_REFUSALS) {
+      const oldest = held.shift()!;
+      dropped += 1;
+      droppedFrom ??= oldest.at;
+      droppedTo = oldest.at;
+    }
+  };
+
   const bridge = attachBridge({
     window: options.window,
     origin: manifest.origin,
     ...(manifest.anchors !== undefined ? { anchors: manifest.anchors } : {}),
-    ...(options.now !== undefined ? { now: options.now } : {}),
+    onRefused: (refusal) => refused({ reason: refusal.reason, detail: refusal.detail }),
     onRequest: (request) => {
       if (request.kind === "changed") {
         announce();
@@ -77,6 +108,31 @@ export function extensionProvider(options: ExtensionProviderOptions): ExtensionP
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
+      };
+    },
+    connect: (given) => {
+      hooks = given;
+      if (dropped > 0) {
+        given.refused({
+          reason: "held_overflow",
+          detail: {
+            dropped,
+            from: droppedFrom,
+            to: droppedTo,
+            held: held.length,
+          },
+        });
+        dropped = 0;
+        droppedFrom = undefined;
+        droppedTo = undefined;
+      }
+      for (const { refusal } of held.splice(0)) {
+        given.refused(refusal);
+      }
+      return () => {
+        if (hooks === given) {
+          hooks = undefined;
+        }
       };
     },
     bridge,

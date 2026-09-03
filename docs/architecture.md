@@ -150,6 +150,20 @@ provider's catalog never changes and its adapter is the page's model
 context, so it uses neither. The extension's provider is
 `packages/extension`, described in `docs/design/browser-extension.md`.
 
+A provider's refusal is the operator's audit event. At `start` the
+runtime hands every provider one hook through `connect`, `refused`, and
+takes it back at `stop`; what comes through it is recorded as
+`provider_refused`, carrying the provider's kind, the reason as the
+provider states it, a detail object the runtime does not interpret, and
+the time. The SDK learns no word for what a provider is: a forged page
+message refused by the extension's bridge and a denied call sit in one
+audit, and a provider that refuses nothing, the native one, omits
+`connect`. A detail that cannot be cloned into the audit is recorded as
+unrecordable rather than lost. Audit events are the operator's and are
+not projected through the agent view, so a refusal's detail, which may
+quote page content, reaches no agent-facing result at all; a test holds
+quoted content out of every result while the audit carries it.
+
 ## WebMCP surface coverage
 
 Verified against the spec's `index.bs` IDL. `registerTool`'s second
@@ -1971,8 +1985,9 @@ packages/webmcp/src/audit.ts untrusted_content_ignored gestureId
 packages/webmcp/src/persistence.ts PersistedRecord PersistedIdempotencyClaim PersistedArtifact PersistenceAdapter memoryPersistence indexedDbPersistence sealOf verifyRecord
 packages/webmcp/src/runtime.ts persistOpen rehydrate describeArtifact restoredClaims approvalClaims
 packages/webmcp/src/staging.ts hydrate identify digestOf
-packages/webmcp/src/provider.ts CapabilityProvider nativeProvider subscribe
-packages/webmcp/src/runtime.ts catalogChanged assertStagingBacked provider
+packages/webmcp/src/provider.ts CapabilityProvider nativeProvider subscribe connect ProviderHooks ProviderRefusal
+packages/webmcp/src/runtime.ts catalogChanged assertStagingBacked provider disconnectProvider
+packages/webmcp/src/audit.ts provider_refused
 packages/webmcp/src/indexeddb-staging.ts indexedDbStaging IndexedDbFork IndexedDbDraft STAGING_STORE versionOf open flush resolveArtifact
 packages/webmcp/src/staging.ts StagedCommitRefused buildStageHandler
 packages/webmcp/src/runtime.ts runInvocation

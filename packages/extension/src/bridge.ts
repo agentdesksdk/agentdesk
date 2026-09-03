@@ -34,26 +34,19 @@ export type BridgeRefusal = {
 
 export type BridgeAcceptance = { readonly ok: true; readonly request: BridgeRequest };
 
-export type BridgeAuditEntry =
-  | {
-      readonly kind: "bridge_refused";
-      readonly reason: BridgeRefusalReason;
-      readonly detail: string;
-      readonly origin: string;
-      readonly at: number;
-    }
-  | {
-      readonly kind: "bridge_accepted";
-      readonly request: BridgeRequest["kind"];
-      readonly origin: string;
-      readonly at: number;
-    };
+/**
+ * What the bridge hands the one audit for a refusal: the reason, and a
+ * detail object the runtime does not interpret, carrying the bridge's own
+ * sentence, the origin the message came from, and the kind it claimed.
+ */
+export type BridgeRefused = {
+  readonly reason: BridgeRefusalReason;
+  readonly detail: { readonly detail: string; readonly origin: string; readonly kind?: string };
+};
 
 export type Bridge = {
   /** Stops listening. */
   detach: () => void;
-  /** Every message the bridge decided on, refused or accepted, oldest first. */
-  audit: () => BridgeAuditEntry[];
   /** The reveal anchors the page has registered, the only ones `reveal` may name. */
   anchors: () => string[];
   /** The decision for one message, with nothing dispatched; what the listener applies. */
@@ -67,9 +60,13 @@ export type BridgeOptions = {
   origin: string;
   /** Called with every accepted request, in the extension's context. */
   onRequest: (request: BridgeRequest) => void;
+  /**
+   * Called with every refusal of a message addressed to the bridge. The
+   * bridge keeps no log of its own: this is the way into the one audit.
+   */
+  onRefused?: (refusal: BridgeRefused) => void;
   /** Anchors known before the page registers any. */
   anchors?: readonly string[];
-  now?: () => number;
 };
 
 /** What a page may ask for. Anything else addressed to the bridge is a forgery. */
@@ -126,8 +123,6 @@ function refuse(reason: BridgeRefusalReason, detail: string): BridgeRefusal {
 }
 
 export function attachBridge(options: BridgeOptions): Bridge {
-  const now = options.now ?? (() => Date.now());
-  const audit: BridgeAuditEntry[] = [];
   const registered = new Set<string>(options.anchors ?? []);
 
   const validate = (event: MessageEvent): BridgeAcceptance | BridgeRefusal => {
@@ -210,12 +205,14 @@ export function attachBridge(options: BridgeOptions): Bridge {
     }
     const decision = validate(message);
     if (!decision.ok) {
-      audit.push({
-        kind: "bridge_refused",
+      const claimed = (data as { kind?: unknown }).kind;
+      options.onRefused?.({
         reason: decision.reason,
-        detail: decision.detail,
-        origin: message.origin,
-        at: now(),
+        detail: {
+          detail: decision.detail,
+          origin: message.origin,
+          ...(typeof claimed === "string" ? { kind: claimed } : {}),
+        },
       });
       return;
     }
@@ -224,7 +221,6 @@ export function attachBridge(options: BridgeOptions): Bridge {
         registered.add(anchor);
       }
     }
-    audit.push({ kind: "bridge_accepted", request: decision.request.kind, origin: message.origin, at: now() });
     options.onRequest(decision.request);
   };
 
@@ -232,7 +228,6 @@ export function attachBridge(options: BridgeOptions): Bridge {
 
   return {
     detach: () => options.window.removeEventListener("message", listener),
-    audit: () => [...audit],
     anchors: () => [...registered].sort(),
     validate,
   };

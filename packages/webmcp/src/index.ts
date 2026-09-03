@@ -29,6 +29,8 @@ export {
   nativeProvider,
   type CapabilityProvider,
   type NativeProviderOptions,
+  type ProviderHooks,
+  type ProviderRefusal,
 } from "./provider.ts";
 export {
   catalogHierarchy,

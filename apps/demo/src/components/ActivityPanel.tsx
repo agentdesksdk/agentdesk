@@ -356,6 +356,17 @@ function collapse(events: readonly AuditEvent[]): Rendered[] {
           meta: `${event.sources.join(", ")} was in context; treated as data, not authority`,
         });
         break;
+      case "provider_refused":
+        out.push({
+          key,
+          at: event.at,
+          head: "Provider refused a message",
+          cap: event.provider,
+          meta: `${event.reason}${
+            typeof event.detail.detail === "string" ? `: ${event.detail.detail}` : ""
+          }`,
+        });
+        break;
       // A new audit kind has to get a case above; this stops it compiling
       // rather than letting it vanish from the panel.
       default: {

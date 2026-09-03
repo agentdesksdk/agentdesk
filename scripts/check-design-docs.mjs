@@ -231,6 +231,11 @@ const CLAIMS = [
   ["browser-extension.md", /A page message is a\s+request and never an authorization/, "present", "the extension design states the bridge's rule"],
   ["browser-extension.md", /checks origin, then source, then shape, in that order/, "present", "the extension design states the bridge's check order"],
   ["browser-extension.md", /What this slice leaves unsatisfied/, "present", "the extension design says which assumptions remain unsatisfied"],
+  ["browser-extension.md", /The bridge's audit lives on the bridge/, "absent", "the extension design no longer lists the bridge's own audit as unsatisfied"],
+  ["browser-extension.md", /every refusal is the runtime's audit event/, "present", "the extension design says a refusal is the runtime's audit event"],
+  ["docs/architecture.md", /A provider's refusal is the operator's audit event/, "present", "architecture states provider_refused"],
+  ["docs/architecture.md", /The SDK learns no word for what a provider is/, "present", "architecture says the audit kind is generic"],
+  ["docs/architecture.md", /reaches no agent-facing result at all/, "present", "architecture says a refusal's detail never reaches the agent"],
 ];
 
 /**
