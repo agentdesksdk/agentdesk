@@ -199,6 +199,11 @@ body {
   stroke: #3a4a5e;
 }
 
+.scene .beacon[data-beacon="stopped"] {
+  animation: none;
+  fill: var(--good);
+}
+
 .scene .beacon {
   fill: var(--danger);
   animation: beacon 1.6s ease-in-out infinite;
@@ -596,6 +601,15 @@ summary:focus-visible {
   background: var(--good-soft);
   border-radius: 12px;
   padding: 12px 16px;
+}
+
+.confirmation.recovered {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.confirmation.recovered h2 {
+  color: var(--accent);
 }
 
 .confirmation h2 {

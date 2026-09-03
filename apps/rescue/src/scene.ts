@@ -1,4 +1,5 @@
 import type { PresentationListener } from "@agentdesksdk/webmcp";
+import { COMPLETE_RESCUE } from "./capabilities.ts";
 import { rescue } from "./runtime.ts";
 import { onReset } from "./state.ts";
 
@@ -14,15 +15,17 @@ export type SceneFlags = {
   droneAssigned: boolean;
   dockPowered: boolean;
   underway: boolean;
+  completed: boolean;
 };
 
-const NOTHING: SceneFlags = { oxygenLoaded: false, droneAssigned: false, dockPowered: false, underway: false };
+const NOTHING: SceneFlags = { oxygenLoaded: false, droneAssigned: false, dockPowered: false, underway: false, completed: false };
 
 const FLAG_OF: Record<string, keyof SceneFlags> = {
   reserve_oxygen: "oxygenLoaded",
   assign_rescue_drone: "droneAssigned",
   reroute_dock_power: "dockPowered",
   launch_rescue: "underway",
+  [COMPLETE_RESCUE]: "completed",
 };
 
 export function createSceneStore(subscribePresentation: (listener: PresentationListener) => () => void) {

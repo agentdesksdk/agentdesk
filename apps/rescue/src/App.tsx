@@ -1,6 +1,6 @@
 import { useState, useSyncExternalStore } from "react";
 import type { AuditEvent, OperationPlan } from "@agentdesksdk/webmcp";
-import { AuthorizationOverlay, Confirmation, isSettled, PlanRecord, receiptLines, show, stateWords } from "./PlanCard.tsx";
+import { AuthorizationOverlay, Confirmation, isSettled, PlanRecord, receiptLines, Recovered, show, stateWords } from "./PlanCard.tsx";
 import { Presence } from "./Presence.tsx";
 import { getRuntimeSnapshot, resetRescue, subscribeRuntime, webmcpNative } from "./runtime.ts";
 import { scene } from "./scene.ts";
@@ -14,6 +14,9 @@ const useScene = () => useSyncExternalStore(scene.subscribe, scene.get);
 /** The objective a mission commander gives their WebMCP client. The page only shows it. */
 export const TRY_THIS =
   "Find the stranded Asteria crew. Prepare a rescue plan that reserves two oxygen packs, assigns rescue drone NIA-7, reroutes power to Dock 3, and launches the rescue. Do not launch without my approval.";
+
+/** The second objective, shown once the rescue has launched. The page only shows it. */
+export const COMPLETE_PROMPT = "Complete the Asteria rescue, verify the crew is safe, and show me the final receipt.";
 
 const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
@@ -64,10 +67,10 @@ function planStatus(plans: OperationPlan[]): string | null {
   return null;
 }
 
-async function copyPrompt(setNote: (words: string) => void) {
+async function copyPrompt(text: string, setNote: (words: string) => void) {
   try {
     if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(TRY_THIS);
+      await navigator.clipboard.writeText(text);
       setNote("Copied. Paste it into your WebMCP client.");
       return;
     }
@@ -124,19 +127,35 @@ export function App() {
             {status}
           </p>
         ) : null}
+        {flags.completed ? <Recovered audit={snapshot.audit} state={state} /> : null}
         {latest !== undefined ? <Confirmation plan={latest} audit={snapshot.audit} /> : null}
-        <section className="objective-band" role="region" aria-label="Objective">
-          <span className="eyebrow">Objective for your WebMCP client</span>
-          <blockquote>{TRY_THIS}</blockquote>
-          <div className="actions">
-            <button type="button" onClick={() => void copyPrompt(setNote)}>
-              Copy prompt
-            </button>
-            <span className="detail" role="status" aria-live="polite">
-              {note}
-            </span>
-          </div>
-        </section>
+        {state.mission.status === "draft" ? (
+          <section className="objective-band" role="region" aria-label="Objective">
+            <span className="eyebrow">Objective for your WebMCP client</span>
+            <blockquote>{TRY_THIS}</blockquote>
+            <div className="actions">
+              <button type="button" onClick={() => void copyPrompt(TRY_THIS, setNote)}>
+                Copy prompt
+              </button>
+              <span className="detail" role="status" aria-live="polite">
+                {note}
+              </span>
+            </div>
+          </section>
+        ) : (
+          <section className="objective-band" role="region" aria-label="Next objective">
+            <span className="eyebrow">Next objective for your WebMCP client</span>
+            <blockquote>{COMPLETE_PROMPT}</blockquote>
+            <div className="actions">
+              <button type="button" onClick={() => void copyPrompt(COMPLETE_PROMPT, setNote)}>
+                Copy prompt
+              </button>
+              <span className="detail" role="status" aria-live="polite">
+                {note}
+              </span>
+            </div>
+          </section>
+        )}
       </section>
 
       {draft !== undefined ? <AuthorizationOverlay plan={draft} /> : null}

@@ -8,7 +8,7 @@ export type RescueState = {
   oxygen: { available: number; reserved: number };
   drone: { id: string; status: "standby" | "assigned"; assignment: string | null };
   dock: { name: string; power: number };
-  mission: { id: string; status: "draft" | "launched" };
+  mission: { id: string; status: "draft" | "launched" | "completed" };
 };
 
 export const MISSION = "AST-10428";
@@ -47,10 +47,11 @@ function notify(): void {
 }
 
 /**
- * The four lines a person reads, compares, and verifies: the fields of every
+ * The five lines a person reads, compares, and verifies: the fields of every
  * diff and of the receipt. Reserved packs and the drone's assignment are
  * shown on the screen but are consequences of these four, not lines of
- * their own, so the consolidated diff stays four rows.
+ * their own, so the launch plan's consolidated diff stays four rows; the
+ * crew line changes only when the rescue is completed.
  */
 export function rows(state: RescueState): Record<string, string | number> {
   return {
@@ -58,6 +59,7 @@ export function rows(state: RescueState): Record<string, string | number> {
     [`Drone ${state.drone.id}`]: state.drone.status,
     [`${state.dock.name} power`]: `${state.dock.power}%`,
     [`Mission ${state.mission.id}`]: state.mission.status,
+    [`Crew ${state.crew.name}`]: state.crew.status,
   };
 }
 

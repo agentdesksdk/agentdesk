@@ -1,7 +1,7 @@
 import type { AuditEvent, Change, OperationPlan, Receipt } from "@agentdesksdk/webmcp";
-import { rescueCapabilities } from "./capabilities.ts";
+import { COMPLETE_RESCUE, rescueCapabilities } from "./capabilities.ts";
 import { OPERATOR, rescue } from "./runtime.ts";
-import { CREW, DRONE } from "./state.ts";
+import { CREW, DRONE, MISSION, rows, type RescueState } from "./state.ts";
 
 /** The plan's four previews in order: what a person authorizes, as one list. */
 export function consolidated(plan: OperationPlan): Change[] {
@@ -162,6 +162,48 @@ export function Confirmation({ plan, audit }: { plan: OperationPlan; audit: read
               </li>
             );
           })}
+        </ol>
+      </details>
+    </section>
+  );
+}
+
+/**
+ * The final confirmation, after the completion capability has landed: the receipt the
+ * runtime recorded for that execution, each change read back against live
+ * state by the page itself. Rendered only when the scene's completed flag
+ * is on, which turns on at the capability's completion event.
+ */
+export function Recovered({ audit, state }: { audit: readonly AuditEvent[]; state: RescueState }) {
+  const landed = [...audit].reverse().find(
+    (event): event is Extract<AuditEvent, { kind: "execution_completed" }> =>
+      event.kind === "execution_completed" && event.capability === COMPLETE_RESCUE && event.receipt !== undefined,
+  );
+  if (landed === undefined) {
+    return null;
+  }
+  const observed = rows(state);
+  const lines = landed.receipt!.changes.map((change) => ({
+    change,
+    verification: observed[change.field] === change.after ? "matches" : "differs",
+  }));
+  return (
+    <section className="confirmation recovered" role="region" aria-label="Crew recovered" data-recovered={landed.executionId}>
+      <h2>CREW RECOVERED</h2>
+      <p className="line">
+        The {CREW} crew is safe aboard {DRONE}. Mission {MISSION} complete.
+      </p>
+      <p className="counts">
+        {lines.length} changes read back · Execution {landed.executionId}
+      </p>
+      <details className="evidence" data-evidence>
+        <summary>View evidence</summary>
+        <ChangeRows label="Changes read back" changes={lines} />
+        <ol className="operations" aria-label="Operation and outcome">
+          <li data-operation={COMPLETE_RESCUE}>
+            <code>{COMPLETE_RESCUE}</code>
+            <span className="outcome">completed, execution {landed.executionId}, entity {landed.receipt!.entity}</span>
+          </li>
         </ol>
       </details>
     </section>
