@@ -317,7 +317,7 @@ describe("durability: what is loaded is what was saved", () => {
 });
 
 describe("durability: an idempotency claim survives a restart", () => {
-  it("refuses a repeat of the same call after reload instead of replaying or re-executing", async () => {
+  it("replays the exact settled result after reload without re-executing", async () => {
     const persistence = memoryPersistence();
     const first = makeAdapter();
     const runtime = await boot(first.adapter, persistence);
@@ -334,13 +334,12 @@ describe("durability: an idempotency claim survives a restart", () => {
       input: { id: "T-2" },
     });
 
-    expect(repeat.code).toBe("IDEMPOTENCY_CONFLICT");
-    expect(String(repeat.data?.reason)).toMatch(/restart|reload/i);
+    expect(repeat).toEqual(done);
     expect(differently.code).toBe("IDEMPOTENCY_CONFLICT");
     expect(second.dispatches()).toBe(0);
   });
 
-  it("carries the earlier write's receipt as evidence and points at the receipts query for the capability", async () => {
+  it("replays the earlier write's receipt as part of the exact result", async () => {
     const persistence = memoryPersistence();
     const first = makeAdapter();
     const runtime = await boot(first.adapter, persistence);
@@ -355,12 +354,7 @@ describe("durability: an idempotency claim survives a restart", () => {
     const again = await boot(makeAdapter().adapter, persistence);
     const repeat = await again.invoke("invoke_capability", call);
 
-    expect(repeat.code).toBe("IDEMPOTENCY_CONFLICT");
-    expect(repeat.data?.cause).toBe("after_restart");
-    expect(repeat.data?.evidence).toEqual([{ kind: "receipt", id: receiptId }]);
-    expect(String(repeat.data?.next)).toMatch(/receipts? .*touch_thing|touch_thing.*receipts?/i);
-    expect(repeat.data?.nowPossible).toContain("touch_thing");
-    expect(repeat.data).not.toHaveProperty("repair");
+    expect(repeat).toEqual(done);
     expect(persistence.claims.get("touch_thing:once")?.receiptId).toBe(receiptId);
   });
 });
@@ -432,7 +426,7 @@ describe("durability: a key through the approval path", () => {
     expect(runtime.getSnapshot().pending).toHaveLength(1);
   });
 
-  it("refuses the same key after a restart once the record is reconciled, rather than asking again", async () => {
+  it("refuses the same key after a restarted indeterminate record is reconciled", async () => {
     const persistence = memoryPersistence();
     const first = makeAdapter({ throwAfterWrite: true });
     const runtime = await boot(first.adapter, persistence);

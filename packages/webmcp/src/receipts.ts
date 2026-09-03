@@ -81,6 +81,12 @@ export type ReceiptQuery = {
   reviewed?: boolean;
 };
 
+export type ReceiptCheckpoint = {
+  version: 1;
+  nextId: number;
+  receipts: StoredReceipt[];
+};
+
 /**
  * Queryable history of what actually changed, distinct from the audit log.
  * Audit records that things happened; this records what they did, with the
@@ -228,6 +234,33 @@ export class ReceiptStore {
     return filter.limit === undefined
       ? newestFirst
       : newestFirst.slice(0, filter.limit);
+  }
+
+  checkpoint(): ReceiptCheckpoint {
+    return {
+      version: 1,
+      nextId: this.nextId,
+      receipts: this.receipts.map((entry) => structuredClone(entry)),
+    };
+  }
+
+  hydrate(checkpoint: ReceiptCheckpoint): void {
+    if (checkpoint.version !== 1) {
+      throw new Error(`unsupported receipt checkpoint version ${String(checkpoint.version)}`);
+    }
+    let highest = 0;
+    this.receipts = checkpoint.receipts.map((entry) => {
+      const stored = deepFreeze(structuredClone(entry));
+      const numeric = Number(String(stored.id).replace(/^RCPT-/, ""));
+      if (Number.isFinite(numeric)) {
+        highest = Math.max(highest, numeric);
+      }
+      return stored;
+    });
+    if (this.receipts.length > this.limit) {
+      this.receipts.splice(0, this.receipts.length - this.limit);
+    }
+    this.nextId = Math.max(checkpoint.nextId, highest + 1);
   }
 
   clear(): void {

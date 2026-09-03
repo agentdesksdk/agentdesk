@@ -59,6 +59,12 @@ export type ActionRecord =
 
 export type ActionStatus = ActionRecord["status"];
 
+export type ApprovalCheckpoint = {
+  version: 1;
+  nextId: number;
+  records: ActionRecord[];
+};
+
 export class ApprovalManager {
   private nextId = 1001;
   private readonly records = new Map<string, ActionRecord>();
@@ -132,6 +138,31 @@ export class ApprovalManager {
 
   resolve(id: string, record: ActionRecord): void {
     this.records.set(id, record);
+  }
+
+  checkpoint(): ApprovalCheckpoint {
+    return {
+      version: 1,
+      nextId: this.nextId,
+      records: [...this.records.values()].map((record) => structuredClone(record)),
+    };
+  }
+
+  hydrate(checkpoint: ApprovalCheckpoint): void {
+    if (checkpoint.version !== 1) {
+      throw new Error(`unsupported approval checkpoint version ${String(checkpoint.version)}`);
+    }
+    this.records.clear();
+    let highest = 1000;
+    for (const record of checkpoint.records) {
+      const stored = structuredClone(record);
+      this.records.set(stored.action.id, stored);
+      const numeric = Number(String(stored.action.id).replace(/^APR-/, ""));
+      if (Number.isFinite(numeric)) {
+        highest = Math.max(highest, numeric);
+      }
+    }
+    this.nextId = Math.max(checkpoint.nextId, highest + 1);
   }
 
   /**

@@ -348,6 +348,8 @@ describe("the proposal store keys on runtime identity", () => {
     const store = new StagedProposalStore();
     let firstDiscarded = false;
     const first: StagedProposal = {
+      operation: "first",
+      input: {},
       changes: [],
       artifact: {},
       commit: () => ({}),
@@ -356,6 +358,8 @@ describe("the proposal store keys on runtime identity", () => {
       },
     };
     const second: StagedProposal = {
+      operation: "second",
+      input: {},
       changes: [],
       artifact: {},
       commit: () => ({}),
@@ -375,6 +379,8 @@ describe("the proposal store keys on runtime identity", () => {
     const store = new StagedProposalStore();
     const discarded: string[] = [];
     const proposal = (label: string): StagedProposal => ({
+      operation: label,
+      input: {},
       changes: [],
       artifact: {},
       commit: () => ({}),

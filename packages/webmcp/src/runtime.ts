@@ -75,10 +75,13 @@ import {
 } from "./plan.ts";
 import type { EvidenceLink, Receipt } from "./results.ts";
 import {
+  sealCheckpoint,
   sealOf,
+  verifyCheckpoint,
   verifyRecord,
   type PersistedArtifact,
   type PersistedRecord,
+  type PersistedRuntimeCheckpoint,
   type PersistenceAdapter,
 } from "./persistence.ts";
 import {
@@ -99,6 +102,7 @@ import {
   isRouteError,
   rankCapabilities,
   routeCapability,
+  tokenize,
   type RankedCapability,
 } from "./router.ts";
 import {
@@ -125,6 +129,7 @@ import {
   buildStageHandler,
   isThenable,
   parseResolution,
+  restoreStagedProposal,
   StagedCommitIndeterminate,
   StagedProposalStore,
   stateDigest,
@@ -147,12 +152,131 @@ const INVOKE_CAPABILITY = "invoke_capability";
 const GET_CONTEXT = "get_context";
 const GET_ACTION_STATUS = "get_action_status";
 
+const GOVERNANCE_ROLLBACK = "agentdesk_rollback_receipt";
+const GOVERNANCE_RECONCILE_STAGED = "agentdesk_reconcile_staged";
+const GOVERNANCE_RECONCILE_ROLLBACK = "agentdesk_reconcile_rollback";
+
 const BUILTIN_NAMES = new Set([
   FIND_CAPABILITIES,
   INVOKE_CAPABILITY,
   GET_CONTEXT,
   GET_ACTION_STATUS,
 ]);
+
+const GOVERNANCE_OPERATIONS = [
+  {
+    name: "prepare_plan",
+    readOnly: false,
+    description: "Stage one or more capability calls into a reviewable plan.",
+    input: { summary: "string?", operations: "[{ capability, input? }]" },
+  },
+  {
+    name: "get_plan",
+    readOnly: true,
+    description: "Read a plan by plan_id.",
+    input: { plan_id: "string" },
+  },
+  {
+    name: "list_plans",
+    readOnly: true,
+    description: "List plans and their current statuses.",
+    input: {},
+  },
+  {
+    name: "commit_plan",
+    readOnly: false,
+    description: "Commit a plan after a human approved it in the application UI.",
+    input: { plan_id: "string" },
+  },
+  {
+    name: "query_receipts",
+    readOnly: true,
+    description: "Query completed receipts by capability, plan, grant, actor, time, review state, and limit.",
+    input: {
+      capability: "string?",
+      plan_id: "string?",
+      grant_id: "string?",
+      actor_id: "string?",
+      since: "number?",
+      limit: "number?",
+      reviewed: "boolean?",
+    },
+  },
+  {
+    name: "list_unreconciled",
+    readOnly: true,
+    description: "List staged writes or cleanups whose outcome needs human reconciliation.",
+    input: {},
+  },
+  {
+    name: "request_rollback",
+    readOnly: false,
+    description: "Ask the page to show a human approval card for rolling back a receipt.",
+    input: { receipt_id: "string" },
+  },
+  {
+    name: "request_reconciliation",
+    readOnly: false,
+    description: "Ask the page to show a human approval card for reconciling an unreconciled record or rollback.",
+    input: {
+      record_id: "string?",
+      receipt_id: "string?",
+      outcome: "compensated|untouched?",
+      resolution: "{ kind }?",
+    },
+  },
+] as const;
+
+type GovernanceOperationName = (typeof GOVERNANCE_OPERATIONS)[number]["name"];
+
+function isGovernanceOperation(value: string): value is GovernanceOperationName {
+  return GOVERNANCE_OPERATIONS.some((operation) => operation.name === value);
+}
+
+function findGovernanceOperations(query: string) {
+  const queryTokens = new Set(tokenize(query).filter((token) => token.length > 2));
+  const normalizedQuery = query.toLowerCase();
+  if (queryTokens.size === 0) {
+    return [];
+  }
+
+  return GOVERNANCE_OPERATIONS.map((operation) => {
+    const nameTokens = tokenize(operation.name).filter((token) => token.length > 2);
+    const searchable = tokenize(`${operation.name} ${operation.description}`).filter(
+      (token) => token.length > 2,
+    );
+    const overlap = searchable.filter((token) => queryTokens.has(token)).length;
+    const exactName =
+      nameTokens.length > 0 && nameTokens.every((token) => queryTokens.has(token));
+    const exactIdentifier = normalizedQuery.includes(operation.name);
+    return {
+      operation,
+      score: overlap + (exactName ? 100 : 0) + (exactIdentifier ? 1_000 : 0),
+    };
+  })
+    .filter(({ score }) => score > 0)
+    .sort(
+      (a, b) =>
+        b.score - a.score || compareNames(a.operation.name, b.operation.name),
+    )
+    .slice(0, 5)
+    .map(({ operation }) => ({
+      name: operation.name,
+      read_only: operation.readOnly,
+      description: operation.description,
+      input: structuredClone(operation.input),
+      invoke_via: INVOKE_CAPABILITY,
+    }));
+}
+
+function assertGovernanceNamesAvailable(capabilities: readonly Capability[]): void {
+  const collision = capabilities.find((capability) => isGovernanceOperation(capability.name));
+  if (collision !== undefined) {
+    throw new Error(
+      `${collision.name} is reserved by the AgentDesk governance gateway`,
+    );
+  }
+}
 
 export type Exposure = "routed" | "flat";
 
@@ -445,6 +569,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   const presentation = new PresentationBus();
   const plans = new PlanStore();
   const receipts = new ReceiptStore();
+  let api: AgentDeskRuntime;
   // Bounded mandates a person issued. Consulted only where policy would ask
   // for an approval, so a grant can narrow what needs a human and never
   // widen what policy allows.
@@ -509,15 +634,22 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     // Started at once when nothing is in flight, so a synchronous adapter
     // has taken effect by the time the caller returns, and chained behind
     // an asynchronous one still running, so saves land in order.
-    const start = (): Promise<void> => {
-      persistsInFlight += 1;
-      let settled: Promise<void>;
+    const start = (): Promise<void> | undefined => {
+      let outcome: void | Promise<void>;
       try {
-        settled = Promise.resolve(work()).then(() => undefined);
+        outcome = work();
       } catch (err) {
-        settled = Promise.reject(err);
+        console.error("agentdesk persistence adapter threw", err);
+        return undefined;
       }
-      return settled
+      // A synchronous adapter has finished now. Keeping it marked in flight
+      // until a promise microtask would unnecessarily queue later saves and
+      // let an immediate reload observe an older checkpoint.
+      if (!isThenable(outcome)) {
+        return undefined;
+      }
+      persistsInFlight += 1;
+      return Promise.resolve(outcome)
         .catch((err) => {
           console.error("agentdesk persistence adapter threw", err);
         })
@@ -525,7 +657,30 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           persistsInFlight -= 1;
         });
     };
-    persisting = persistsInFlight === 0 ? start() : persisting.then(start);
+    if (persistsInFlight === 0) {
+      persisting = start() ?? Promise.resolve();
+    } else {
+      persisting = persisting.then(() => start());
+    }
+  }
+
+  function runtimeCheckpoint(): PersistedRuntimeCheckpoint {
+    const checkpoint = {
+      version: 1 as const,
+      updatedAt: now(),
+      approvals: approvals.checkpoint(),
+      receipts: receipts.checkpoint(),
+      plans: plans.checkpoint(),
+      proposals: proposals.snapshot(describeArtifact),
+    };
+    return { ...checkpoint, seal: sealCheckpoint(checkpoint) };
+  }
+
+  function persistCheckpoint(): void {
+    if (persistence?.saveCheckpoint === undefined) {
+      return;
+    }
+    persist(() => persistence.saveCheckpoint?.(runtimeCheckpoint()));
   }
   /**
    * A loaded artifact that is not the live object: the persisted
@@ -541,7 +696,10 @@ export function createAgentDeskRuntime<S = unknown>(options: {
    * claimed for, and the receipt the write recorded when it recorded one.
    * The result is gone; the receipt is what a refusal can point at.
    */
-  const restoredClaims = new Map<string, { fingerprint: string; receiptId?: string }>();
+  const restoredClaims = new Map<
+    string,
+    { fingerprint: string; receiptId?: string; result?: ToolResult }
+  >();
 
   /**
    * How an artifact is written down. The object itself when it clones; the
@@ -598,6 +756,26 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     if (persistence === undefined) {
       return;
     }
+    if (persistence.loadCheckpoint !== undefined) {
+      const checkpoint = await persistence.loadCheckpoint();
+      if (checkpoint !== undefined) {
+        const verified = verifyCheckpoint(checkpoint);
+        if (verified.ok) {
+          approvals.hydrate(verified.checkpoint.approvals);
+          receipts.hydrate(verified.checkpoint.receipts);
+          plans.hydrate(verified.checkpoint.plans);
+          restorePersistedProposals(verified.checkpoint.proposals);
+        } else {
+          audit.append({
+            kind: "staged_reconcile_failed",
+            capability: "runtime_checkpoint",
+            recordId: "checkpoint",
+            detail: `refused at load: ${verified.reason}`,
+            at: now(),
+          });
+        }
+      }
+    }
     const loaded = await persistence.loadOpenRecords();
     for (const candidate of loaded) {
       const verified = verifyRecord(candidate);
@@ -626,10 +804,25 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     }
     for (const claim of await persistence.loadIdempotencyClaims()) {
       if (claim.version === 1 && typeof claim.slot === "string") {
-        restoredClaims.set(claim.slot, {
+        const restored = {
           fingerprint: claim.fingerprint,
           ...(typeof claim.receiptId === "string" ? { receiptId: claim.receiptId } : {}),
-        });
+          ...(claim.result !== undefined ? { result: structuredClone(claim.result) } : {}),
+        };
+        restoredClaims.set(claim.slot, restored);
+        const actionId =
+          restored.result?.code === "APPROVAL_REQUIRED"
+            ? restored.result.data?.approval_id
+            : undefined;
+        if (
+          typeof actionId === "string" &&
+          approvals.get(actionId)?.status === "PENDING"
+        ) {
+          approvalClaims.set(
+            actionId,
+            restoredApprovalClaim(claim.slot, claim.fingerprint),
+          );
+        }
       }
     }
   }
@@ -783,6 +976,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   const policy = options.policy ?? riskBasedPolicy;
   const validate = options.validate ?? defaultValidator;
   let appCapabilities: readonly Capability[] = provider.capabilities();
+  assertGovernanceNamesAvailable(appCapabilities);
   let catalog = new CapabilityCatalog([
     ...builtinCapabilities(),
     ...appCapabilities,
@@ -825,6 +1019,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     fingerprint: string;
     inFlight: Promise<ToolResult>;
     settled: boolean;
+    result?: ToolResult;
   };
   const IDEMPOTENCY_LIMIT = 512;
   const idempotency = new Map<string, IdempotencyEntry>();
@@ -904,6 +1099,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         outcomes,
         resolvedAt: now(),
       });
+      persistCheckpoint();
     }
     return {
       ok: false,
@@ -1595,6 +1791,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
    */
   async function catalogChanged(): Promise<void> {
     const next = provider.capabilities();
+    assertGovernanceNamesAvailable(next);
     const rebuilt = new CapabilityCatalog([...builtinCapabilities(), ...next]);
     assertStagingBacked(rebuilt.all());
     appCapabilities = next;
@@ -1688,7 +1885,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     }
     if (capability.name === GET_CONTEXT) {
       try {
-        return toToolResult(throughView(contextPayload(), undefined, invocationActor));
+        return objectResult(throughView(contextPayload(), undefined, invocationActor) as Record<string, unknown>);
       } catch (err) {
         if (err instanceof AgentViewFailed) {
           return viewFailed(undefined, GET_CONTEXT, false);
@@ -1728,6 +1925,18 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       });
       emit();
       return policyDenied(capability.name, offered.reason, refusal(capability));
+    }
+    // A settled replay describes the earlier invocation, not whether a new
+    // invocation would be available against today's state. In particular, a
+    // successful write commonly makes itself unavailable. Resolve the exact
+    // same idempotent call before consulting that changed state.
+    const settledReplay = replaySettledIdempotency(
+      capability,
+      input,
+      idempotencyKey,
+    );
+    if (settledReplay !== undefined) {
+      return settledReplay;
     }
     const availability = evaluateAvailability(capability, context);
     if (!availability.available) {
@@ -1934,7 +2143,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       idempotencyKey,
       claim,
       ...(grantId !== undefined ? { grantId } : {}),
-      ...(direct.proposal ? { commit: direct.proposal.commit } : {}),
+      ...(direct.proposal
+        ? {
+            commit: direct.proposal.commit,
+            verificationChanges: direct.proposal.changes,
+          }
+        : {}),
     });
     if (!outcome.ok) {
       direct.proposal?.discard();
@@ -2063,6 +2277,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         summary,
         at: now(),
       });
+      persistCheckpoint();
       present(capability, "approval_requested", input, invocationActor);
       emit();
       return approvalRequired(
@@ -2141,6 +2356,31 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     | { ok: true; proposal?: StagedProposal }
     | { ok: false; error: string };
 
+  function stagingHooks(capability: string) {
+    return {
+      cleanupFailed: (failure: { detail: string; artifact: unknown }) => {
+        const record = unreconciled.record(
+          {
+            capability,
+            kind: "cleanup_failed",
+            detail: failure.detail,
+            changes: [],
+            at: now(),
+          },
+          failure.artifact,
+        );
+        audit.append({
+          kind: "staged_cleanup_failed" as const,
+          capability,
+          recordId: record.id,
+          detail: failure.detail,
+          at: now(),
+        });
+        persistOpen(record.id);
+      },
+    };
+  }
+
   function stageFor(
     capability: Capability,
     input: Record<string, unknown>,
@@ -2158,30 +2398,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     const stage = buildStageHandler(
       capability.stagedOperation,
       options.staging,
-      {
-        cleanupFailed: (failure) => {
-          // Attempting a hook that throws disposes nothing, so the artifact
-          // is still open in the application and has to stay findable.
-          const record = unreconciled.record(
-            {
-              capability: capability.name,
-              kind: "cleanup_failed",
-              detail: failure.detail,
-              changes: [],
-              at: now(),
-            },
-            failure.artifact,
-          );
-          audit.append({
-            kind: "staged_cleanup_failed",
-            capability: capability.name,
-            recordId: record.id,
-            detail: failure.detail,
-            at: now(),
-          });
-          persistOpen(record.id);
-        },
-      },
+      stagingHooks(capability.name),
     );
     const linked = linkSignals(signal, epochController.signal);
     const failed = (err: unknown): StageOutcome => ({
@@ -2219,6 +2436,9 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         "cannot invoke a surface tool through invoke_capability",
       );
     }
+    if (isGovernanceOperation(name)) {
+      return dispatchGovernance(name, readRecord(input.input));
+    }
     const routed = routeCapability(catalog, name);
     if (isRouteError(routed)) {
       return errorResult(`unknown capability: ${name}`);
@@ -2233,6 +2453,321 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       );
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function proposalCapability(key: string): Capability | undefined {
+    const separator = key.lastIndexOf("#");
+    const name = separator === -1
+      ? approvals.get(key)?.action.capability
+      : plans.get(key.slice(0, separator))?.operations[Number(key.slice(separator + 1))]?.capability;
+    return name === undefined ? undefined : catalog.get(name);
+  }
+
+  function restorePersistedProposals(
+    saved: PersistedRuntimeCheckpoint["proposals"],
+  ): void {
+    if (saved.length === 0 || options.staging === undefined) {
+      return;
+    }
+    for (const snapshot of saved) {
+      const capability = proposalCapability(snapshot.key);
+      if (
+        capability?.stagedOperation !== snapshot.operation ||
+        proposals.has(snapshot.key)
+      ) {
+        continue;
+      }
+      const artifact = snapshot.artifact.kind === "value"
+        ? snapshot.artifact.value
+        : persistence?.resolveProposalArtifact?.(snapshot);
+      if (artifact === undefined) {
+        continue;
+      }
+      try {
+        proposals.put(
+          snapshot.key,
+          restoreStagedProposal(
+            { ...snapshot, artifact: artifact as S },
+            options.staging,
+            stagingHooks(capability.name),
+          ),
+        );
+      } catch (err) {
+        audit.append({
+          kind: "staged_reconcile_failed",
+          capability: capability.name,
+          recordId: snapshot.key,
+          detail: `persisted proposal was not restored: ${err instanceof Error ? err.message : String(err)}`,
+          at: now(),
+        });
+      }
+    }
+  }
+
+  async function dispatchGovernance(
+    name: GovernanceOperationName,
+    input: Record<string, unknown>,
+  ): Promise<ToolResult> {
+    try {
+      if (name === "prepare_plan") {
+        const operations = readPlanOperations(input.operations);
+        if (!operations.ok) {
+          return errorResult(operations.reason);
+        }
+        const plan = await api.prepare({
+          operations: operations.operations,
+          ...(typeof input.summary === "string" ? { summary: input.summary } : {}),
+        });
+        return objectResult({ status: plan.status, plan_id: plan.id, plan });
+      }
+      if (name === "get_plan") {
+        const planId = readString(input, "plan_id") ?? readString(input, "planId") ?? readString(input, "id");
+        if (planId === undefined) {
+          return errorResult("plan_id is required");
+        }
+        const plan = api.getPlan(planId);
+        if (plan === undefined) {
+          return errorResult(`unknown plan: ${planId}`);
+        }
+        return objectResult({ status: plan.status, plan_id: plan.id, plan });
+      }
+      if (name === "list_plans") {
+        return objectResult({ plans: api.listPlans() });
+      }
+      if (name === "commit_plan") {
+        const planId = readString(input, "plan_id") ?? readString(input, "planId") ?? readString(input, "id");
+        if (planId === undefined) {
+          return errorResult("plan_id is required");
+        }
+        const result = await api.commitPlan(planId);
+        return objectResult({
+          ok: result.ok,
+          status: result.plan?.status ?? "REFUSED",
+          ...(result.ok ? {} : { reason: result.reason }),
+          ...(result.plan !== undefined ? { plan: result.plan } : {}),
+        });
+      }
+      if (name === "query_receipts") {
+        return objectResult({ receipts: api.queryReceipts(readReceiptQuery(input)) });
+      }
+      if (name === "list_unreconciled") {
+        return objectResult({ records: api.listUnreconciled() });
+      }
+      if (name === "request_rollback") {
+        return requestRollbackApproval(input);
+      }
+      return requestReconciliationApproval(input);
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function requestRollbackApproval(input: Record<string, unknown>): ToolResult {
+    const receiptId = readString(input, "receipt_id") ?? readString(input, "receiptId") ?? readString(input, "id");
+    if (receiptId === undefined) {
+      return errorResult("receipt_id is required");
+    }
+    const stored = receipts.get(receiptId);
+    if (stored === undefined) {
+      return errorResult(`unknown receipt: ${receiptId}`);
+    }
+    if (stored.rollbackState !== "READY") {
+      return errorResult(`${receiptId} is ${stored.rollbackState}, not READY`);
+    }
+    const action = approvals.request(
+      GOVERNANCE_ROLLBACK as CapabilityName,
+      { receipt_id: receiptId },
+      "CONSEQUENTIAL",
+      `Rollback ${receiptId} from ${stored.capability}`,
+      stored.receipt.changes.map((change) => ({
+        field: change.field,
+        before: change.after,
+        after: change.before,
+      })),
+      now(),
+    );
+    audit.append({
+      kind: "approval_requested",
+      capability: GOVERNANCE_ROLLBACK as CapabilityName,
+      actionId: action.id,
+      risk: "CONSEQUENTIAL",
+      summary: action.summary,
+      at: now(),
+    });
+    persistCheckpoint();
+    emit();
+    return objectResult(approvalPayload(action));
+  }
+
+  function requestReconciliationApproval(input: Record<string, unknown>): ToolResult {
+    const receiptId = readString(input, "receipt_id") ?? readString(input, "receiptId");
+    if (receiptId !== undefined) {
+      const outcome = readString(input, "outcome");
+      if (outcome !== "compensated" && outcome !== "untouched") {
+        return errorResult('outcome must be "compensated" or "untouched" for rollback reconciliation');
+      }
+      const stored = receipts.get(receiptId);
+      if (stored === undefined) {
+        return errorResult(`unknown receipt: ${receiptId}`);
+      }
+      if (stored.rollbackState !== "INDETERMINATE") {
+        return errorResult(`${receiptId} is ${stored.rollbackState}, and only an indeterminate rollback can be reconciled`);
+      }
+      const action = approvals.request(
+        GOVERNANCE_RECONCILE_ROLLBACK as CapabilityName,
+        { receipt_id: receiptId, outcome },
+        "CONSEQUENTIAL",
+        `Reconcile rollback of ${receiptId} as ${outcome}`,
+        [{ field: "rollbackState", before: "INDETERMINATE", after: outcome === "compensated" ? "ROLLED_BACK" : "READY" }],
+        now(),
+      );
+      audit.append({
+        kind: "approval_requested",
+        capability: GOVERNANCE_RECONCILE_ROLLBACK as CapabilityName,
+        actionId: action.id,
+        risk: "CONSEQUENTIAL",
+        summary: action.summary,
+        at: now(),
+      });
+      persistCheckpoint();
+      emit();
+      return objectResult(approvalPayload(action));
+    }
+
+    const recordId = readString(input, "record_id") ?? readString(input, "recordId") ?? readString(input, "id");
+    if (recordId === undefined) {
+      return errorResult("record_id or receipt_id is required");
+    }
+    const found = unreconciled.list().find((record) => record.id === recordId);
+    if (found === undefined) {
+      return errorResult(`nothing unreconciled for ${recordId}`);
+    }
+    const resolution = readRecord(input.resolution);
+    const parsed = parseResolution(found.kind, resolution);
+    if (!parsed.ok) {
+      return errorResult(parsed.reason);
+    }
+    const action = approvals.request(
+      GOVERNANCE_RECONCILE_STAGED as CapabilityName,
+      { record_id: recordId, resolution: parsed.resolution },
+      "CONSEQUENTIAL",
+      `Reconcile ${recordId} as ${parsed.resolution.kind}`,
+      [{ field: found.kind, before: "open", after: parsed.resolution.kind }],
+      now(),
+    );
+    audit.append({
+      kind: "approval_requested",
+      capability: GOVERNANCE_RECONCILE_STAGED as CapabilityName,
+      actionId: action.id,
+      risk: "CONSEQUENTIAL",
+      summary: action.summary,
+      at: now(),
+    });
+    persistCheckpoint();
+    emit();
+    return objectResult(approvalPayload(action));
+  }
+
+  async function runGovernanceApproval(
+    actionId: string,
+    action: PendingAction,
+    authorizer: { actor: HumanActor; gestureId?: string },
+  ): Promise<ToolResult | undefined> {
+    if (
+      action.capability !== (GOVERNANCE_ROLLBACK as CapabilityName) &&
+      action.capability !== (GOVERNANCE_RECONCILE_STAGED as CapabilityName) &&
+      action.capability !== (GOVERNANCE_RECONCILE_ROLLBACK as CapabilityName)
+    ) {
+      return undefined;
+    }
+
+    audit.append({
+      kind: "approval_approved",
+      actionId,
+      capability: action.capability,
+      approvedBy: authorizer.actor,
+      ...(authorizer.gestureId !== undefined ? { gestureId: authorizer.gestureId } : {}),
+      at: now(),
+    });
+
+    let result: Record<string, unknown>;
+    try {
+      if (action.capability === (GOVERNANCE_ROLLBACK as CapabilityName)) {
+        const receiptId = readString(action.input, "receipt_id");
+        if (receiptId === undefined) {
+          throw new Error("receipt_id is required");
+        }
+        const rolledBack = await api.rollback(receiptId);
+        if (!rolledBack.ok) {
+          throw new Error(rolledBack.reason);
+        }
+        result = {
+          status: "COMPLETED",
+          operation: "request_rollback",
+          receipt_id: receiptId,
+          result: rolledBack.result,
+        };
+      } else if (action.capability === (GOVERNANCE_RECONCILE_ROLLBACK as CapabilityName)) {
+        const receiptId = readString(action.input, "receipt_id");
+        const outcome = readString(action.input, "outcome");
+        if (receiptId === undefined || (outcome !== "compensated" && outcome !== "untouched")) {
+          throw new Error("receipt_id and a valid outcome are required");
+        }
+        const reconciled = api.reconcileRollback(receiptId, outcome, authorizer.actor);
+        if (!reconciled.ok) {
+          throw new Error(reconciled.reason);
+        }
+        result = {
+          status: "COMPLETED",
+          operation: "request_reconciliation",
+          receipt_id: receiptId,
+          receipt: reconciled.receipt,
+        };
+      } else {
+        const recordId = readString(action.input, "record_id");
+        if (recordId === undefined) {
+          throw new Error("record_id is required");
+        }
+        const resolution = readRecord(action.input.resolution);
+        const reconciled = api.reconcile(recordId, resolution as StagedResolution, authorizer.actor);
+        if (!reconciled.ok) {
+          throw new Error(reconciled.reason);
+        }
+        result = {
+          status: "COMPLETED",
+          operation: "request_reconciliation",
+          record_id: recordId,
+          resolution,
+        };
+      }
+      approvals.resolve(actionId, {
+        status: "APPROVED_EXECUTED",
+        action,
+        result,
+        resolvedAt: now(),
+      });
+      persistCheckpoint();
+      emit();
+      return objectResult(result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      approvals.resolve(actionId, {
+        status: "FAILED",
+        action,
+        error: message,
+        resolvedAt: now(),
+      });
+      audit.append({
+        kind: "execution_failed",
+        capability: action.capability,
+        executionId: `${actionId}-governance`,
+        error: message,
+        at: now(),
+      });
+      persistCheckpoint();
+      emit();
+      return errorResult(agentText(message));
     }
   }
 
@@ -2290,6 +2825,8 @@ export function createAgentDeskRuntime<S = unknown>(options: {
      * only way its write reaches live state.
      */
     commit?: (() => unknown) | undefined;
+    /** Derived staged changes used for readback when no receipt envelope exists. */
+    verificationChanges?: readonly Change[] | undefined;
     /**
      * Only `approve` sets this. A UI may hand keyboard focus to an
      * execution a human authorized and to no other, so an agent working in
@@ -2413,6 +2950,72 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     | { kind: "replay"; result: Promise<ToolResult> }
     | { kind: "refused"; result: ToolResult };
 
+  function restoredApprovalClaim(
+    slot: string,
+    fingerprint: string,
+  ): Extract<IdempotencyClaim, { kind: "won" }> {
+    return {
+      kind: "won",
+      slot,
+      fingerprint,
+      settle: (result) => {
+        const previous = restoredClaims.get(slot);
+        restoredClaims.set(slot, {
+          fingerprint,
+          ...(previous?.receiptId !== undefined
+            ? { receiptId: previous.receiptId }
+            : {}),
+          ...(result.code === "EXECUTION_INDETERMINATE"
+            ? {}
+            : { result: structuredClone(result) }),
+        });
+        persist(() =>
+          persistence!.saveIdempotencyClaim({
+            version: 1,
+            slot,
+            fingerprint,
+            at: now(),
+            ...(previous?.receiptId !== undefined
+              ? { receiptId: previous.receiptId }
+              : {}),
+            ...(result.code === "EXECUTION_INDETERMINATE"
+              ? {}
+              : { result: structuredClone(result) }),
+          }),
+        );
+      },
+    };
+  }
+
+  function replaySettledIdempotency(
+    capability: Capability,
+    input: Record<string, unknown>,
+    idempotencyKey: string | undefined,
+  ): ToolResult | undefined {
+    if (idempotencyKey === undefined) {
+      return undefined;
+    }
+    const slot = `${capability.name}:${idempotencyKey}`;
+    const fingerprint = fingerprintInput(input);
+    const restored = restoredClaims.get(slot);
+    if (
+      restored?.fingerprint === fingerprint &&
+      restored.result !== undefined
+    ) {
+      return structuredClone(restored.result);
+    }
+    const current = idempotency.get(slot);
+    if (
+      current?.fingerprint === fingerprint &&
+      current.settled &&
+      current.result !== undefined &&
+      current.result.code !== "EXECUTION_INDETERMINATE"
+    ) {
+      return structuredClone(current.result);
+    }
+    return undefined;
+  }
+
   /**
    * Claims or joins the slot for `idempotencyKey`. Synchronous, so a
    * duplicate arriving in the same tick sees the winner's entry rather than
@@ -2434,6 +3037,9 @@ export function createAgentDeskRuntime<S = unknown>(options: {
     const restored = restoredClaims.get(slot);
     if (restored !== undefined) {
       const same = restored.fingerprint === fingerprint;
+      if (same && restored.result !== undefined) {
+        return { kind: "replay", result: Promise.resolve(structuredClone(restored.result)) };
+      }
       // No capability repairs this: the fix is a person checking the
       // earlier write, so the receipt it recorded rides as evidence and
       // `next` names the receipts query for the capability.
@@ -2497,8 +3103,20 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         // approval request replays the approval while it is pending and
         // the outcome once a person has decided.
         entry.settled = true;
+        entry.result = structuredClone(result);
         resolve(result);
         entry.inFlight = Promise.resolve(result);
+        persist(() =>
+          persistence!.saveIdempotencyClaim({
+            version: 1,
+            slot,
+            fingerprint,
+            at: now(),
+            ...(result.code === "EXECUTION_INDETERMINATE"
+              ? {}
+              : { result: structuredClone(result) }),
+          }),
+        );
       },
     };
   }
@@ -2527,6 +3145,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
             fingerprint: claim.fingerprint,
             at: now(),
             receiptId,
+            result: structuredClone(outcome.result),
           }),
         );
       }
@@ -2621,12 +3240,16 @@ export function createAgentDeskRuntime<S = unknown>(options: {
                 : deriveEvidence(capability, input, value.receipt.entity),
           }
         : undefined;
+      const verificationChanges =
+        settledReceipt?.changes ?? opts.verificationChanges;
       if (settledReceipt !== undefined) {
         event.receipt = settledReceipt;
+      }
+      if (verificationChanges !== undefined) {
         verification = await runVerification(
           capability,
           input,
-          settledReceipt.changes,
+          verificationChanges,
         );
       }
       // Verification is an application callback and can outlive the session
@@ -2688,6 +3311,9 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         }
       }
       const stored = pending ? receipts.record(pending) : undefined;
+      if (stored !== undefined) {
+        persistCheckpoint();
+      }
       const evidence: Evidence[] = [
         ...(stored ? [{ kind: "receipt" as const, id: stored.id }] : []),
         { kind: "execution", id: executionId },
@@ -2941,7 +3567,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         ...(operation.stateVersion !== undefined
           ? { stateVersion: operation.stateVersion }
           : {}),
-        ...(proposal ? { commit: proposal.commit } : {}),
+        ...(proposal
+          ? {
+              commit: proposal.commit,
+              verificationChanges: operation.preview,
+            }
+          : {}),
       });
       if (!outcome.ok && !outcome.indeterminate) {
         proposal?.discard();
@@ -3040,6 +3671,8 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         .map((capability) => ({ capability, score: 0 }));
     }
     const domains = domain === undefined || unknownDomain ? tree().view(routable).domains : undefined;
+    const governanceMatches =
+      domain === undefined ? findGovernanceOperations(query) : [];
     const matches: RoutedMatch[] = ranked.map(({ capability, score }) => {
       const availability = evaluateAvailability(capability, context);
       const match: RoutedMatch = {
@@ -3110,13 +3743,17 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       ),
       [],
     );
+    const governanceInstruction =
+      governanceMatches.length === 0
+        ? ""
+        : " Call invoke_capability with the governance operation as name and its arguments as input; governance operations stay behind the stable gateway and do not expand the native tool set.";
     const instruction = unknownDomain
       ? `${domain} is not a domain in this catalog; choose one from domains and call again with it.`
       : `Up to 5 of the most relevant capabilities are active WebMCP tools; refine the query to surface others. Prefer the native typed tools. If your client has not refreshed its tool list, call invoke_capability with the capability name.${
           domain === undefined
             ? " The domains list is the catalog's tree; call again with domain, or domain/subdomain, to rank within one branch."
             : ""
-        }`;
+        }${governanceInstruction}`;
     return {
       catalog_size: appCaps.length,
       query,
@@ -3144,6 +3781,9 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       }),
       ...situation,
       ...(domains !== undefined ? { domains } : {}),
+      ...(governanceMatches.length > 0
+        ? { governance_matches: governanceMatches }
+        : {}),
       activated_tools: activated,
       limit: 5,
       instruction,
@@ -3162,6 +3802,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         capability: action.capability,
         risk: action.risk,
         summary: action.summary,
+      })),
+      governance_operations: GOVERNANCE_OPERATIONS.map((operation) => ({
+        name: operation.name,
+        read_only: operation.readOnly,
+        description: operation.description,
+        input: operation.input,
       })),
       state: options.describeContext
         ? options.describeContext(context)
@@ -3211,7 +3857,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       base.hint =
         "The commit threw after it may already have written. Check the application, then call reconcile with what you found. Do not retry.";
     }
-    return toToolResult(base);
+    return objectResult(base);
   }
 
   function pruneRouted(): void {
@@ -3255,6 +3901,10 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         note: "This approval was already claimed or resolved; the action did not run again.",
       });
     }
+    const governanceApproval = await runGovernanceApproval(actionId, action, authorizer);
+    if (governanceApproval !== undefined) {
+      return governanceApproval;
+    }
     const routed = routeCapability(catalog, action.capability);
     if (isRouteError(routed)) {
       proposals.discard(actionId);
@@ -3264,6 +3914,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         error: `unknown capability: ${action.capability}`,
         resolvedAt: now(),
       });
+      persistCheckpoint();
       return errorResult(`unknown capability: ${action.capability}`);
     }
     try {
@@ -3284,6 +3935,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         error: decision.reason,
         resolvedAt: now(),
       });
+      persistCheckpoint();
       audit.append({
         kind: "policy_denied",
         capability: action.capability,
@@ -3316,6 +3968,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         reason: blocker.reason,
         resolvedAt: now(),
       });
+      persistCheckpoint();
       audit.append({
         kind: "capability_unavailable",
         capability: action.capability,
@@ -3351,6 +4004,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           reason: `the state this approval was reviewed against has moved (expected ${versions.expected}, observed ${versions.observed})`,
           resolvedAt: now(),
         });
+        persistCheckpoint();
         audit.append({
           kind: "capability_unavailable",
           capability: action.capability,
@@ -3389,6 +4043,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         reason: missing.reason,
         resolvedAt: now(),
       });
+      persistCheckpoint();
       audit.append({
         kind: "capability_unavailable",
         capability: action.capability,
@@ -3426,7 +4081,12 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       humanInitiated: true,
       ...(action.stateVersion !== undefined ? { stateVersion: action.stateVersion } : {}),
       ...(held !== undefined ? { claim: held } : {}),
-      ...(proposal ? { commit: proposal.commit } : {}),
+      ...(proposal
+        ? {
+            commit: proposal.commit,
+            verificationChanges: proposal.changes,
+          }
+        : {}),
     });
     // approvals.resolve inserts, so resolving after a reset put the cleared
     // action back into the fresh session. Nothing here belongs to it.
@@ -3465,6 +4125,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         resolvedAt: now(),
       });
     }
+    persistCheckpoint();
     emit();
     return outcome.result;
     } catch (err) {
@@ -3478,6 +4139,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         error: message,
         resolvedAt: now(),
       });
+      persistCheckpoint();
       audit.append({
         kind: "execution_failed",
         capability: action.capability,
@@ -3491,7 +4153,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
   
   }
 
-  return {
+  api = {
     async start() {
       if (started) {
         return;
@@ -3799,6 +4461,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         risk,
         at: now(),
       });
+      persistCheckpoint();
       emit();
       return plan;
     },
@@ -3841,6 +4504,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         ...(approver.gestureId !== undefined ? { gestureId: approver.gestureId } : {}),
         at: now(),
       });
+      persistCheckpoint();
       emit();
       return { ok: true, plan: plans.get(planId)! };
     },
@@ -3856,6 +4520,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       proposals.discardPlan(planId);
       plans.resolve(planId, { resolvedAt: now() });
       audit.append({ kind: "plan_rejected", planId, at: now() });
+      persistCheckpoint();
       emit();
       return { ok: true, plan };
     },
@@ -3896,6 +4561,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           resolvedAt: now(),
           ...(observedRevision !== undefined ? { observedRevision } : {}),
         });
+        persistCheckpoint();
         audit.append({
           kind: "plan_drifted",
           planId,
@@ -3934,6 +4600,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           resolvedAt: now(),
           ...(observedRevision !== undefined ? { observedRevision } : {}),
         });
+        persistCheckpoint();
         audit.append({
           kind: "plan_failed",
           planId,
@@ -4004,6 +4671,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         resolvedAt: now(),
         ...(observedRevision !== undefined ? { observedRevision } : {}),
       });
+      persistCheckpoint();
       audit.append({
         kind:
           status === "INDETERMINATE"
@@ -4107,6 +4775,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         return reviewer;
       }
       receipts.markReviewed(receiptId, now(), reviewer.actor);
+      persistCheckpoint();
       audit.append({
         kind: "receipt_reviewed",
         capability: stored.capability,
@@ -4190,6 +4859,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
             now(),
             "the session ended while the compensating action was running",
           );
+          persistCheckpoint();
           return {
             ok: false,
             reason: `${receiptId} belongs to a session that ended while the undo was running, so it is unreconciled rather than rolled back`,
@@ -4201,6 +4871,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         // nobody checked.
         if (restored.kind === "unreconciled") {
           receipts.markIndeterminate(receiptId, now(), restored.detail);
+          persistCheckpoint();
           audit.append({
             kind: "rollback_indeterminate",
             capability: stored.capability,
@@ -4214,6 +4885,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           };
         }
         receipts.markRolledBack(receiptId, now(), restored.verification);
+        persistCheckpoint();
         audit.append({
           kind: "rollback_performed",
           capability: stored.capability,
@@ -4234,6 +4906,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
             ? `${detail} (the session ended while the undo was running)`
             : detail,
         );
+        persistCheckpoint();
         if (session.expired()) {
           return {
             ok: false,
@@ -4287,6 +4960,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
           reason: `${receiptId} is ${stored.rollbackState}, and only an indeterminate rollback can be reconciled`,
         };
       }
+      persistCheckpoint();
       audit.append({
         kind: "rollback_reconciled",
         capability: stored.capability,
@@ -4538,6 +5212,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
         rejectedBy: authorizer.actor,
         at: now(),
       });
+      persistCheckpoint();
       emit();
       const rejected = toToolResult({
         status: "REJECTED",
@@ -4552,6 +5227,7 @@ export function createAgentDeskRuntime<S = unknown>(options: {
       return rejected;
     },
   };
+  return api;
 }
 
 function builtinCapabilities(): Capability[] {
@@ -4723,4 +5399,81 @@ function readRecord(value: unknown): Record<string, unknown> {
     record[key] = nested;
   }
   return record;
+}
+
+function objectResult(data: Record<string, unknown>): ToolResult {
+  return {
+    content: [{ type: "text", text: JSON.stringify(data) }],
+    data,
+  };
+}
+
+function approvalPayload(action: PendingAction): Record<string, unknown> {
+  return {
+    status: "APPROVAL_REQUIRED",
+    code: "APPROVAL_REQUIRED",
+    approval_id: action.id,
+    actionId: action.id,
+    capability: action.capability,
+    risk: action.risk,
+    summary: action.summary,
+    will_change: action.preview,
+    hint: "A human must approve this governance action in the application UI. Check get_action_status with the approval_id later.",
+  };
+}
+
+function readPlanOperations(
+  value: unknown,
+):
+  | { ok: true; operations: Array<{ capability: string; input?: Record<string, unknown> }> }
+  | { ok: false; reason: string } {
+  if (!Array.isArray(value) || value.length === 0) {
+    return { ok: false, reason: "operations must be a non-empty array" };
+  }
+  const operations: Array<{ capability: string; input?: Record<string, unknown> }> = [];
+  for (const [index, operation] of value.entries()) {
+    if (typeof operation !== "object" || operation === null || Array.isArray(operation)) {
+      return { ok: false, reason: `operation ${index} must be an object` };
+    }
+    const capability = (operation as { capability?: unknown }).capability;
+    if (typeof capability !== "string" || capability.trim() === "") {
+      return { ok: false, reason: `operation ${index} must name a capability` };
+    }
+    const input = (operation as { input?: unknown }).input;
+    operations.push({
+      capability,
+      ...(input === undefined ? {} : { input: readRecord(input) }),
+    });
+  }
+  return { ok: true, operations };
+}
+
+function readReceiptQuery(input: Record<string, unknown>): ReceiptQuery {
+  const query: ReceiptQuery = {};
+  const capability = readString(input, "capability");
+  if (capability !== undefined) {
+    query.capability = capability;
+  }
+  const planId = readString(input, "plan_id") ?? readString(input, "planId");
+  if (planId !== undefined) {
+    query.planId = planId;
+  }
+  const grantId = readString(input, "grant_id") ?? readString(input, "grantId");
+  if (grantId !== undefined) {
+    query.grantId = grantId;
+  }
+  const actorId = readString(input, "actor_id") ?? readString(input, "actorId");
+  if (actorId !== undefined) {
+    query.actorId = actorId;
+  }
+  if (typeof input.since === "number" && Number.isFinite(input.since)) {
+    query.since = input.since;
+  }
+  if (typeof input.limit === "number" && Number.isFinite(input.limit)) {
+    query.limit = input.limit;
+  }
+  if (typeof input.reviewed === "boolean") {
+    query.reviewed = input.reviewed;
+  }
+  return query;
 }

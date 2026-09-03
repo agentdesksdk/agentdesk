@@ -1603,8 +1603,10 @@ defineCapability({
 });
 ```
 
-The verifier receives the input, the app context, and the receipt's
-recorded changes. It returns one of four results:
+The verifier receives the input, the app context, and the change set the
+runtime committed. That is the receipt's changes for a receipt-producing
+handler, or the adapter-derived changes for a staged write. It returns one
+of four results:
 
 - `VERIFIED`. State matches what the change claimed.
 - `PARTIAL`, with the fields it could not confirm and an optional note.
@@ -1616,11 +1618,12 @@ recorded changes. It returns one of four results:
 Two rules keep verification from becoming a new failure mode. A verifier
 that throws yields `PARTIAL` with a `verifier failed` note, never an error,
 because a broken verifier must not turn a completed write into a reported
-failure (`runVerification` in `runtime.ts`). And verification runs only
-when the handler returned a `receipt()` envelope, since the receipt's
-change list is what a verifier checks against. A handler that returns a
-plain value is recorded as `UNSUPPORTED` even if the capability declares
-`verify`.
+failure (`runVerification` in `runtime.ts`). Verification runs only when the
+runtime has a durable change set to check. Direct handlers provide one with
+a `receipt()` envelope. Staged writes already have one because the adapter
+derived the approved diff from the artifact it commits. A non-staged handler
+that returns a plain value has no such evidence and remains `UNSUPPORTED`
+even if the capability declares `verify`.
 
 The result rides on the stored receipt and, for planned work, on the
 operation outcome and the `plan_committed`, `plan_partial`, or
